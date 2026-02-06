@@ -17,7 +17,10 @@ This repo contains:
 ```bash
 cd api
 uv venv
-.\.venv\Scripts\activate
+PC:
+   .\.venv\Scripts\activate
+MAC
+   source .venv/bin/activate
 uv pip install -r requirements.txt
 cp .env.example env   # or on Windows: copy .env.example env
 # add your OpenAI key in api/env
