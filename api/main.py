@@ -5,6 +5,7 @@ import traceback
 from datetime import datetime, timezone
 import sys
 from pathlib import Path
+from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, List, Literal, Optional
 from uuid import UUID
 
@@ -15,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from llm_tools import get_tools
+from llm_tools import BUILTIN_TOOL_NAMES, get_tools
 from image_router import image_router
 from image_tool import (
     run_convert_image_tool,
@@ -39,10 +40,26 @@ from rag_routes import rag_router
 from local_settings import DEFAULT_IMAGE_SETTINGS, load_image_defaults, save_image_defaults
 from skills_loader import build_available_skills_xml, get_skill_content
 
+try:
+    from mcp_client import call_mcp_tool
+except ImportError:
+    call_mcp_tool = None
+
 _env_file = ".env" if sys.platform == "win32" else "env"
 load_dotenv(Path(__file__).parent / _env_file)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: Any):
+    # Prime MCP tools cache at startup so get_mcp_tools_openai() runs and tools are loaded/logged.
+    try:
+        get_tools()
+    except Exception:
+        pass
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -153,6 +170,10 @@ class HistoryPayload(BaseModel):
     messages: List[HistoryMessage] = Field(default_factory=list)
 
 
+class CondensePayload(BaseModel):
+    messages: List[HistoryMessage] = Field(default_factory=list)
+
+
 class ImageDefaults(BaseModel):
     num_images: Optional[int] = None
     width: Optional[int] = None
@@ -256,6 +277,36 @@ def clear_chat_history(agent_id: str) -> dict:
         return {"deleted": True}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to delete history: {exc}") from exc
+
+
+@app.post("/chat/condense/{agent_id}")
+def condense_chat_history(agent_id: str, body: CondensePayload) -> dict:
+    """Summarize the conversation into one paragraph of valuable information. Returns { summary }."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Missing OPENAI_API_KEY")
+    messages = body.messages[-MAX_HISTORY_ITEMS:]
+    if not messages:
+        return {"summary": "(No messages to condense.)"}
+    client = OpenAI(api_key=api_key)
+    system = (
+        "You are summarizing a conversation. Extract only valuable information: "
+        "decisions, action items, key facts, conclusions, and anything the user or assistant committed to. "
+        "Output a single concise paragraph. Use clear, neutral language. Do not use bullet points unless necessary."
+    )
+    chat_messages: List[dict[str, str]] = [{"role": "system", "content": system}]
+    for m in messages:
+        chat_messages.append({"role": m.role, "content": (m.content or "").strip() or "(empty)"})
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=chat_messages,
+            stream=False,
+        )
+        content = (resp.choices[0].message.content or "").strip()
+        return {"summary": content or "(No summary generated.)"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Condense failed: {exc}") from exc
 
 
 @app.get("/settings/image_defaults")
@@ -467,12 +518,15 @@ async def chat_stream(body: ChatRequest) -> StreamingResponse:
                     "messages": pending_messages,
                     "stream": True,
                 }
+                # Always pass tools so the model can use MCP and builtin tools on any turn.
+                create_kwargs["tools"] = get_tools()
                 if include_tools:
-                    create_kwargs["tools"] = get_tools()
                     if forced_tool_name:
                         create_kwargs["tool_choice"] = {"type": "function", "function": {"name": forced_tool_name}}
                     else:
                         create_kwargs["tool_choice"] = "required" if use_tools_this_turn else "auto"
+                else:
+                    create_kwargs["tool_choice"] = "auto"
 
                 stream = client.chat.completions.create(**create_kwargs)
                 tool_call_map: dict[int, dict[str, Any]] = {}
@@ -553,6 +607,10 @@ async def chat_stream(body: ChatRequest) -> StreamingResponse:
                     "convert_image": "image_updated",
                     "load_skill": "skill_loaded",
                 }
+                all_tool_names = {t["function"]["name"] for t in get_tools()}
+                for name in all_tool_names:
+                    if name not in allowed_tools:
+                        allowed_tools[name] = "mcp_result"
                 allowed_tool_calls = [
                     call for call in tool_calls if call.get("function", {}).get("name") in allowed_tools
                 ]
@@ -631,6 +689,42 @@ async def chat_stream(body: ChatRequest) -> StreamingResponse:
                             event_name = "skill_loaded"
                             event_payload = {"skill_name": skill_name, "loaded": bool(content)}
                             tool_content = content if content else json.dumps(result)
+                            yield sse_event(event_name, json.dumps(event_payload))
+                            pending_messages.append(
+                                {
+                                    "role": "assistant",
+                                    "content": assistant_text,
+                                    "tool_calls": [
+                                        {
+                                            "id": tool_id,
+                                            "type": "function",
+                                            "function": {
+                                                "name": tool_name or "tool",
+                                                "arguments": raw_args,
+                                            },
+                                        }
+                                    ],
+                                }
+                            )
+                            pending_messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool_id,
+                                    "name": tool_name or "tool",
+                                    "content": tool_content,
+                                }
+                            )
+                            continue
+                        elif tool_name not in BUILTIN_TOOL_NAMES:
+                            if call_mcp_tool is not None:
+                                result = call_mcp_tool(tool_name, parsed_args)
+                                event_name = "mcp_result"
+                                event_payload = {"tool": tool_name, "ok": True}
+                                tool_content = result if isinstance(result, str) else json.dumps(result)
+                            else:
+                                event_name = "mcp_result"
+                                event_payload = {"tool": tool_name, "ok": False, "error": "MCP not configured."}
+                                tool_content = json.dumps({"error": "MCP not configured or mcp package not installed."})
                             yield sse_event(event_name, json.dumps(event_payload))
                             pending_messages.append(
                                 {

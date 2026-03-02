@@ -630,6 +630,31 @@ export default function HomePage() {
     }
   };
 
+  const condenseConversation = async () => {
+    if (messages.length === 0 || isStreaming) return;
+    setStatus("Condensing...");
+    try {
+      const response = await fetch(`${API_BASE}/chat/condense/${agentId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error((errBody as { detail?: string }).detail ?? `Condense failed: ${response.status}`);
+      }
+      const data = (await response.json()) as { summary: string };
+      const summary = typeof data.summary === "string" ? data.summary : "(No summary.)";
+      updateHistory(agentId, () => [{ role: "assistant", content: summary }]);
+      setStatus("Conversation condensed.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setStatus(`Error: ${message}`);
+    }
+  };
+
   const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
@@ -865,6 +890,9 @@ export default function HomePage() {
           )}
         </div>
             <div className="input-row">
+              <button type="button" onClick={() => void condenseConversation()} disabled={isStreaming || messages.length === 0}>
+                Condense
+              </button>
               <button type="button" onClick={() => void clearContext()} disabled={isStreaming}>
                 Clear Context
               </button>

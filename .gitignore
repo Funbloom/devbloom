@@ -213,3 +213,4 @@ api/env
 .DS_Store
 debug_prompts.txt
 .local_data/
+docs

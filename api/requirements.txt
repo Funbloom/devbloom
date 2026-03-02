@@ -10,3 +10,4 @@ pillow
 requests
 python-docx
 openpyxl
+mcp

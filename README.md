@@ -28,6 +28,10 @@ Run:
 uvicorn main:app --reload --port 8000
 ```
 
+#### TECH
+Supabase is the database that is currently used 
+- Project GameDevKing
+
 ### Frontend
 ```bash
 cd web

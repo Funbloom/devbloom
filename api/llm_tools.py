@@ -1,5 +1,11 @@
+BUILTIN_TOOL_NAMES = frozenset({
+    "export_pdf", "export_docx", "export_xlsx", "generate_image",
+    "resize_image", "crop_image", "convert_image", "load_skill",
+})
+
+
 def get_tools() -> list[dict]:
-    return [
+    builtin: list[dict] = [
         {
             "type": "function",
             "function": {
@@ -226,3 +232,16 @@ def get_tools() -> list[dict]:
             },
         },
     ]
+    mcp_tools = []
+    try:
+        from mcp_client import get_mcp_tools_openai
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("MCP client not available: %s", e)
+    else:
+        try:
+            mcp_tools = get_mcp_tools_openai() or []
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("MCP tools load failed: %s", e)
+    return builtin + mcp_tools
