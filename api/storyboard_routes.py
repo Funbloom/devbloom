@@ -4,6 +4,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from image_tool import build_image_filename, build_image_url, save_bytes_to_file
+from image_storage import upload_image_to_supabase
 from rag import get_supabase_client
 from storyboard import (
     add_character,
@@ -185,6 +186,10 @@ async def api_upload_character_image(storyboard_id: str, file: UploadFile = File
         data = await file.read()
         output_path = save_bytes_to_file(data, filename, project_key)
         url = build_image_url(filename, project_key)
+        content_type = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png" if ext == "png" else "image/webp" if ext == "webp" else "image/png"
+        storage_url = upload_image_to_supabase(data, f"characters/{storyboard_id.strip()}/{filename}", content_type=content_type)
+        if storage_url:
+            url = storage_url
         return {
             "filename": filename,
             "url": url,
@@ -239,6 +244,10 @@ async def api_upload_location_image(storyboard_id: str, file: UploadFile = File(
         data = await file.read()
         output_path = save_bytes_to_file(data, filename, project_key)
         url = build_image_url(filename, project_key)
+        content_type = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png" if ext == "png" else "image/webp" if ext == "webp" else "image/png"
+        storage_url = upload_image_to_supabase(data, f"locations/{storyboard_id.strip()}/{filename}", content_type=content_type)
+        if storage_url:
+            url = storage_url
         return {
             "filename": filename,
             "url": url,

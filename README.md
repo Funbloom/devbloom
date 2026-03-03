@@ -62,5 +62,5 @@ Optional: set `STORYBOARD_IMAGES_BUCKET` in `api/.env` if you use a different bu
 
 If the bucket is missing or upload fails, the API still saves the image locally and stores the local URL; images will then only work on that machine until you regenerate with Storage configured.
 
-**Character/location images** (uploaded manually) are still stored only on the API server’s disk. To have them on all machines, use the same project path on each machine or add Storage upload for those too later.
+**Character and location images** (uploaded in the storyboard sidebar) are also uploaded to the same bucket under `characters/<storyboard_id>/...` and `locations/<storyboard_id>/...`, so they work from any machine too.
 
