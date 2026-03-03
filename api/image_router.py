@@ -119,16 +119,32 @@ def convert_image_route(body: ConvertImageRequest) -> dict:
 
 @image_router.get("/images/{filename}")
 def get_image(filename: str, project_key: str | None = None) -> FileResponse:
+    """
+    Serve a generated image. Images are stored locally on the API server:
+    - With project_key: <project_local_path>/Images/<filename>
+      (project path is set in Admin > Project Config, stored in .local_data/project_paths.json)
+    - Without project_key: default project's Images/ or ./output/images (relative to API cwd)
+    """
     print(f"[GET /images] request: filename={filename!r} project_key={project_key!r}")
     try:
-        images_dir = get_images_dir(project_key)
-        print(f"[GET /images] images_dir={images_dir}")
         safe_name = validate_image_filename(filename)
+        # Try requested project_key first
+        images_dir = get_images_dir(project_key)
         path = safe_resolve_path(safe_name, project_key)
         exists = path.exists()
-        print(f"[GET /images] resolved path={path} exists={exists}")
+        print(f"[GET /images] images_dir={images_dir} path={path} exists={exists}")
+        if not exists and project_key:
+            # Fallback: try default/output location (e.g. when project path not set on this machine)
+            path_fallback = safe_resolve_path(safe_name, None)
+            if path_fallback.exists():
+                path = path_fallback
+                exists = True
+                print(f"[GET /images] fallback path={path} exists=True")
         if not exists:
-            raise HTTPException(status_code=404, detail="Image not found.")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Image not found. Looked in {images_dir}. Images are stored locally when generated; ensure the API runs on the same machine or that project paths match.",
+            )
         media_type, _ = mimetypes.guess_type(path.name)
         return FileResponse(path, media_type=media_type or "application/octet-stream", filename=path.name)
     except HTTPException:

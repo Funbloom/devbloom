@@ -49,3 +49,18 @@ Open: http://localhost:3000
 2. Start Web app (port 3000)
 3. Send a message and watch the assistant stream back
 
+## Storyboard images (sync across computers)
+
+**Tile images** are uploaded to **Supabase Storage** when you generate them, so they work from any machine. The tile’s `image` field stores the Storage URL (e.g. `https://...supabase.co/storage/v1/object/public/storyboard-images/...`).
+
+**Setup (one-time):** In [Supabase Dashboard](https://supabase.com/dashboard) → your project → **Storage** → **New bucket**:
+- Name: `storyboard-images`
+- **Public bucket**: ON (so the app can load images without auth)
+- Create the bucket
+
+Optional: set `STORYBOARD_IMAGES_BUCKET` in `api/.env` if you use a different bucket name.
+
+If the bucket is missing or upload fails, the API still saves the image locally and stores the local URL; images will then only work on that machine until you regenerate with Storage configured.
+
+**Character/location images** (uploaded manually) are still stored only on the API server’s disk. To have them on all machines, use the same project path on each machine or add Storage upload for those too later.
+

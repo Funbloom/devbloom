@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
@@ -561,6 +562,23 @@ def generate_tile_image(tile_id: str) -> Dict[str, Any]:
         image_url = first.get("url") or first.get("filename")
         if not image_url:
             raise HTTPException(status_code=500, detail="Image generation did not return a URL.")
+
+        # Upload to Supabase Storage so the image is available from any machine
+        try:
+            from image_storage import upload_image_to_supabase
+            path_str = first.get("path")
+            filename = first.get("filename") or "image.png"
+            if path_str and Path(path_str).exists():
+                data = Path(path_str).read_bytes()
+                storage_url = upload_image_to_supabase(
+                    data,
+                    f"tiles/{tid}/{filename}",
+                    content_type="image/png",
+                )
+                if storage_url:
+                    image_url = storage_url
+        except Exception as exc:
+            print(f"[generate_tile_image] Supabase upload skipped: {exc}")
 
         update_payload = {
             "image": image_url,
