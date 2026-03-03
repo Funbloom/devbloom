@@ -92,6 +92,8 @@ export default function AdminPage() {
     style: "high resolution cartoon, movie style",
   });
   const [imageDefaultsStatus, setImageDefaultsStatus] = useState<string | null>(null);
+  const [uiTheme, setUiTheme] = useState<"original" | "ocean" | "forest">("ocean");
+  const [uiThemeStatus, setUiThemeStatus] = useState<string | null>(null);
   const [ragTestStatus, setRagTestStatus] = useState<{
     state: "idle" | "success" | "error";
     message?: string;
@@ -162,6 +164,27 @@ export default function AdminPage() {
     }
   };
 
+  const loadUiTheme = async () => {
+    setUiThemeStatus(null);
+    try {
+      const response = await fetch(`${API_BASE}/settings/ui_theme`);
+      if (!response.ok) {
+        throw new Error(`Load failed: ${response.status}`);
+      }
+      const data = (await response.json()) as { theme?: "original" | "ocean" | "forest" };
+      if (data.theme === "original" || data.theme === "ocean" || data.theme === "forest") {
+        setUiTheme(data.theme);
+        if (typeof document !== "undefined") {
+          document.documentElement.setAttribute("data-theme", data.theme);
+        }
+        window.localStorage.setItem("uiTheme", data.theme);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setUiThemeStatus(`Error: ${message}`);
+    }
+  };
+
   useEffect(() => {
     const stored = window.localStorage.getItem("activeProjectKey");
     if (stored) {
@@ -174,6 +197,7 @@ export default function AdminPage() {
     void loadSources();
     void loadProjects();
     void loadImageDefaults();
+    void loadUiTheme();
   }, []);
 
   useEffect(() => {
@@ -571,6 +595,33 @@ export default function AdminPage() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setImageDefaultsStatus(`Error: ${message}`);
+    }
+  };
+
+  const saveUiTheme = async () => {
+    setUiThemeStatus(null);
+    try {
+      const response = await fetch(`${API_BASE}/settings/ui_theme`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ theme: uiTheme }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Save failed: ${response.status}`);
+      }
+      const data = (await response.json()) as { theme?: "original" | "ocean" | "forest" };
+      if (data.theme === "original" || data.theme === "ocean" || data.theme === "forest") {
+        setUiTheme(data.theme);
+        if (typeof document !== "undefined") {
+          document.documentElement.setAttribute("data-theme", data.theme);
+        }
+        window.localStorage.setItem("uiTheme", data.theme);
+      }
+      setUiThemeStatus("Theme saved.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setUiThemeStatus(`Error: ${message}`);
     }
   };
 
@@ -1121,6 +1172,26 @@ export default function AdminPage() {
         {showSettings && (
           <div className="admin-card admin-test-card">
             <div className="admin-card-title">Settings</div>
+            <div className="admin-test-block">
+              <div className="admin-test-title">UI Theme</div>
+              <div className="admin-test-grid">
+                <label className="admin-field">
+                  <span>Color preset</span>
+                  <select
+                    value={uiTheme}
+                    onChange={(e) => setUiTheme(e.target.value as "original" | "ocean" | "forest")}
+                  >
+                    <option value="original">Original</option>
+                    <option value="ocean">Ocean</option>
+                    <option value="forest">Forest</option>
+                  </select>
+                </label>
+                <button type="button" onClick={() => void saveUiTheme()}>
+                  Save Theme
+                </button>
+              </div>
+              {uiThemeStatus && <div className="admin-status">{uiThemeStatus}</div>}
+            </div>
             <div className="admin-test-block">
               <div className="admin-test-title">Image Defaults</div>
               <div className="admin-test-grid">

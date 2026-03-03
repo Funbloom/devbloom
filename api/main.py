@@ -38,7 +38,8 @@ from rag import (
 from projects import projects_router
 from rag_routes import rag_router
 from storyboard_routes import storyboard_router
-from local_settings import DEFAULT_IMAGE_SETTINGS, load_image_defaults, save_image_defaults
+from settings import settings_router
+from tools import tools_router
 from skills_loader import build_available_skills_xml, get_skill_content
 
 try:
@@ -175,13 +176,6 @@ class CondensePayload(BaseModel):
     messages: List[HistoryMessage] = Field(default_factory=list)
 
 
-class ImageDefaults(BaseModel):
-    num_images: Optional[int] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    style: Optional[str] = None
-
-
 def normalize_agent_id(agent_id: Optional[str]) -> str:
     if not agent_id:
         return "creative_director"
@@ -310,29 +304,13 @@ def condense_chat_history(agent_id: str, body: CondensePayload) -> dict:
         raise HTTPException(status_code=500, detail=f"Condense failed: {exc}") from exc
 
 
-@app.get("/settings/image_defaults")
-def get_image_defaults() -> dict:
-    return load_image_defaults()
-
-
-@app.put("/settings/image_defaults")
-def update_image_defaults(body: ImageDefaults) -> dict:
-    payload = body.model_dump(exclude_none=True)
-    if "num_images" in payload:
-        payload["num_images"] = max(1, min(int(payload["num_images"]), 4))
-    if "width" in payload:
-        payload["width"] = int(payload["width"])
-    if "height" in payload:
-        payload["height"] = int(payload["height"])
-    if "style" in payload:
-        payload["style"] = str(payload["style"]).strip()
-    return save_image_defaults(payload)
-
 app.include_router(rag_router)
 app.include_router(projects_router)
 app.include_router(storyboard_router)
 app.include_router(pdf_router)
 app.include_router(image_router)
+app.include_router(settings_router)
+app.include_router(tools_router)
 
 
 @app.post("/chat/stream")

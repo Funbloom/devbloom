@@ -18,7 +18,7 @@ image_router = APIRouter()
 
 
 class GenerateImageRequest(BaseModel):
-    prompt: str = Field(min_length=1, max_length=1000)
+    prompt: str = Field(min_length=1, max_length=4000)
     negative_prompt: str | None = None
     width: int = 1024
     height: int = 1024

@@ -7,6 +7,7 @@ const PAGES: { path: string; label: string }[] = [
   { path: "/", label: "Agents" },
   { path: "/admin", label: "Admin" },
   { path: "/storyboard", label: "Storyboard" },
+  { path: "/imageGen", label: "Image Gen" },
 ];
 
 function getCurrentPageLabel(pathname: string): string {
@@ -22,7 +23,7 @@ export function AppHeader() {
     <header className="app-header">
       <div className="app-header-page">{currentLabel}</div>
       <Link href="/" className="app-header-title">
-        FunBloom Assist
+        DevBloom Studio
       </Link>
       <nav className="app-header-nav">
         {PAGES.map(({ path, label }) => {

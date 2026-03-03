@@ -114,6 +114,7 @@ def save_bytes_to_file(data: bytes, filename: str, project_key: Optional[str] = 
     safe_name = sanitize_filename(filename)
     output_path = safe_resolve_path(safe_name, project_key)
     output_path.write_bytes(data)
+    print(f"[image_tool] Saved image to: {output_path.resolve()}")
     return output_path
 
 
