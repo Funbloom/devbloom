@@ -1,4 +1,6 @@
+import base64
 import io
+import mimetypes
 import os
 import re
 import time
@@ -195,6 +197,138 @@ def _extract_error_details(payload: object) -> str:
     return str(payload)
 
 
+def _generate_image_gemini(
+    prompt: str,
+    width: int,
+    height: int,
+    quantity: int,
+    project_key: Optional[str],
+    reference_image_filenames: Optional[Iterable[str]] = None,
+) -> dict:
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("Gemini API key is missing. Set GEMINI_API_KEY.")
+
+    # Basic aspect ratio + size mapping based on requested dimensions.
+    if width == height:
+        aspect_ratio = "1:1"
+    elif width > height:
+        aspect_ratio = "16:9"
+    else:
+        aspect_ratio = "9:16"
+
+    max_dim = max(width, height)
+    if max_dim <= 1024:
+        image_size = "1K"
+    elif max_dim <= 2048:
+        image_size = "2K"
+    else:
+        image_size = "4K"
+
+    parts: list[dict] = [{"text": prompt}]
+
+    filenames = list(reference_image_filenames or [])
+    for name in filenames[:14]:
+        cleaned = str(name or "").strip()
+        if not cleaned:
+            continue
+        try:
+            # We deliberately only accept bare filenames that live in our images directory.
+            safe_name = validate_image_filename(cleaned)
+            image_path = safe_resolve_path(safe_name, project_key)
+            if not image_path.exists():
+                continue
+            data = image_path.read_bytes()
+            mime_type, _ = mimetypes.guess_type(image_path.name)
+            if not mime_type:
+                mime_type = "image/png"
+            b64 = base64.b64encode(data).decode("ascii")
+            parts.append(
+                {
+                    "inline_data": {
+                        "mime_type": mime_type,
+                        "data": b64,
+                    }
+                }
+            )
+        except Exception:
+            # Best-effort: skip any problematic reference image.
+            continue
+
+    payload = {
+        "contents": [
+            {
+                "parts": parts,
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {
+                "aspectRatio": aspect_ratio,
+                "imageSize": image_size,
+            },
+        },
+    }
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-3.1-flash-image-preview:generateContent"
+    )
+    headers = {
+        "x-goog-api-key": api_key,
+        "Content-Type": "application/json",
+    }
+    response = requests.post(url, json=payload, headers=headers, timeout=120)
+    response_text = response.text
+    try:
+        data = response.json()
+    except ValueError:
+        data = response_text
+
+    if not response.ok:
+        raise ValueError(f"Gemini request failed: {_extract_error_details(data)}")
+
+    if isinstance(data, dict) and any(
+        key in data for key in ("error", "errors", "detail")
+    ):
+        raise ValueError(f"Gemini request failed: {_extract_error_details(data)}")
+
+    images_bytes: list[bytes] = []
+    if isinstance(data, dict):
+        for candidate in data.get("candidates", []) or []:
+            content = candidate.get("content") or {}
+            parts_list = content.get("parts") or []
+            for part in parts_list:
+                if not isinstance(part, dict):
+                    continue
+                inline = part.get("inline_data") or part.get("inlineData")
+                if not isinstance(inline, dict):
+                    continue
+                b64 = inline.get("data")
+                if not isinstance(b64, str) or not b64:
+                    continue
+                try:
+                    images_bytes.append(base64.b64decode(b64))
+                except Exception:
+                    continue
+
+    if not images_bytes:
+        raise ValueError("Gemini image generation returned no image data.")
+
+    images: list[dict] = []
+    for idx, data_bytes in enumerate(images_bytes[:quantity]):
+        filename = build_image_filename("gemini", "png")
+        output_path = save_bytes_to_file(data_bytes, filename, project_key)
+        images.append(
+            {
+                "filename": filename,
+                "url": build_image_url(filename, project_key),
+                "path": str(output_path),
+            }
+        )
+    return {"images": images}
+
+
 def generate_image(
     prompt: str,
     negative_prompt: str | None = None,
@@ -204,6 +338,7 @@ def generate_image(
     seed: int | None = None,
     model: str = "gemini-2.5-flash-image",
     project_key: Optional[str] = None,
+    reference_image_filenames: Optional[Iterable[str]] = None,
 ) -> dict:
     if not prompt or len(prompt.strip()) == 0:
         raise ValueError("Prompt is required.")
@@ -212,6 +347,18 @@ def generate_image(
     width = _clamp_dimension(width)
     height = _clamp_dimension(height)
     quantity = max(1, min(num_images, MAX_IMAGES))
+
+    # Prefer Gemini Nano Banana (Gemini 3.1 Flash Image) when configured.
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if gemini_key:
+        return _generate_image_gemini(
+            prompt=prompt,
+            width=width,
+            height=height,
+            quantity=quantity,
+            project_key=project_key,
+            reference_image_filenames=reference_image_filenames,
+        )
 
     api_key = os.getenv("LEONARDO_API_KEY")
     if not api_key:

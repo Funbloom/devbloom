@@ -1,0 +1,257 @@
+from typing import Any, List, Optional
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field
+
+from image_tool import build_image_filename, build_image_url, save_bytes_to_file
+from rag import get_supabase_client
+from storyboard import (
+    add_character,
+    add_location,
+    add_tile,
+    create_storyboard,
+    delete_character,
+    delete_location,
+    delete_storyboard,
+    get_storyboard_full,
+    list_storyboards,
+    reorder_tiles,
+    generate_tile_image,
+    update_character,
+    update_location,
+    update_storyboard,
+    update_tile,
+)
+
+
+storyboard_router = APIRouter()
+
+
+class StoryboardCreate(BaseModel):
+    name: str = Field(min_length=1)
+    style: Optional[str] = None
+    project_key: Optional[str] = None
+
+
+class StoryboardUpdate(BaseModel):
+    name: Optional[str] = None
+    style: Optional[str] = None
+
+
+class CharacterCreate(BaseModel):
+    name: str = Field(min_length=1)
+    image: Optional[str] = None
+
+
+class CharacterUpdate(BaseModel):
+    name: Optional[str] = None
+    image: Optional[str] = None
+
+
+class TileCreate(BaseModel):
+    prompt: str = Field(min_length=1)
+    image: Optional[str] = None
+    tile_number: Optional[int] = Field(default=None, ge=1)
+    location_id: Optional[str] = None
+    character_ids: Optional[List[str]] = None
+
+
+class TileUpdate(BaseModel):
+    prompt: Optional[str] = None
+    image: Optional[str] = None
+    tile_number: Optional[int] = Field(default=None, ge=1)
+    location_id: Optional[str] = None
+    character_ids: Optional[List[str]] = None
+
+
+class TilesReorder(BaseModel):
+    tile_ids: List[str] = Field(min_items=1)
+
+
+class LocationCreate(BaseModel):
+    name: str = Field(min_length=1)
+    image: Optional[str] = None
+
+
+class LocationUpdate(BaseModel):
+    name: Optional[str] = None
+    image: Optional[str] = None
+
+
+@storyboard_router.get("/storyboard")
+def api_list_storyboards(project_key: Optional[str] = None) -> list[dict[str, Any]]:
+    return list_storyboards(project_key=project_key)
+
+
+@storyboard_router.post("/storyboard")
+def api_create_storyboard(body: StoryboardCreate) -> dict[str, Any]:
+    return create_storyboard(name=body.name, style=body.style, project_key=body.project_key)
+
+
+@storyboard_router.get("/storyboard/{storyboard_id}")
+def api_get_storyboard(storyboard_id: str) -> dict[str, Any]:
+    return get_storyboard_full(storyboard_id)
+
+
+@storyboard_router.patch("/storyboard/{storyboard_id}")
+def api_update_storyboard(storyboard_id: str, body: StoryboardUpdate) -> dict[str, Any]:
+    if body.name is None and body.style is None:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+    return update_storyboard(storyboard_id, name=body.name, style=body.style)
+
+
+@storyboard_router.delete("/storyboard/{storyboard_id}")
+def api_delete_storyboard(storyboard_id: str) -> dict[str, Any]:
+    return delete_storyboard(storyboard_id)
+
+
+@storyboard_router.post("/storyboard/{storyboard_id}/characters")
+def api_add_character(storyboard_id: str, body: CharacterCreate) -> dict[str, Any]:
+    return add_character(storyboard_id, name=body.name, image=body.image)
+
+
+@storyboard_router.patch("/storyboard/characters/{character_id}")
+def api_update_character(character_id: str, body: CharacterUpdate) -> dict[str, Any]:
+    if body.name is None and body.image is None:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+    return update_character(character_id, name=body.name, image=body.image)
+
+
+@storyboard_router.delete("/storyboard/characters/{character_id}")
+def api_delete_character(character_id: str) -> dict[str, Any]:
+    return delete_character(character_id)
+
+
+@storyboard_router.post("/storyboard/{storyboard_id}/tiles")
+def api_add_tile(storyboard_id: str, body: TileCreate) -> dict[str, Any]:
+    return add_tile(
+        storyboard_id,
+        prompt=body.prompt,
+        image=body.image,
+        tile_number=body.tile_number,
+        location_id=body.location_id,
+        character_ids=body.character_ids,
+    )
+
+
+@storyboard_router.patch("/storyboard/tiles/{tile_id}")
+def api_update_tile(tile_id: str, body: TileUpdate) -> dict[str, Any]:
+    if (
+        body.prompt is None
+        and body.image is None
+        and body.tile_number is None
+        and body.location_id is None
+        and body.character_ids is None
+    ):
+        raise HTTPException(status_code=400, detail="No fields to update.")
+    return update_tile(
+        tile_id,
+        prompt=body.prompt,
+        image=body.image,
+        tile_number=body.tile_number,
+        location_id=body.location_id,
+        character_ids=body.character_ids,
+    )
+
+
+@storyboard_router.patch("/storyboard/{storyboard_id}/tiles/reorder")
+def api_reorder_tiles(storyboard_id: str, body: TilesReorder) -> dict[str, Any]:
+    return reorder_tiles(storyboard_id, tile_ids_in_order=body.tile_ids)
+
+
+@storyboard_router.post("/storyboard/{storyboard_id}/characters/image")
+async def api_upload_character_image(storyboard_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    """Upload an image for a storyboard character and return a URL that can be stored in the DB."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="filename is required.")
+    try:
+        supabase = get_supabase_client()
+        sb = (
+            supabase.table("storyboards")
+            .select("project_key")
+            .eq("id", storyboard_id.strip())
+            .limit(1)
+            .execute()
+        )
+        project_key: Optional[str] = None
+        if sb.data:
+            value = sb.data[0].get("project_key")
+            if isinstance(value, str) and value.strip():
+                project_key = value.strip()
+
+        orig_name = file.filename
+        ext = orig_name.rsplit(".", 1)[-1].lower() if "." in orig_name else "png"
+        filename = build_image_filename("character", ext)
+        data = await file.read()
+        output_path = save_bytes_to_file(data, filename, project_key)
+        url = build_image_url(filename, project_key)
+        return {
+            "filename": filename,
+            "url": url,
+            "path": str(output_path),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to upload character image: {exc}") from exc
+
+
+@storyboard_router.post("/storyboard/{storyboard_id}/locations")
+def api_add_location(storyboard_id: str, body: LocationCreate) -> dict[str, Any]:
+    return add_location(storyboard_id, name=body.name, image=body.image)
+
+
+@storyboard_router.patch("/storyboard/locations/{location_id}")
+def api_update_location(location_id: str, body: LocationUpdate) -> dict[str, Any]:
+    if body.name is None and body.image is None:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+    return update_location(location_id, name=body.name, image=body.image)
+
+
+@storyboard_router.delete("/storyboard/locations/{location_id}")
+def api_delete_location(location_id: str) -> dict[str, Any]:
+    return delete_location(location_id)
+
+
+@storyboard_router.post("/storyboard/{storyboard_id}/locations/image")
+async def api_upload_location_image(storyboard_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    """Upload an image for a storyboard location and return a URL that can be stored in the DB."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="filename is required.")
+    try:
+        supabase = get_supabase_client()
+        sb = (
+            supabase.table("storyboards")
+            .select("project_key")
+            .eq("id", storyboard_id.strip())
+            .limit(1)
+            .execute()
+        )
+        project_key: Optional[str] = None
+        if sb.data:
+            value = sb.data[0].get("project_key")
+            if isinstance(value, str) and value.strip():
+                project_key = value.strip()
+
+        orig_name = file.filename
+        ext = orig_name.rsplit(".", 1)[-1].lower() if "." in orig_name else "png"
+        filename = build_image_filename("location", ext)
+        data = await file.read()
+        output_path = save_bytes_to_file(data, filename, project_key)
+        url = build_image_url(filename, project_key)
+        return {
+            "filename": filename,
+            "url": url,
+            "path": str(output_path),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to upload location image: {exc}") from exc
+
+
+@storyboard_router.post("/storyboard/tiles/{tile_id}/generate")
+def api_generate_tile(tile_id: str) -> dict[str, Any]:
+  """Generate an image for a tile and update the tile's image field."""
+  return generate_tile_image(tile_id)
+

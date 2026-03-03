@@ -579,9 +579,6 @@ export default function AdminPage() {
       <div className="admin-shell">
         <div className="admin-header">
           <div className="admin-header-left">
-            <Link className="admin-link" href="/">
-              Back
-            </Link>
             <div className="admin-title">Admin: RAG Sources</div>
           </div>
           <button className="admin-link" onClick={() => setShowTests((prev) => !prev)}>

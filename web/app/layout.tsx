@@ -1,8 +1,10 @@
 import "./globals.css";
 
+import { AppHeader } from "./components/AppHeader";
+
 export const metadata = {
-  title: "Streaming Chat",
-  description: "Simple streaming chat UI",
+  title: "FunBloom Assist",
+  description: "FunBloom Assist – Agents, Admin, Storyboard",
 };
 
 export default function RootLayout({
@@ -12,7 +14,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <div className="app-layout">
+          <AppHeader />
+          {children}
+        </div>
+      </body>
     </html>
   );
 }

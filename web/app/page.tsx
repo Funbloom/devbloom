@@ -672,12 +672,6 @@ export default function HomePage() {
   return (
     <main>
       <div className="chat-shell">
-        <div className="chat-top">
-          <div className="chat-header">Streaming Chat</div>
-          <Link className="admin-link" href="/admin">
-            Admin
-          </Link>
-        </div>
         <div className="chat-main">
           <div className="chat-left">
             <div
@@ -861,41 +855,43 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
-            <div className="input-row">
-              <textarea
-                placeholder="Type your message..."
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-              />
-              <button onClick={() => void sendMessage()} disabled={isStreaming}>
-                Send
-              </button>
-              <button className="stop-button" onClick={stopStreaming} disabled={!isStreaming}>
-                Stop
-              </button>
-            </div>
-        <div className="status">
-          {isStreaming ? (
-            <span className="thinking">
-              {status || "Thinking"}
-              <span className="dots" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </span>
-          ) : (
-            status || ""
-          )}
-        </div>
-            <div className="input-row">
-              <button type="button" onClick={() => void condenseConversation()} disabled={isStreaming || messages.length === 0}>
-                Condense
-              </button>
-              <button type="button" onClick={() => void clearContext()} disabled={isStreaming}>
-                Clear Context
-              </button>
+            <div className="chat-input-area">
+              <div className="input-row">
+                <textarea
+                  placeholder="Type your message..."
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                />
+                <button onClick={() => void sendMessage()} disabled={isStreaming}>
+                  Send
+                </button>
+                <button className="stop-button" onClick={stopStreaming} disabled={!isStreaming}>
+                  Stop
+                </button>
+              </div>
+              <div className="status">
+                {isStreaming ? (
+                  <span className="thinking">
+                    {status || "Thinking"}
+                    <span className="dots" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                  </span>
+                ) : (
+                  status || ""
+                )}
+              </div>
+              <div className="input-row">
+                <button type="button" onClick={() => void condenseConversation()} disabled={isStreaming || messages.length === 0}>
+                  Condense
+                </button>
+                <button type="button" onClick={() => void clearContext()} disabled={isStreaming}>
+                  Clear Context
+                </button>
+              </div>
             </div>
           </div>
           <div className="chat-right">

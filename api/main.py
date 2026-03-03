@@ -37,6 +37,7 @@ from rag import (
 )
 from projects import projects_router
 from rag_routes import rag_router
+from storyboard_routes import storyboard_router
 from local_settings import DEFAULT_IMAGE_SETTINGS, load_image_defaults, save_image_defaults
 from skills_loader import build_available_skills_xml, get_skill_content
 
@@ -329,6 +330,7 @@ def update_image_defaults(body: ImageDefaults) -> dict:
 
 app.include_router(rag_router)
 app.include_router(projects_router)
+app.include_router(storyboard_router)
 app.include_router(pdf_router)
 app.include_router(image_router)
 
