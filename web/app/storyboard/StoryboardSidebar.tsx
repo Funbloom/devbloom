@@ -2,7 +2,14 @@
 
 import type { Character, Location, Storyboard } from "./types";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** Use same-origin URLs for images so they work when API is on another host/port (e.g. Mac). */
+function imageSrc(url: string | null | undefined): string {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return url.startsWith("/") ? url : `/${url}`;
+}
 
 type Props = {
   storyboards: Storyboard[];
@@ -149,9 +156,7 @@ export function StoryboardSidebar(props: Props) {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {characters.map((ch) => {
                 const src =
-                  ch.image && (ch.image.startsWith("http")
-                    ? ch.image
-                    : `${API_BASE}${ch.image.startsWith("/") ? "" : "/"}${ch.image}`);
+                  ch.image ? imageSrc(ch.image) : "";
                 return (
                   <div className="sidebar-item" key={ch.id}>
                     <div className="sources-name">{ch.name}</div>
@@ -222,9 +227,7 @@ export function StoryboardSidebar(props: Props) {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {locations.map((loc) => {
                 const src =
-                  loc.image && (loc.image.startsWith("http")
-                    ? loc.image
-                    : `${API_BASE}${loc.image.startsWith("/") ? "" : "/"}${loc.image}`);
+                  loc.image ? imageSrc(loc.image) : "";
                 return (
                   <div className="sidebar-item" key={loc.id}>
                     <div className="sources-name">{loc.name}</div>

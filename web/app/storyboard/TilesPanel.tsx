@@ -4,7 +4,14 @@ import { useState } from "react";
 
 import type { Character, Location, Storyboard, Tile } from "./types";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** Use same-origin URLs for images so they work when API is on another host/port (e.g. Mac). */
+function imageSrc(url: string | null | undefined): string {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return url.startsWith("/") ? url : `/${url}`;
+}
 
 type Props = {
   storyboard: Storyboard | null;
@@ -56,6 +63,7 @@ export function TilesPanel(props: Props) {
 
   const [selectedCharacterByTile, setSelectedCharacterByTile] = useState<Record<string, string>>({});
   const [promptByTile, setPromptByTile] = useState<Record<string, string>>({});
+  const [presentationMode, setPresentationMode] = useState(false);
 
   return (
     <div className="chat-right" style={{ flexBasis: "75%", maxWidth: "75%", position: "relative" }}>
@@ -70,31 +78,61 @@ export function TilesPanel(props: Props) {
         <div className="chat-transcript">
           <div className="chat-top" style={{ marginBottom: 8 }}>
             <div className="chat-header">Tiles for {storyboard.name}</div>
-            <div className="edit-actions" style={{ alignItems: "center", gap: 8 }}>
-              <label style={{ fontSize: 14 }} htmlFor="tiles-per-row">
-                Nb of Tiles in a row:
-              </label>
-              <input
-                id="tiles-per-row"
-                type="number"
-                min={1}
-                max={12}
-                value={tilesPerRow}
-                onChange={(e) => {
-                  const n = parseInt(e.target.value, 10);
-                  if (!Number.isNaN(n) && n >= 1 && n <= 12) onTilesPerRowChange(n);
-                }}
-                style={{ width: 56, padding: "6px 8px" }}
-              />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="edit-actions" style={{ alignItems: "center", gap: 8 }}>
+                <label style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={presentationMode}
+                    onChange={(e) => setPresentationMode(e.target.checked)}
+                    aria-label="Presentation mode: show only tile images"
+                  />
+                  Presentation Mode
+                </label>
+              </div>
+              <div className="edit-actions" style={{ alignItems: "center", gap: 8 }}>
+                <label style={{ fontSize: 14 }} htmlFor="tiles-per-row">
+                  Nb of Tiles in a row:
+                </label>
+                <input
+                  id="tiles-per-row"
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={tilesPerRow}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(n) && n >= 1 && n <= 12) onTilesPerRowChange(n);
+                  }}
+                  style={{ width: 56, padding: "6px 8px" }}
+                />
+              </div>
             </div>
           </div>
 
           <div
-            className="storyboard-tiles-grid"
+            className={`storyboard-tiles-grid ${presentationMode ? "storyboard-tiles-grid--presentation" : ""}`}
             style={{ gridTemplateColumns: `repeat(${tilesPerRow}, 1fr)` }}
           >
             {tiles.length === 0 && <div className="status">No tiles yet.</div>}
-            {tiles.map((tile, index) => {
+            {presentationMode
+              ? tiles.map((tile) => {
+                  const tileSrc = tile.image ? imageSrc(tile.image) : "";
+                  return (
+                    <div className="storyboard-tile-presentation" key={tile.id}>
+                      {tileSrc ? (
+                        <img
+                          className="storyboard-tile-presentation-img"
+                          src={tileSrc}
+                          alt={tile.prompt || `Tile ${tile.tile_number}`}
+                        />
+                      ) : (
+                        <div className="storyboard-tile-presentation-placeholder">No image</div>
+                      )}
+                    </div>
+                  );
+                })
+              : tiles.map((tile, index) => {
               const tileCharacters =
                 tile.character_ids && tile.character_ids.length > 0
                   ? characters.filter((ch) => tile.character_ids?.includes(ch.id))
@@ -103,10 +141,7 @@ export function TilesPanel(props: Props) {
                 (ch) => !tile.character_ids || !tile.character_ids.includes(ch.id),
               );
               const currentPrompt = promptByTile[tile.id] ?? tile.prompt ?? "";
-              const tileSrc =
-                tile.image && (tile.image.startsWith("http")
-                  ? tile.image
-                  : `${API_BASE}${tile.image.startsWith("/") ? "" : "/"}${tile.image}`);
+                  const tileSrc = tile.image ? imageSrc(tile.image) : "";
               return (
                 <div className="message storyboard-tile" key={tile.id}>
                   <div className="bubble">
@@ -271,19 +306,21 @@ export function TilesPanel(props: Props) {
             })}
           </div>
 
-          <div
-            style={{
-              marginTop: 16,
-              paddingTop: 8,
-              borderTop: "1px solid #222836",
-              display: "flex",
-              justifyContent: "flex-start",
-            }}
-          >
-            <button type="button" onClick={() => void onAddTile()} disabled={isSaving}>
-              Add New Tile
-            </button>
-          </div>
+          {!presentationMode && (
+            <div
+              style={{
+                marginTop: 16,
+                paddingTop: 8,
+                borderTop: "1px solid #222836",
+                display: "flex",
+                justifyContent: "flex-start",
+              }}
+            >
+              <button type="button" onClick={() => void onAddTile()} disabled={isSaving}>
+                Add New Tile
+              </button>
+            </div>
+          )}
         </div>
       )}
       <div className="status">
