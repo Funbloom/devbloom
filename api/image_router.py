@@ -119,16 +119,23 @@ def convert_image_route(body: ConvertImageRequest) -> dict:
 
 @image_router.get("/images/{filename}")
 def get_image(filename: str, project_key: str | None = None) -> FileResponse:
+    print(f"[GET /images] request: filename={filename!r} project_key={project_key!r}")
     try:
+        images_dir = get_images_dir(project_key)
+        print(f"[GET /images] images_dir={images_dir}")
         safe_name = validate_image_filename(filename)
         path = safe_resolve_path(safe_name, project_key)
-        if not path.exists():
+        exists = path.exists()
+        print(f"[GET /images] resolved path={path} exists={exists}")
+        if not exists:
             raise HTTPException(status_code=404, detail="Image not found.")
         media_type, _ = mimetypes.guess_type(path.name)
         return FileResponse(path, media_type=media_type or "application/octet-stream", filename=path.name)
     except HTTPException:
         raise
     except ValueError as exc:
+        print(f"[GET /images] ValueError: {exc}")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        print(f"[GET /images] unexpected error: {exc}")
         raise HTTPException(status_code=500, detail="Failed to read image.") from exc

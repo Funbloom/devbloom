@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Character, Location, Storyboard, Tile } from "./types";
 
@@ -10,6 +10,19 @@ function imageSrc(url: string | null | undefined): string {
   if (!url) return "";
   if (url.startsWith("http")) return url;
   return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+/** Debug: log image URLs when tiles change (remove when done debugging) */
+function useImageUrlLog(tiles: Tile[]) {
+  useEffect(() => {
+    if (tiles.length === 0) return;
+    console.log("[TilesPanel] API_BASE =", API_BASE);
+    tiles.forEach((tile, i) => {
+      const raw = tile.image;
+      const src = raw ? imageSrc(raw) : "";
+      console.log(`[TilesPanel] tile ${i + 1} (id=${tile.id}) raw image=${raw ?? "(none)"} -> src=${src || "(no src)"}`);
+    });
+  }, [tiles]);
 }
 
 type Props = {
@@ -63,6 +76,8 @@ export function TilesPanel(props: Props) {
   const [selectedCharacterByTile, setSelectedCharacterByTile] = useState<Record<string, string>>({});
   const [promptByTile, setPromptByTile] = useState<Record<string, string>>({});
   const [presentationMode, setPresentationMode] = useState(false);
+
+  useImageUrlLog(tiles);
 
   return (
     <div className="chat-right" style={{ flexBasis: "75%", maxWidth: "75%", position: "relative" }}>
