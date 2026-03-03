@@ -4,11 +4,10 @@ import type { Character, Location, Storyboard } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-/** Use same-origin URLs for images so they work when API is on another host/port (e.g. Mac). */
 function imageSrc(url: string | null | undefined): string {
   if (!url) return "";
   if (url.startsWith("http")) return url;
-  return url.startsWith("/") ? url : `/${url}`;
+  return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
 type Props = {
