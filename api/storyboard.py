@@ -156,6 +156,66 @@ def delete_storyboard(storyboard_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to delete storyboard: {exc}") from exc
 
 
+def list_styles() -> List[Dict[str, Any]]:
+    """Return all styles in the bank (name + prompt)."""
+    try:
+        supabase = get_supabase_client()
+        result = (
+            supabase.table("storyboard_styles")
+            .select("id,name,prompt,created_at")
+            .order("name", desc=False)
+            .execute()
+        )
+        return list(result.data or [])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to list styles: {exc}") from exc
+
+
+def add_style(name: str, prompt: str) -> Dict[str, Any]:
+    """Add a style to the bank."""
+    cleaned_name = (name or "").strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=400, detail="name is required.")
+    try:
+        supabase = get_supabase_client()
+        payload: Dict[str, Any] = {
+            "name": cleaned_name,
+            "prompt": (prompt or "").strip(),
+        }
+        result = supabase.table("storyboard_styles").insert(payload).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create style.")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to add style: {exc}") from exc
+
+
+def delete_style(style_id: str) -> Dict[str, Any]:
+    """Remove a style from the bank."""
+    sid = (style_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="style_id is required.")
+    try:
+        supabase = get_supabase_client()
+        result = (
+            supabase.table("storyboard_styles")
+            .delete()
+            .eq("id", sid)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Style not found.")
+        return {"deleted": True, "id": sid}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete style: {exc}") from exc
+
+
 def add_character(storyboard_id: str, name: str, image: Optional[str] = None) -> Dict[str, Any]:
     sid = (storyboard_id or "").strip()
     if not sid:
@@ -310,6 +370,27 @@ def delete_location(location_id: str) -> Dict[str, Any]:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to delete location: {exc}") from exc
+
+
+def delete_tile(tile_id: str) -> Dict[str, Any]:
+    tid = (tile_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="tile_id is required.")
+    try:
+        supabase = get_supabase_client()
+        result = (
+            supabase.table("storyboard_tiles")
+            .delete()
+            .eq("id", tid)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(status_code=404, detail="tile not found.")
+        return {"deleted": True, "id": tid}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete tile: {exc}") from exc
 
 
 def _next_tile_number(supabase: Any, storyboard_id: str) -> int:

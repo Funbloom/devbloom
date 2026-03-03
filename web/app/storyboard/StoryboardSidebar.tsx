@@ -1,6 +1,7 @@
 "use client";
 
-import type { Character, Location, Storyboard } from "./types";
+import { useState } from "react";
+import type { Character, Location, Storyboard, Style } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -8,6 +9,46 @@ function imageSrc(url: string | null | undefined): string {
   if (!url) return "";
   if (url.startsWith("http")) return url;
   return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+function AddStyleForm({
+  onAdd,
+  disabled,
+}: {
+  onAdd: (name: string, prompt: string) => void;
+  disabled: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n) return;
+    onAdd(n, prompt.trim());
+    setName("");
+    setPrompt("");
+  };
+  return (
+    <form onSubmit={handleSubmit} style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+      <input
+        type="text"
+        placeholder="Style name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        style={{ padding: "6px 8px", fontSize: 14 }}
+      />
+      <textarea
+        placeholder="Style prompt (visual style, mood, guidelines)"
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        rows={2}
+        style={{ width: "100%", resize: "vertical", padding: "6px 8px", fontSize: 14 }}
+      />
+      <button type="submit" disabled={disabled || !name.trim()}>
+        Add style to bank
+      </button>
+    </form>
+  );
 }
 
 type Props = {
@@ -25,9 +66,11 @@ type Props = {
   onDeleteStoryboard: () => void;
   onSelectStoryboard: (id: string) => void;
 
+  styles: Style[];
   newStyle: string;
-  onNewStyleChange: (value: string) => void;
-  onSaveStyle: () => void;
+  onApplyStyle: (style: Style | null) => void;
+  onAddStyle: (name: string, prompt: string) => void;
+  onDeleteStyle: (id: string) => void;
 
   newCharacterName: string;
   newCharacterImage: string;
@@ -46,7 +89,10 @@ type Props = {
   onDeleteLocation: (id: string) => void;
 };
 
+type TabId = "styles" | "characters" | "locations";
+
 export function StoryboardSidebar(props: Props) {
+  const [activeTab, setActiveTab] = useState<TabId>("styles");
   const {
     storyboards,
     selectedId,
@@ -60,9 +106,11 @@ export function StoryboardSidebar(props: Props) {
     onCreateStoryboard,
     onDeleteStoryboard,
     onSelectStoryboard,
+    styles,
     newStyle,
-    onNewStyleChange,
-    onSaveStyle,
+    onApplyStyle,
+    onAddStyle,
+    onDeleteStyle,
     newCharacterName,
     newCharacterImage,
     onNewCharacterNameChange,
@@ -135,23 +183,96 @@ export function StoryboardSidebar(props: Props) {
       </div>
 
       {activeStoryboard && (
-        <div className="admin-section">
-          <div className="section-title">Style</div>
-          <textarea
-            value={newStyle}
-            onChange={(e) => onNewStyleChange(e.target.value)}
-            placeholder="Describe the visual style, mood, and guidelines for this storyboard."
-          />
-          <button type="button" onClick={() => void onSaveStyle()} disabled={isSaving}>
-            Save style
-          </button>
-        </div>
-      )}
+        <div className="sidebar-panel sidebar-panel-tabs">
+          <div className="sidebar-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "styles"}
+              className={activeTab === "styles" ? "sidebar-tab active" : "sidebar-tab"}
+              onClick={() => setActiveTab("styles")}
+            >
+              Styles
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "characters"}
+              className={activeTab === "characters" ? "sidebar-tab active" : "sidebar-tab"}
+              onClick={() => setActiveTab("characters")}
+            >
+              Characters
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "locations"}
+              className={activeTab === "locations" ? "sidebar-tab active" : "sidebar-tab"}
+              onClick={() => setActiveTab("locations")}
+            >
+              Locations
+            </button>
+          </div>
+          <div className="sidebar-tab-content">
+            {activeTab === "styles" && (
+              <div className="sidebar-panel-content" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div>
+              <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>Current style</label>
+              <select
+                value={
+                  newStyle === ""
+                    ? "__none"
+                    : styles.find((s) => s.prompt === newStyle)?.id ?? "__none"
+                }
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__none") void onApplyStyle(null);
+                  else {
+                    const s = styles.find((x) => x.id === v);
+                    if (s) void onApplyStyle(s);
+                  }
+                }}
+                disabled={isSaving}
+                style={{ width: "100%", padding: "6px 8px", fontSize: 14 }}
+              >
+                <option value="__none">(None)</option>
+                {styles.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-      {activeStoryboard && (
-        <div className="sidebar-panel sidebar-panel-characters">
-          <h3 className="sidebar-panel-title">Characters</h3>
-          <div className="sidebar-panel-content">
+            <div style={{ borderTop: "1px solid #2a2f3a", paddingTop: 10, marginTop: 4 }}>
+              <div className="section-title" style={{ marginBottom: 8 }}>Style bank</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {styles.map((s) => (
+                  <div key={s.id} className="sidebar-item" style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <span className="sources-name" style={{ fontWeight: 600 }}>{s.name}</span>
+                      <button
+                        type="button"
+                        className="admin-link"
+                        onClick={() => void onDeleteStyle(s.id)}
+                        disabled={isSaving}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#9aa3b2", whiteSpace: "pre-wrap", maxHeight: 60, overflow: "auto" }}>
+                      {s.prompt || "(no prompt)"}
+                    </div>
+                  </div>
+                ))}
+                {styles.length === 0 && <div className="status" style={{ fontSize: 12 }}>No styles in bank. Add one below.</div>}
+              </div>
+              <AddStyleForm onAdd={onAddStyle} disabled={isSaving} />
+            </div>
+              </div>
+            )}
+            {activeTab === "characters" && (
+              <div className="sidebar-panel-content">
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {characters.map((ch) => {
                 const src =
@@ -215,14 +336,10 @@ export function StoryboardSidebar(props: Props) {
                 }}
               />
             </div>
-          </div>
-        </div>
-      )}
-
-      {activeStoryboard && (
-        <div className="sidebar-panel sidebar-panel-locations">
-          <h3 className="sidebar-panel-title">Locations</h3>
-          <div className="sidebar-panel-content">
+              </div>
+            )}
+            {activeTab === "locations" && (
+              <div className="sidebar-panel-content">
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {locations.map((loc) => {
                 const src =
@@ -286,6 +403,8 @@ export function StoryboardSidebar(props: Props) {
                 }}
               />
             </div>
+              </div>
+            )}
           </div>
         </div>
       )}

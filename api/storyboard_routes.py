@@ -9,13 +9,17 @@ from rag import get_supabase_client
 from storyboard import (
     add_character,
     add_location,
+    add_style,
     add_tile,
     create_storyboard,
     delete_character,
     delete_location,
     delete_storyboard,
+    delete_style,
+    delete_tile,
     get_storyboard_full,
     list_storyboards,
+    list_styles,
     reorder_tiles,
     generate_tile_image,
     update_character,
@@ -77,6 +81,26 @@ class LocationCreate(BaseModel):
 class LocationUpdate(BaseModel):
     name: Optional[str] = None
     image: Optional[str] = None
+
+
+class StyleCreate(BaseModel):
+    name: str = Field(min_length=1)
+    prompt: str = Field(default="")
+
+
+@storyboard_router.get("/storyboard/styles")
+def api_list_styles() -> list[dict[str, Any]]:
+    return list_styles()
+
+
+@storyboard_router.post("/storyboard/styles")
+def api_add_style(body: StyleCreate) -> dict[str, Any]:
+    return add_style(name=body.name, prompt=body.prompt)
+
+
+@storyboard_router.delete("/storyboard/styles/{style_id}")
+def api_delete_style(style_id: str) -> dict[str, Any]:
+    return delete_style(style_id)
 
 
 @storyboard_router.get("/storyboard")
@@ -153,6 +177,11 @@ def api_update_tile(tile_id: str, body: TileUpdate) -> dict[str, Any]:
         location_id=body.location_id,
         character_ids=body.character_ids,
     )
+
+
+@storyboard_router.delete("/storyboard/tiles/{tile_id}")
+def api_delete_tile(tile_id: str) -> dict[str, Any]:
+    return delete_tile(tile_id)
 
 
 @storyboard_router.patch("/storyboard/{storyboard_id}/tiles/reorder")

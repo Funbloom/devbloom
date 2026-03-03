@@ -425,6 +425,45 @@ main {
   background: #1e2433;
 }
 
+/* Tabs in storyboard sidebar */
+.sidebar-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid #2a2f3a;
+  background: #161a22;
+}
+
+.sidebar-tab {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #9aa3b2;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.sidebar-tab:hover {
+  color: #e6e6e6;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sidebar-tab.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.sidebar-tab-content {
+  padding: 12px;
+  min-height: 120px;
+  overflow-y: auto;
+}
+
 .sidebar-panel-title {
   font-size: 14px;
   font-weight: 700;

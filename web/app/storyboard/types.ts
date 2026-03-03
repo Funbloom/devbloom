@@ -1,3 +1,10 @@
+export type Style = {
+  id: string;
+  name: string;
+  prompt: string;
+  created_at?: string;
+};
+
 export type Storyboard = {
   id: string;
   name: string;

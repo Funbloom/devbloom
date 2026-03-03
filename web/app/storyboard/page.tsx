@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import type { Character, Location, Storyboard, StoryboardDetailResponse, Tile } from "./types";
+import type { Character, Location, Storyboard, StoryboardDetailResponse, Style, Tile } from "./types";
 import { StoryboardSidebar } from "./StoryboardSidebar";
 import { TilesPanel } from "./TilesPanel";
 
@@ -20,6 +20,7 @@ export default function StoryboardPage() {
 
   const [newName, setNewName] = useState("");
   const [newStyle, setNewStyle] = useState("");
+  const [styles, setStyles] = useState<Style[]>([]);
 
   const [newCharacterName, setNewCharacterName] = useState("");
   const [newCharacterImage, setNewCharacterImage] = useState("");
@@ -88,8 +89,21 @@ export default function StoryboardPage() {
     }
   };
 
+  const loadStyles = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/storyboard/styles`);
+      if (response.ok) {
+        const data = (await response.json()) as Style[];
+        setStyles(Array.isArray(data) ? data : []);
+      }
+    } catch {
+      setStyles([]);
+    }
+  };
+
   useEffect(() => {
     void loadStoryboards();
+    void loadStyles();
   }, []);
 
   useEffect(() => {
@@ -179,6 +193,76 @@ export default function StoryboardPage() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setStatus(`Error updating style: ${message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const applyStyle = async (style: Style | null) => {
+    if (!selectedId) return;
+    setIsSaving(true);
+    setStatus(null);
+    try {
+      const payload = { style: style ? style.prompt : "" };
+      const response = await fetch(`${API_BASE}/storyboard/${selectedId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error((body as { detail?: string }).detail ?? `Update failed: ${response.status}`);
+      }
+      const updated = (await response.json()) as Storyboard;
+      setStoryboards((prev) => prev.map((s) => (s.id === updated.id ? { ...s, style: updated.style } : s)));
+      setNewStyle(style ? style.prompt : "");
+      setStatus(style ? "Style applied." : "Style cleared.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setStatus(`Error applying style: ${message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const addStyleToBank = async (name: string, prompt: string) => {
+    setIsSaving(true);
+    setStatus(null);
+    try {
+      const response = await fetch(`${API_BASE}/storyboard/styles`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), prompt: prompt.trim() }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error((body as { detail?: string }).detail ?? `Add failed: ${response.status}`);
+      }
+      const created = (await response.json()) as Style;
+      setStyles((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setStatus("Style added to bank.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setStatus(`Error adding style: ${message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deleteStyleFromBank = async (styleId: string) => {
+    setIsSaving(true);
+    setStatus(null);
+    try {
+      const response = await fetch(`${API_BASE}/storyboard/styles/${styleId}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error((body as { detail?: string }).detail ?? `Delete failed: ${response.status}`);
+      }
+      setStyles((prev) => prev.filter((s) => s.id !== styleId));
+      setStatus("Style removed from bank.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setStatus(`Error deleting style: ${message}`);
     } finally {
       setIsSaving(false);
     }
@@ -471,6 +555,25 @@ export default function StoryboardPage() {
     }
   };
 
+  const deleteTileClick = async (tileId: string) => {
+    if (!window.confirm("Delete this tile?")) return;
+    setIsSaving(true);
+    setStatus(null);
+    try {
+      const response = await fetch(`${API_BASE}/storyboard/tiles/${tileId}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error((body as { detail?: string }).detail ?? `Delete failed: ${response.status}`);
+      }
+      setTiles((prev) => prev.filter((t) => t.id !== tileId));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setStatus(`Error deleting tile: ${message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <main>
       <div className="chat-shell">
@@ -488,9 +591,11 @@ export default function StoryboardPage() {
             onCreateStoryboard={createStoryboard}
             onDeleteStoryboard={deleteCurrentStoryboard}
             onSelectStoryboard={setSelectedId}
+            styles={styles}
             newStyle={newStyle}
-            onNewStyleChange={setNewStyle}
-            onSaveStyle={saveStyle}
+            onApplyStyle={applyStyle}
+            onAddStyle={addStyleToBank}
+            onDeleteStyle={deleteStyleFromBank}
             newCharacterName={newCharacterName}
             newCharacterImage={newCharacterImage}
             onNewCharacterNameChange={setNewCharacterName}
@@ -530,6 +635,7 @@ export default function StoryboardPage() {
             onReorderTiles={reorderTilesLocallyAndPersist}
             onGenerateTile={generateTile}
             onUpdateTileInputs={updateTileInputs}
+            onDeleteTile={deleteTileClick}
           />
         </div>
       </div>

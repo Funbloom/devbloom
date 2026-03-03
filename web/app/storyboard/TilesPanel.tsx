@@ -50,6 +50,7 @@ type Props = {
   onReorderTiles: (fromIndex: number, toIndex: number) => void;
   onGenerateTile: (tile: Tile) => void;
   onUpdateTileInputs: (tileId: string, updates: { prompt?: string; location_id?: string | null; character_ids?: string[] | null }) => void;
+  onDeleteTile: (tileId: string) => void;
 };
 
 export function TilesPanel(props: Props) {
@@ -71,6 +72,7 @@ export function TilesPanel(props: Props) {
     onReorderTiles,
     onGenerateTile,
     onUpdateTileInputs,
+    onDeleteTile,
   } = props;
 
   const [selectedCharacterByTile, setSelectedCharacterByTile] = useState<Record<string, string>>({});
@@ -312,6 +314,15 @@ export function TilesPanel(props: Props) {
                         title="Move tile right"
                       >
                         →
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-link"
+                        onClick={() => onDeleteTile(tile.id)}
+                        disabled={isSaving}
+                        title="Delete tile"
+                      >
+                        Delete
                       </button>
                     </div>
                   </div>
