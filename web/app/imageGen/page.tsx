@@ -1,38 +1,120 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { Style } from "../storyboard/types";
+import {
+  addStyle,
+  deleteStyle,
+  generateCharacterImage,
+  generateImageFromPrompt,
+  generateImagePrompt,
+  getImageGenerated,
+  getStyles,
+  normalizeImageUrl,
+  putImageGenerated,
+} from "./client";
+import { STORAGE_KEY_PROJECT } from "./config";
+import { CharactersTabPanel } from "./CharactersTabPanel";
+import { ImageTabPanel } from "./ImageTabPanel";
+import { ResultsPanel } from "./ResultsPanel";
+import type { GeneratedImage, ImageTab } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const STORAGE_KEY_PROJECT = "activeProjectKey";
+function parseStoredImages(raw: unknown[]): GeneratedImage[] {
+  return raw
+    .filter((img) => img && typeof (img as Record<string, unknown>).id === "string" && typeof (img as Record<string, unknown>).url === "string")
+    .map((img) => {
+      const o = img as Record<string, unknown>;
+      const tab: ImageTab = o.tab === "characters" ? "characters" : "image";
+      return {
+        id: String(o.id),
+        url: normalizeImageUrl(String(o.url)),
+        prompt: typeof o.prompt === "string" ? o.prompt : "",
+        styleName: typeof o.styleName === "string" ? o.styleName : undefined,
+        createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(0).toISOString(),
+        tab,
+      };
+    });
+}
 
-type GeneratedImage = {
-  id: string;
-  url: string;
-  prompt: string;
-  styleName?: string;
-  createdAt: string;
-  tab: "image" | "characters";
-};
+function toPayload(img: GeneratedImage): Record<string, unknown> {
+  return {
+    id: img.id,
+    url: img.url,
+    prompt: img.prompt,
+    styleName: img.styleName,
+    createdAt: img.createdAt,
+    tab: img.tab,
+  };
+}
 
-function normalizeImageUrl(url: string): string {
-  if (url.startsWith("http")) return url;
-  return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+function StylesAddForm({
+  onAdd,
+  disabled,
+}: {
+  onAdd: (name: string, prompt: string) => void;
+  disabled: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [prompt, setPrompt] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n) return;
+    onAdd(n, prompt.trim());
+    setName("");
+    setPrompt("");
+  };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <input
+        type="text"
+        placeholder="Style name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        style={{ padding: "6px 8px", fontSize: 14 }}
+      />
+      <textarea
+        placeholder="Style prompt (visual style, mood, guidelines)"
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        rows={2}
+        style={{ width: "100%", resize: "vertical", padding: "6px 8px", fontSize: 14 }}
+      />
+      <button type="submit" disabled={disabled || !name.trim()}>
+        Add style to bank
+      </button>
+    </form>
+  );
 }
 
 export default function ImageGenPage() {
   const [projectKey, setProjectKey] = useState("");
-  const [styles, setStyles] = useState<Style[]>([]);
-  const [selectedStyleId, setSelectedStyleId] = useState<string | "__none">("__none");
+  const [styles, setStyles] = useState<Awaited<ReturnType<typeof getStyles>>>([]);
+  const [selectedStyleId, setSelectedStyleId] = useState<string>("__none");
   const [prompt, setPrompt] = useState("");
   const [genPrompt, setGenPrompt] = useState("");
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [imagesPerRow, setImagesPerRow] = useState(3);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingCharacter, setIsGeneratingCharacter] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"image" | "characters">("image");
+  const [activeTab, setActiveTab] = useState<ImageTab>("image");
+  const [charRole, setCharRole] = useState("");
+  const [charPhysical, setCharPhysical] = useState("");
+  const [charAge, setCharAge] = useState("");
+  const [charOutfit, setCharOutfit] = useState("");
+  const [charNegative, setCharNegative] = useState("");
+  const [selectedCharacterStyleId, setSelectedCharacterStyleId] = useState<string>("__none");
+  const [isManagingStyles, setIsManagingStyles] = useState(false);
+
+  /** Only persist after initial load for this project has completed; avoids overwriting saved data with [] on mount. */
+  const loadCompletedForProjectRef = useRef<string | null>(null);
 
   useEffect(() => {
     const key = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY_PROJECT) : null;
@@ -40,88 +122,85 @@ export default function ImageGenPage() {
   }, []);
 
   useEffect(() => {
-    const loadStyles = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/storyboard/styles`);
-        if (!response.ok) return;
-        const data = (await response.json()) as Style[];
-        if (Array.isArray(data)) {
-          setStyles(data);
-        }
-      } catch {
-        // ignore, styles remain empty
-      }
-    };
-    void loadStyles();
+    let cancelled = false;
+    getStyles().then((data) => {
+      if (!cancelled) setStyles(data);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!projectKey) return;
+    loadCompletedForProjectRef.current = null;
     let cancelled = false;
-    const load = async () => {
-      try {
-        const response = await fetch(
-          `${API_BASE}/tools/image_generated?project_key=${encodeURIComponent(projectKey)}`
-        );
-        if (!response.ok || cancelled) return;
-        const data = (await response.json()) as { images?: unknown[] };
-        const raw = data.images ?? [];
-        if (!Array.isArray(raw) || cancelled) return;
-        const parsed: GeneratedImage[] = raw
-          .filter((img) => img && typeof (img as any).id === "string" && typeof (img as any).url === "string")
-          .map((img) => {
-            const anyImg = img as any;
-            const rawTab = anyImg.tab;
-            const tab: "image" | "characters" = rawTab === "characters" ? "characters" : "image";
-            return {
-              id: String(anyImg.id),
-              url: normalizeImageUrl(String(anyImg.url)),
-              prompt: typeof anyImg.prompt === "string" ? anyImg.prompt : "",
-              styleName: typeof anyImg.styleName === "string" ? anyImg.styleName : undefined,
-              createdAt:
-                typeof anyImg.createdAt === "string" ? anyImg.createdAt : new Date(0).toISOString(),
-              tab,
-            };
-          });
-        if (!cancelled) setImages(parsed);
-      } catch {
-        if (!cancelled) setImages([]);
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
+    getImageGenerated(projectKey)
+      .then(({ images: raw }) => {
+        if (!cancelled) {
+          setImages(parseStoredImages(raw));
+          loadCompletedForProjectRef.current = projectKey;
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setImages([]);
+          loadCompletedForProjectRef.current = projectKey;
+        }
+      });
+    return () => { cancelled = true; };
   }, [projectKey]);
 
   const persistImages = useCallback(
     async (list: GeneratedImage[]) => {
       if (!projectKey) return;
-      const payload = list.map((img) => ({
-        id: img.id,
-        url: img.url,
-        prompt: img.prompt,
-        styleName: img.styleName,
-        createdAt: img.createdAt,
-        tab: img.tab,
-      }));
       try {
-        await fetch(`${API_BASE}/tools/image_generated`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project_key: projectKey, images: payload }),
-        });
+        await putImageGenerated(projectKey, list.map(toPayload));
       } catch {
-        // ignore persist errors
+        // ignore
       }
     },
     [projectKey]
   );
 
   useEffect(() => {
-    if (!projectKey) return;
+    if (!projectKey || loadCompletedForProjectRef.current !== projectKey) return;
     void persistImages(images);
   }, [projectKey, images, persistImages]);
+
+  const handleAddStyle = useCallback(
+    async (name: string, prompt: string) => {
+      setIsManagingStyles(true);
+      setStatus(null);
+      try {
+        const created = await addStyle(name, prompt);
+        setStyles((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+        setStatus("Style added to bank.");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setStatus(`Error adding style: ${message}`);
+      } finally {
+        setIsManagingStyles(false);
+      }
+    },
+    []
+  );
+
+  const handleDeleteStyle = useCallback(
+    async (styleId: string) => {
+      setIsManagingStyles(true);
+      setStatus(null);
+      try {
+        await deleteStyle(styleId);
+        setStyles((prev) => prev.filter((s) => s.id !== styleId));
+        setStatus("Style removed from bank.");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setStatus(`Error deleting style: ${message}`);
+      } finally {
+        setIsManagingStyles(false);
+      }
+    },
+    []
+  );
 
   const handleGenerate = async () => {
     const base = genPrompt.trim() || prompt.trim();
@@ -129,73 +208,62 @@ export default function ImageGenPage() {
     setIsGenerating(true);
     setStatus("Generating image...");
     try {
-      const style =
-        selectedStyleId !== "__none" ? styles.find((s) => s.id === selectedStyleId) ?? null : null;
+      const style = selectedStyleId !== "__none" ? styles.find((s) => s.id === selectedStyleId) ?? null : null;
       let fullPrompt = base;
-      if (style && style.prompt) {
-        fullPrompt = `${style.prompt}\n\n${base}`;
-      }
-      const body = {
-        prompt: fullPrompt,
-      };
-      const response = await fetch(`${API_BASE}/tools/generate_image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) {
-        const errBody = (await response.json().catch(() => ({}))) as {
-          detail?: string | Array<{ loc?: unknown[]; msg?: string }>;
-        };
-        const detail = errBody.detail;
-        const message =
-          typeof detail === "string"
-            ? detail
-            : Array.isArray(detail) && detail.length > 0 && detail[0].msg
-              ? detail[0].msg
-              : `Generate failed: ${response.status}`;
-        throw new Error(message);
-      }
-      const data = (await response.json()) as { images?: { url?: string; filename?: string }[] };
+      if (style?.prompt) fullPrompt = `${style.prompt}\n\n${base}`;
+      const backendImages = await generateImageFromPrompt(fullPrompt);
       const now = new Date().toISOString();
-      const sourceImages = (data.images ?? []).filter((img) => (img.url || img.filename || "") !== "");
-      const newItems: GeneratedImage[] = sourceImages.map((img, index) => {
-        const raw = img.url || img.filename!;
-        const url = raw.startsWith("http")
-          ? raw
-          : `${API_BASE}${raw.startsWith("/") ? "" : "/"}${raw}`;
-        return {
-          id: `${now}-${index}-${Math.random().toString(36).slice(2)}`,
-          url,
-          prompt: base,
-          styleName: style?.name,
-          createdAt: now,
-          tab: activeTab,
-        };
-      });
+      const newItems: GeneratedImage[] = backendImages.map((img, index) => ({
+        id: `${now}-${index}-${Math.random().toString(36).slice(2)}`,
+        url: (img.url || img.filename || "").startsWith("http")
+          ? (img.url || img.filename)!
+          : normalizeImageUrl((img.url || img.filename)!),
+        prompt: base,
+        styleName: style?.name,
+        createdAt: now,
+        tab: activeTab,
+      }));
       setImages((prev) => [...newItems, ...prev]);
       setStatus("Image generated.");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setStatus(`Error generating image: ${message}`);
+      setStatus(`Error generating image: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleDeleteImage = (id: string) => {
-    setImages((prev) => prev.filter((img) => img.id !== id));
-  };
+  const handleGenerateCharacter = async () => {
+    if (!charRole.trim() && !charPhysical.trim() && !charOutfit.trim() && !charAge.trim()) return;
 
-  const handleImagesPerRowChange = (value: string) => {
-    const n = parseInt(value, 10);
-    if (!Number.isNaN(n) && n >= 1 && n <= 8) {
-      setImagesPerRow(n);
+    setIsGeneratingCharacter(true);
+    setStatus("Generating character image...");
+    try {
+      const result = await generateCharacterImage({
+        role: charRole,
+        physical_description: charPhysical,
+        age: charAge,
+        outfit: charOutfit,
+        negative_prompt: charNegative,
+        style_id: selectedCharacterStyleId,
+      });
+      const now = new Date().toISOString();
+      const newItems: GeneratedImage[] = result.images.map((img, index) => ({
+        id: `${now}-${index}-${Math.random().toString(36).slice(2)}`,
+        url: (img.url || img.filename || "").startsWith("http")
+          ? (img.url || img.filename)!
+          : normalizeImageUrl((img.url || img.filename)!),
+        prompt: result.prompt,
+        styleName: result.style_name,
+        createdAt: now,
+        tab: "characters",
+      }));
+      setImages((prev) => [...newItems, ...prev]);
+      setStatus("Character image generated.");
+    } catch (err) {
+      setStatus(`Error generating character image: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setIsGeneratingCharacter(false);
     }
-  };
-
-  const setImagesPerRowClamped = (n: number) => {
-    if (n >= 1 && n <= 8) setImagesPerRow(n);
   };
 
   const handleGeneratePrompt = async () => {
@@ -204,29 +272,27 @@ export default function ImageGenPage() {
     setIsGeneratingPrompt(true);
     setStatus("Generating image prompt...");
     try {
-      const response = await fetch(`${API_BASE}/tools/generate_image_prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: src }),
-      });
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}));
-        throw new Error((errBody as { detail?: string }).detail ?? `Generate failed: ${response.status}`);
-      }
-      const data = (await response.json()) as { prompt?: string };
-      if (data.prompt) {
-        setGenPrompt(data.prompt);
-      }
+      const generated = await generateImagePrompt(src);
+      setGenPrompt(generated);
       setStatus("Image prompt generated.");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setStatus(`Error generating image prompt: ${message}`);
+      setStatus(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setIsGeneratingPrompt(false);
     }
   };
 
-  const visibleImages = images.filter((img) => img.tab === activeTab);
+  const handleImagesPerRowChange = (value: string) => {
+    const n = parseInt(value, 10);
+    if (!Number.isNaN(n) && n >= 1 && n <= 8) setImagesPerRow(n);
+  };
+
+  const setImagesPerRowClamped = (delta: number) => {
+    const n = imagesPerRow + delta;
+    if (n >= 1 && n <= 8) setImagesPerRow(n);
+  };
+
+  const visibleImages = images.filter((img) => img.tab === (activeTab === "styles" ? "image" : activeTab));
 
   return (
     <main>
@@ -254,157 +320,126 @@ export default function ImageGenPage() {
                 >
                   Characters
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "styles"}
+                  className={activeTab === "styles" ? "sidebar-tab active" : "sidebar-tab"}
+                  onClick={() => setActiveTab("styles")}
+                >
+                  Styles
+                </button>
               </div>
               <div className="sidebar-tab-content">
                 {activeTab === "image" && (
-                  <>
-                    <label className="imagegen-label" htmlFor="imagegen-prompt">
-                      Prompt (concept)
-                    </label>
-                    <textarea
-                      id="imagegen-prompt"
-                      className="imagegen-textarea"
-                      placeholder="Describe the image you want to generate..."
-                      value={prompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      rows={4}
-                    />
-
-                    <label className="imagegen-label" htmlFor="imagegen-gen-prompt">
-                      Generated Prompt
-                    </label>
-                    <textarea
-                      id="imagegen-gen-prompt"
-                      className="imagegen-textarea"
-                      placeholder="Generated image prompt will appear here (you can edit it)."
-                      value={genPrompt}
-                      onChange={(e) => setGenPrompt(e.target.value)}
-                      rows={4}
-                    />
-
-                    <button
-                      type="button"
-                      className="imagegen-generate-button"
-                      onClick={handleGeneratePrompt}
-                      disabled={isGeneratingPrompt || !prompt.trim()}
-                    >
-                      {isGeneratingPrompt ? "Generating Prompt..." : "Generate Prompt"}
-                    </button>
-                    <br /><br/>
-
-                    <label className="imagegen-label" htmlFor="imagegen-style">
-                      Style
-                    </label>
-                    <select
-                      id="imagegen-style"
-                      className="imagegen-select"
-                      value={selectedStyleId}
-                      onChange={(e) => setSelectedStyleId(e.target.value as "__none" | string)}
-                    >
-                      <option value="__none">(No style)</option>
-                      {styles.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    <button
-                      type="button"
-                      className="imagegen-generate-button"
-                      onClick={handleGenerate}
-                      disabled={isGenerating || (!prompt.trim() && !genPrompt.trim())}
-                    >
-                      {isGenerating ? "Generating..." : "Generate"}
-                    </button>
-
-                    {status && <div className="status" style={{ marginTop: 8 }}>{status}</div>}
-                  </>
-                )}
-
-                {activeTab === "characters" && (
-                  <div style={{ fontSize: 13, color: "#9aa3b2" }}>
-                    Characters image generation controls will go here.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="imagegen-right">
-          <div className="imagegen-panel">
-            <div className="imagegen-results-header">
-              <h2 className="imagegen-panel-title">Results</h2>
-              <div className="edit-actions imagegen-images-per-row-row" style={{ alignItems: "center", gap: 8 }}>
-                <label style={{ fontSize: 14 }} htmlFor="imagegen-images-per-row">
-                  Images per row:
-                </label>
-                <div className="imagegen-stepper">
-                  <button
-                    type="button"
-                    aria-label="Decrease images per row"
-                    className="imagegen-stepper-btn"
-                    onClick={() => setImagesPerRowClamped(imagesPerRow - 1)}
-                  >
-                    −
-                  </button>
-                  <input
-                    id="imagegen-images-per-row"
-                    type="number"
-                    min={1}
-                    max={8}
-                    value={imagesPerRow}
-                    onChange={(e) => handleImagesPerRowChange(e.target.value)}
-                    style={{ width: 56, padding: "6px 8px" }}
+                  <ImageTabPanel
+                    prompt={prompt}
+                    genPrompt={genPrompt}
+                    onPromptChange={setPrompt}
+                    onGenPromptChange={setGenPrompt}
+                    styles={styles}
+                    selectedStyleId={selectedStyleId}
+                    onSelectedStyleIdChange={setSelectedStyleId}
+                    onGeneratePrompt={handleGeneratePrompt}
+                    onGenerate={handleGenerate}
+                    isGenerating={isGenerating}
+                    isGeneratingPrompt={isGeneratingPrompt}
+                    status={status}
                   />
-                  <button
-                    type="button"
-                    aria-label="Increase images per row"
-                    className="imagegen-stepper-btn"
-                    onClick={() => setImagesPerRowClamped(imagesPerRow + 1)}
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div
-              className="imagegen-grid"
-              style={{ gridTemplateColumns: `repeat(${imagesPerRow}, minmax(0, 1fr))` }}
-            >
-              {visibleImages.map((img) => (
-                <div key={img.id} className="imagegen-card">
-                  <div className="imagegen-card-image-wrap">
-                    <img src={img.url} alt={img.prompt} className="imagegen-card-image" />
-                  </div>
-                  <div className="imagegen-card-meta">
-                    {img.styleName && (
-                      <div className="imagegen-card-style">Style: {img.styleName}</div>
-                    )}
-                    <div className="imagegen-card-prompt" title={img.prompt}>
-                      {img.prompt}
+                )}
+                {activeTab === "characters" && (
+                  <CharactersTabPanel
+                    role={charRole}
+                    physical={charPhysical}
+                    age={charAge}
+                    outfit={charOutfit}
+                    negativePrompt={charNegative}
+                    styles={styles}
+                    selectedStyleId={selectedCharacterStyleId}
+                    onSelectedStyleIdChange={setSelectedCharacterStyleId}
+                    onRoleChange={setCharRole}
+                    onPhysicalChange={setCharPhysical}
+                    onAgeChange={setCharAge}
+                    onOutfitChange={setCharOutfit}
+                    onNegativePromptChange={setCharNegative}
+                    onGenerateCharacter={handleGenerateCharacter}
+                    isGenerating={isGeneratingCharacter}
+                    status={status}
+                  />
+                )}
+                {activeTab === "styles" && (
+                  <div className="sidebar-panel-content" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div className="section-title" style={{ marginBottom: 8 }}>
+                      Style bank
                     </div>
-                    <button
-                      type="button"
-                      className="imagegen-delete-button"
-                      onClick={() => handleDeleteImage(img.id)}
-                    >
-                      Delete
-                    </button>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {styles.map((s) => (
+                        <div
+                          key={s.id}
+                          className="sidebar-item"
+                          style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 8,
+                            }}
+                          >
+                            <span className="sources-name" style={{ fontWeight: 600 }}>
+                              {s.name}
+                            </span>
+                            <button
+                              type="button"
+                              className="admin-link"
+                              onClick={() => void handleDeleteStyle(s.id)}
+                              disabled={isManagingStyles}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#9aa3b2",
+                              whiteSpace: "pre-wrap",
+                              maxHeight: 60,
+                              overflow: "auto",
+                            }}
+                          >
+                            {s.prompt || "(no prompt)"}
+                          </div>
+                        </div>
+                      ))}
+                      {styles.length === 0 && (
+                        <div className="status" style={{ fontSize: 12 }}>
+                          No styles in bank. Add one below.
+                        </div>
+                      )}
+                    </div>
+                    <StylesAddForm onAdd={handleAddStyle} disabled={isManagingStyles} />
+                    {status && (
+                      <div className="status" style={{ marginTop: 8 }}>
+                        {status}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
-              {visibleImages.length === 0 && (
-                <div className="status" style={{ gridColumn: "1 / -1" }}>
-                  No images yet. Enter a prompt and click Generate.
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>
+
+        <ResultsPanel
+          images={visibleImages}
+          imagesPerRow={imagesPerRow}
+          onImagesPerRowChange={handleImagesPerRowChange}
+          onImagesPerRowStep={setImagesPerRowClamped}
+          onDeleteImage={(id) => setImages((prev) => prev.filter((img) => img.id !== id))}
+          emptyMessage="No images yet. Enter a prompt and click Generate."
+        />
       </div>
     </main>
   );
 }
-

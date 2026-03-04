@@ -13,8 +13,23 @@ from image_tool import (
     safe_resolve_path,
     validate_image_filename,
 )
+from storyboard import list_styles
 
 image_router = APIRouter()
+
+CHARACTER_PROMPT_SUFFIX = (
+    " Full-body game character, standing in a neutral A-pose, on a plain green background without shadows."
+    "Show the character twice, once in a front view and once in a side view. Clear silhouette, suitable for character sheet reference."
+)
+
+
+class GenerateCharacterImageRequest(BaseModel):
+    role: str | None = None
+    physical_description: str | None = None
+    age: str | None = None
+    outfit: str | None = None
+    negative_prompt: str | None = None
+    style_id: str | None = None
 
 
 class GenerateImageRequest(BaseModel):
@@ -53,6 +68,73 @@ class ConvertImageRequest(BaseModel):
     quality: int | None = None
     output_filename: str | None = None
     project_key: str | None = None
+
+
+def _build_character_prompt(
+    role: str | None,
+    physical_description: str | None,
+    age: str | None,
+    outfit: str | None,
+    style_prompt: str | None,
+) -> str:
+    parts: list[str] = []
+    if role and role.strip():
+        parts.append(f"Role / Archetype: {role.strip()}")
+    if physical_description and physical_description.strip():
+        parts.append(f"Physical description: {physical_description.strip()}")
+    if age and age.strip():
+        parts.append(f"Age: {age.strip()}")
+    if outfit and outfit.strip():
+        parts.append(f"Outfit: {outfit.strip()}")
+    if not parts:
+        raise ValueError("At least one of role, physical_description, age, outfit is required.")
+    base = "\n".join(parts) + CHARACTER_PROMPT_SUFFIX
+    if style_prompt and style_prompt.strip():
+        return f"{style_prompt.strip()}\n\n{base}"
+    return base
+
+
+@image_router.post("/tools/generate_character_image")
+def generate_character_image_route(body: GenerateCharacterImageRequest) -> dict:
+    """Assemble character prompt on the server and generate image(s). Returns images + style_name if a style was used."""
+    role = (body.role or "").strip() or None
+    physical = (body.physical_description or "").strip() or None
+    age = (body.age or "").strip() or None
+    outfit = (body.outfit or "").strip() or None
+    if not any((role, physical, age, outfit)):
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of role, physical_description, age, outfit is required.",
+        )
+    style_prompt: str | None = None
+    style_name: str | None = None
+    sid = (body.style_id or "").strip()
+    if sid and sid != "__none":
+        try:
+            styles = list_styles()
+            for s in styles:
+                if str(s.get("id")) == sid:
+                    style_prompt = s.get("prompt") or ""
+                    style_name = s.get("name")
+                    break
+        except Exception:
+            pass
+    try:
+        prompt = _build_character_prompt(role, physical, age, outfit, style_prompt)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        result = generate_image(
+            prompt=prompt,
+            negative_prompt=(body.negative_prompt or "").strip() or None,
+        )
+        out: dict = dict(result)
+        out["prompt"] = prompt
+        if style_name:
+            out["style_name"] = style_name
+        return out
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @image_router.post("/tools/generate_image")

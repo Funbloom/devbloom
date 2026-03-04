@@ -6,11 +6,20 @@ import type { Character, Location, Storyboard, StoryboardDetailResponse, Style, 
 import { StoryboardSidebar } from "./StoryboardSidebar";
 import { TilesPanel } from "./TilesPanel";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
+const STORAGE_KEY_PROJECT = "activeProjectKey";
+const STORAGE_KEY_STORYBOARD = "storyboardSelectedId";
+
+function getStoredStoryboardId(): string | null {
+  if (typeof window === "undefined") return null;
+  const id = window.localStorage.getItem(STORAGE_KEY_STORYBOARD);
+  return id?.trim() || null;
+}
 
 export default function StoryboardPage() {
+  const [projectKey, setProjectKey] = useState("");
   const [storyboards, setStoryboards] = useState<Storyboard[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => getStoredStoryboardId());
   const [characters, setCharacters] = useState<Character[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [tiles, setTiles] = useState<Tile[]>([]);
@@ -40,11 +49,16 @@ export default function StoryboardPage() {
 
   const activeStoryboard = storyboards.find((s) => s.id === selectedId) ?? null;
 
+  useEffect(() => {
+    const key = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY_PROJECT) : null;
+    setProjectKey(key?.trim() ?? "");
+  }, []);
+
   const loadStoryboards = async () => {
     setIsLoading(true);
     setStatus(null);
     try {
-      const storedProjectKey = typeof window !== "undefined" ? window.localStorage.getItem("activeProjectKey") : null;
+      const storedProjectKey = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY_PROJECT) : null;
       const url =
         storedProjectKey && storedProjectKey.trim() !== ""
           ? `${API_BASE}/storyboard?project_key=${encodeURIComponent(storedProjectKey)}`
@@ -55,8 +69,12 @@ export default function StoryboardPage() {
       }
       const data = (await response.json()) as Storyboard[];
       setStoryboards(data);
-      if (data.length > 0 && !selectedId) {
-        setSelectedId(data[0].id);
+      if (data.length > 0) {
+        const storedId = getStoredStoryboardId();
+        const exists = storedId && data.some((s) => s.id === storedId);
+        setSelectedId(exists ? storedId : data[0].id);
+      } else {
+        setSelectedId(null);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -105,6 +123,14 @@ export default function StoryboardPage() {
     void loadStoryboards();
     void loadStyles();
   }, []);
+
+  useEffect(() => {
+    if (selectedId) {
+      window.localStorage.setItem(STORAGE_KEY_STORYBOARD, selectedId);
+    } else {
+      window.localStorage.removeItem(STORAGE_KEY_STORYBOARD);
+    }
+  }, [selectedId]);
 
   useEffect(() => {
     if (selectedId) {
@@ -220,49 +246,6 @@ export default function StoryboardPage() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setStatus(`Error applying style: ${message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const addStyleToBank = async (name: string, prompt: string) => {
-    setIsSaving(true);
-    setStatus(null);
-    try {
-      const response = await fetch(`${API_BASE}/storyboard/styles`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), prompt: prompt.trim() }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error((body as { detail?: string }).detail ?? `Add failed: ${response.status}`);
-      }
-      const created = (await response.json()) as Style;
-      setStyles((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-      setStatus("Style added to bank.");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setStatus(`Error adding style: ${message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const deleteStyleFromBank = async (styleId: string) => {
-    setIsSaving(true);
-    setStatus(null);
-    try {
-      const response = await fetch(`${API_BASE}/storyboard/styles/${styleId}`, { method: "DELETE" });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error((body as { detail?: string }).detail ?? `Delete failed: ${response.status}`);
-      }
-      setStyles((prev) => prev.filter((s) => s.id !== styleId));
-      setStatus("Style removed from bank.");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setStatus(`Error deleting style: ${message}`);
     } finally {
       setIsSaving(false);
     }
@@ -594,8 +577,7 @@ export default function StoryboardPage() {
             styles={styles}
             newStyle={newStyle}
             onApplyStyle={applyStyle}
-            onAddStyle={addStyleToBank}
-            onDeleteStyle={deleteStyleFromBank}
+            projectKey={projectKey}
             newCharacterName={newCharacterName}
             newCharacterImage={newCharacterImage}
             onNewCharacterNameChange={setNewCharacterName}

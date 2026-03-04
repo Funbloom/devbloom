@@ -35,7 +35,7 @@ type ToolPathsResponse = {
   IMAGES_OUTPUT_DIR?: string;
 };
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
 const AGENTS = [
   { id: "creative_director", name: "Creative Director" },
   { id: "art_director", name: "Art Director" },

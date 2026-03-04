@@ -1,54 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Character, Location, Storyboard, Style } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
+
+type GeneratedImageItem = { id: string; url: string; prompt?: string; tab?: string };
 
 function imageSrc(url: string | null | undefined): string {
   if (!url) return "";
   if (url.startsWith("http")) return url;
   return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
-}
-
-function AddStyleForm({
-  onAdd,
-  disabled,
-}: {
-  onAdd: (name: string, prompt: string) => void;
-  disabled: boolean;
-}) {
-  const [name, setName] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const n = name.trim();
-    if (!n) return;
-    onAdd(n, prompt.trim());
-    setName("");
-    setPrompt("");
-  };
-  return (
-    <form onSubmit={handleSubmit} style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-      <input
-        type="text"
-        placeholder="Style name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        style={{ padding: "6px 8px", fontSize: 14 }}
-      />
-      <textarea
-        placeholder="Style prompt (visual style, mood, guidelines)"
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        rows={2}
-        style={{ width: "100%", resize: "vertical", padding: "6px 8px", fontSize: 14 }}
-      />
-      <button type="submit" disabled={disabled || !name.trim()}>
-        Add style to bank
-      </button>
-    </form>
-  );
 }
 
 type Props = {
@@ -69,9 +31,8 @@ type Props = {
   styles: Style[];
   newStyle: string;
   onApplyStyle: (style: Style | null) => void;
-  onAddStyle: (name: string, prompt: string) => void;
-  onDeleteStyle: (id: string) => void;
 
+  projectKey: string;
   newCharacterName: string;
   newCharacterImage: string;
   onNewCharacterNameChange: (value: string) => void;
@@ -91,8 +52,25 @@ type Props = {
 
 type TabId = "styles" | "characters" | "locations";
 
+function urlToCharacterImagePath(url: string): string {
+  if (url.startsWith("http")) {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return url;
+    }
+  }
+  return url.startsWith("/") ? url : `/${url}`;
+}
+
 export function StoryboardSidebar(props: Props) {
   const [activeTab, setActiveTab] = useState<TabId>("styles");
+  const [pickImageGenOpen, setPickImageGenOpen] = useState(false);
+  const [generatedCharacterImages, setGeneratedCharacterImages] = useState<GeneratedImageItem[]>([]);
+  const [loadingGeneratedImages, setLoadingGeneratedImages] = useState(false);
+  const [pickLocationImageGenOpen, setPickLocationImageGenOpen] = useState(false);
+  const [generatedLocationImages, setGeneratedLocationImages] = useState<GeneratedImageItem[]>([]);
+  const [loadingGeneratedLocationImages, setLoadingGeneratedLocationImages] = useState(false);
   const {
     storyboards,
     selectedId,
@@ -109,8 +87,7 @@ export function StoryboardSidebar(props: Props) {
     styles,
     newStyle,
     onApplyStyle,
-    onAddStyle,
-    onDeleteStyle,
+    projectKey,
     newCharacterName,
     newCharacterImage,
     onNewCharacterNameChange,
@@ -126,6 +103,110 @@ export function StoryboardSidebar(props: Props) {
     onAddLocation,
     onDeleteLocation,
   } = props;
+
+  const fetchGeneratedCharacterImages = useCallback(async () => {
+    if (!projectKey.trim()) {
+      setGeneratedCharacterImages([]);
+      return;
+    }
+    setLoadingGeneratedImages(true);
+    try {
+      const response = await fetch(
+        `${API_BASE}/tools/image_generated?project_key=${encodeURIComponent(projectKey)}`
+      );
+      if (!response.ok) {
+        setGeneratedCharacterImages([]);
+        return;
+      }
+      const data = (await response.json()) as { images?: unknown[] };
+      const raw = data.images ?? [];
+      const list: GeneratedImageItem[] = (Array.isArray(raw) ? raw : [])
+        .filter(
+          (img: unknown) =>
+            img &&
+            typeof (img as GeneratedImageItem).id === "string" &&
+            typeof (img as GeneratedImageItem).url === "string" &&
+            (img as GeneratedImageItem).tab === "characters"
+        )
+        .map((img) => ({
+          id: (img as GeneratedImageItem).id,
+          url: (img as GeneratedImageItem).url,
+          prompt: (img as GeneratedImageItem).prompt,
+          tab: (img as GeneratedImageItem).tab,
+        }));
+      setGeneratedCharacterImages(list);
+    } catch {
+      setGeneratedCharacterImages([]);
+    } finally {
+      setLoadingGeneratedImages(false);
+    }
+  }, [projectKey]);
+
+  const fetchGeneratedLocationImages = useCallback(async () => {
+    if (!projectKey.trim()) {
+      setGeneratedLocationImages([]);
+      return;
+    }
+    setLoadingGeneratedLocationImages(true);
+    try {
+      const response = await fetch(
+        `${API_BASE}/tools/image_generated?project_key=${encodeURIComponent(projectKey)}`
+      );
+      if (!response.ok) {
+        setGeneratedLocationImages([]);
+        return;
+      }
+      const data = (await response.json()) as { images?: unknown[] };
+      const raw = data.images ?? [];
+      const list: GeneratedImageItem[] = (Array.isArray(raw) ? raw : [])
+        .filter(
+          (img: unknown) =>
+            img &&
+            typeof (img as GeneratedImageItem).id === "string" &&
+            typeof (img as GeneratedImageItem).url === "string" &&
+            (img as GeneratedImageItem).tab !== "characters"
+        )
+        .map((img) => ({
+          id: (img as GeneratedImageItem).id,
+          url: (img as GeneratedImageItem).url,
+          prompt: (img as GeneratedImageItem).prompt,
+          tab: (img as GeneratedImageItem).tab,
+        }));
+      setGeneratedLocationImages(list);
+    } catch {
+      setGeneratedLocationImages([]);
+    } finally {
+      setLoadingGeneratedLocationImages(false);
+    }
+  }, [projectKey]);
+
+  useEffect(() => {
+    if (pickImageGenOpen && projectKey.trim()) {
+      void fetchGeneratedCharacterImages();
+    } else if (!pickImageGenOpen) {
+      setGeneratedCharacterImages([]);
+    }
+  }, [pickImageGenOpen, projectKey, fetchGeneratedCharacterImages]);
+
+  useEffect(() => {
+    if (pickLocationImageGenOpen && projectKey.trim()) {
+      void fetchGeneratedLocationImages();
+    } else if (!pickLocationImageGenOpen) {
+      setGeneratedLocationImages([]);
+    }
+  }, [pickLocationImageGenOpen, projectKey, fetchGeneratedLocationImages]);
+
+  const handlePickGeneratedCharacterImage = (img: GeneratedImageItem) => {
+    const path = urlToCharacterImagePath(img.url);
+    onNewCharacterImageChange(path);
+    setPickImageGenOpen(false);
+  };
+
+  const handlePickGeneratedLocationImage = (img: GeneratedImageItem) => {
+    const path = urlToCharacterImagePath(img.url);
+    onNewLocationImageChange(path);
+    setPickLocationImageGenOpen(false);
+  };
 
   return (
     <div
@@ -216,59 +297,33 @@ export function StoryboardSidebar(props: Props) {
           <div className="sidebar-tab-content">
             {activeTab === "styles" && (
               <div className="sidebar-panel-content" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div>
-              <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>Current style</label>
-              <select
-                value={
-                  newStyle === ""
-                    ? "__none"
-                    : styles.find((s) => s.prompt === newStyle)?.id ?? "__none"
-                }
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === "__none") void onApplyStyle(null);
-                  else {
-                    const s = styles.find((x) => x.id === v);
-                    if (s) void onApplyStyle(s);
-                  }
-                }}
-                disabled={isSaving}
-                style={{ width: "100%", padding: "6px 8px", fontSize: 14 }}
-              >
-                <option value="__none">(None)</option>
-                {styles.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ borderTop: "1px solid #2a2f3a", paddingTop: 10, marginTop: 4 }}>
-              <div className="section-title" style={{ marginBottom: 8 }}>Style bank</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {styles.map((s) => (
-                  <div key={s.id} className="sidebar-item" style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                      <span className="sources-name" style={{ fontWeight: 600 }}>{s.name}</span>
-                      <button
-                        type="button"
-                        className="admin-link"
-                        onClick={() => void onDeleteStyle(s.id)}
-                        disabled={isSaving}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#9aa3b2", whiteSpace: "pre-wrap", maxHeight: 60, overflow: "auto" }}>
-                      {s.prompt || "(no prompt)"}
-                    </div>
-                  </div>
-                ))}
-                {styles.length === 0 && <div className="status" style={{ fontSize: 12 }}>No styles in bank. Add one below.</div>}
-              </div>
-              <AddStyleForm onAdd={onAddStyle} disabled={isSaving} />
-            </div>
+                <div>
+                  <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>Current style</label>
+                  <select
+                    value={
+                      newStyle === ""
+                        ? "__none"
+                        : styles.find((s) => s.prompt === newStyle)?.id ?? "__none"
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "__none") void onApplyStyle(null);
+                      else {
+                        const s = styles.find((x) => x.id === v);
+                        if (s) void onApplyStyle(s);
+                      }
+                    }}
+                    disabled={isSaving}
+                    style={{ width: "100%", padding: "6px 8px", fontSize: 14 }}
+                  >
+                    <option value="__none">(None)</option>
+                    {styles.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             )}
             {activeTab === "characters" && (
@@ -324,6 +379,15 @@ export function StoryboardSidebar(props: Props) {
                 value={newCharacterImage}
                 onChange={(e) => onNewCharacterImageChange(e.target.value)}
               />
+              <button
+                type="button"
+                className="admin-link"
+                onClick={() => setPickImageGenOpen(true)}
+                disabled={!projectKey.trim()}
+                title={!projectKey.trim() ? "Set active project in Admin to browse generated characters" : "Pick from Image Gen"}
+              >
+                Pick from Image Gen
+              </button>
               <input
                 type="file"
                 accept="image/*"
@@ -336,6 +400,89 @@ export function StoryboardSidebar(props: Props) {
                 }}
               />
             </div>
+            {pickImageGenOpen && (
+              <div
+                className="pick-imagegen-overlay"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="pick-imagegen-title"
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.6)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 1000,
+                }}
+                onClick={() => setPickImageGenOpen(false)}
+              >
+                <div
+                  className="pick-imagegen-modal"
+                  style={{
+                    background: "#161a22",
+                    border: "1px solid #2a2f3a",
+                    borderRadius: 12,
+                    padding: 16,
+                    maxWidth: "90vw",
+                    maxHeight: "80vh",
+                    overflow: "auto",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <h3 id="pick-imagegen-title" style={{ margin: 0, fontSize: 16 }}>Pick from Image Gen (characters)</h3>
+                    <button type="button" onClick={() => setPickImageGenOpen(false)} aria-label="Close">×</button>
+                  </div>
+                  {loadingGeneratedImages && <div className="status">Loading…</div>}
+                  {!loadingGeneratedImages && generatedCharacterImages.length === 0 && (
+                    <div className="status">
+                      {!projectKey.trim()
+                        ? "Set active project in Admin to see generated characters."
+                        : "No character images yet. Generate some in Image Gen → Characters."}
+                    </div>
+                  )}
+                  {!loadingGeneratedImages && generatedCharacterImages.length > 0 && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+                        gap: 10,
+                      }}
+                    >
+                      {generatedCharacterImages.map((img) => {
+                        const src = img.url.startsWith("http") ? img.url : `${API_BASE}${img.url.startsWith("/") ? "" : "/"}${img.url}`;
+                        return (
+                          <button
+                            type="button"
+                            key={img.id}
+                            className="pick-imagegen-thumb"
+                            onClick={() => handlePickGeneratedCharacterImage(img)}
+                            style={{
+                              padding: 0,
+                              border: "2px solid #2a2f3a",
+                              borderRadius: 8,
+                              overflow: "hidden",
+                              background: "#0f1115",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <img
+                              src={src}
+                              alt={img.prompt?.slice(0, 40) ?? "Character"}
+                              style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
               </div>
             )}
             {activeTab === "locations" && (
@@ -391,6 +538,15 @@ export function StoryboardSidebar(props: Props) {
                 value={newLocationImage}
                 onChange={(e) => onNewLocationImageChange(e.target.value)}
               />
+              <button
+                type="button"
+                className="admin-link"
+                onClick={() => setPickLocationImageGenOpen(true)}
+                disabled={!projectKey.trim()}
+                title={!projectKey.trim() ? "Set active project in Admin to browse generated images" : "Pick from Image Gen (Image tab)"}
+              >
+                Pick from Image Gen
+              </button>
               <input
                 type="file"
                 accept="image/*"
@@ -403,6 +559,89 @@ export function StoryboardSidebar(props: Props) {
                 }}
               />
             </div>
+            {pickLocationImageGenOpen && (
+              <div
+                className="pick-imagegen-overlay"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="pick-location-imagegen-title"
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.6)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 1000,
+                }}
+                onClick={() => setPickLocationImageGenOpen(false)}
+              >
+                <div
+                  className="pick-imagegen-modal"
+                  style={{
+                    background: "#161a22",
+                    border: "1px solid #2a2f3a",
+                    borderRadius: 12,
+                    padding: 16,
+                    maxWidth: "90vw",
+                    maxHeight: "80vh",
+                    overflow: "auto",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <h3 id="pick-location-imagegen-title" style={{ margin: 0, fontSize: 16 }}>Pick from Image Gen (Image tab)</h3>
+                    <button type="button" onClick={() => setPickLocationImageGenOpen(false)} aria-label="Close">×</button>
+                  </div>
+                  {loadingGeneratedLocationImages && <div className="status">Loading…</div>}
+                  {!loadingGeneratedLocationImages && generatedLocationImages.length === 0 && (
+                    <div className="status">
+                      {!projectKey.trim()
+                        ? "Set active project in Admin to see generated images."
+                        : "No images yet from Image tab. Generate some in Image Gen → Image."}
+                    </div>
+                  )}
+                  {!loadingGeneratedLocationImages && generatedLocationImages.length > 0 && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+                        gap: 10,
+                      }}
+                    >
+                      {generatedLocationImages.map((img) => {
+                        const src = img.url.startsWith("http") ? img.url : `${API_BASE}${img.url.startsWith("/") ? "" : "/"}${img.url}`;
+                        return (
+                          <button
+                            type="button"
+                            key={img.id}
+                            className="pick-imagegen-thumb"
+                            onClick={() => handlePickGeneratedLocationImage(img)}
+                            style={{
+                              padding: 0,
+                              border: "2px solid #2a2f3a",
+                              borderRadius: 8,
+                              overflow: "hidden",
+                              background: "#0f1115",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <img
+                              src={src}
+                              alt={img.prompt?.slice(0, 40) ?? "Image"}
+                              style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
               </div>
             )}
           </div>

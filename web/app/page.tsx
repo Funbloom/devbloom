@@ -101,7 +101,7 @@ const AGENTS: AgentInfo[] = [
     image: buildAvatar("P", "#8b5cf6"),
   },
 ];
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
 
 function parseSseLines(buffer: string): { events: SseEvent[]; rest: string } {
   const lines = buffer.split("\n");
@@ -277,7 +277,7 @@ export default function HomePage() {
         },
         debug_prompts: debugPrompts || undefined,
       };
-      const response = await fetch("http://localhost:8000/chat/stream", {
+      const response = await fetch(`${API_BASE}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
