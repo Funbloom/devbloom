@@ -12,26 +12,60 @@ import {
   getStyles,
   normalizeImageUrl,
   putImageGenerated,
+  uploadImageToCloud,
 } from "./client";
-import { STORAGE_KEY_PROJECT } from "./config";
+import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
 import { CharactersTabPanel } from "./CharactersTabPanel";
 import { ImageTabPanel } from "./ImageTabPanel";
 import { ResultsPanel } from "./ResultsPanel";
-import type { GeneratedImage, ImageTab } from "./types";
+import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
 
 function parseStoredImages(raw: unknown[]): GeneratedImage[] {
   return raw
-    .filter((img) => img && typeof (img as Record<string, unknown>).id === "string" && typeof (img as Record<string, unknown>).url === "string")
+    .filter(
+      (img) =>
+        img &&
+        typeof (img as Record<string, unknown>).id === "string" &&
+        typeof (img as Record<string, unknown>).url === "string",
+    )
     .map((img) => {
       const o = img as Record<string, unknown>;
+      const rawUrl = typeof o.url === "string" ? o.url : "";
+      const url = normalizeImageUrl(rawUrl);
       const tab: ImageTab = o.tab === "characters" ? "characters" : "image";
+
+      let location: ImageLocation = "local";
+      if (typeof o.location === "string" && (o.location === "local" || o.location === "cloud")) {
+        location = o.location;
+      } else if (url.includes("/images/")) {
+        location = "local";
+      } else {
+        location = "cloud";
+      }
+
+      const filename =
+        typeof o.filename === "string" && o.filename
+          ? o.filename
+          : (() => {
+              try {
+                const u = new URL(url, API_BASE);
+                const pathname = u.pathname || "";
+                const idx = pathname.lastIndexOf("/");
+                return idx >= 0 ? pathname.slice(idx + 1) : "";
+              } catch {
+                return "";
+              }
+            })();
+
       return {
         id: String(o.id),
-        url: normalizeImageUrl(String(o.url)),
+        url,
+        filename: filename || undefined,
         prompt: typeof o.prompt === "string" ? o.prompt : "",
         styleName: typeof o.styleName === "string" ? o.styleName : undefined,
         createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(0).toISOString(),
         tab,
+        location,
       };
     });
 }
@@ -40,10 +74,12 @@ function toPayload(img: GeneratedImage): Record<string, unknown> {
   return {
     id: img.id,
     url: img.url,
+    filename: img.filename,
     prompt: img.prompt,
     styleName: img.styleName,
     createdAt: img.createdAt,
     tab: img.tab,
+    location: img.location,
   };
 }
 
@@ -112,6 +148,7 @@ export default function ImageGenPage() {
   const [charNegative, setCharNegative] = useState("");
   const [selectedCharacterStyleId, setSelectedCharacterStyleId] = useState<string>("__none");
   const [isManagingStyles, setIsManagingStyles] = useState(false);
+  const [defaultLocation, setDefaultLocation] = useState<ImageLocation>("local");
 
   /** Only persist after initial load for this project has completed; avoids overwriting saved data with [] on mount. */
   const loadCompletedForProjectRef = useRef<string | null>(null);
@@ -119,6 +156,21 @@ export default function ImageGenPage() {
   useEffect(() => {
     const key = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY_PROJECT) : null;
     setProjectKey(key?.trim() ?? "");
+  }, []);
+
+  useEffect(() => {
+    const loadDefaults = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/settings/image_defaults`);
+        if (!response.ok) return;
+        const data = (await response.json()) as { location?: string };
+        const loc = data.location === "cloud" ? "cloud" : "local";
+        setDefaultLocation(loc);
+      } catch {
+        // ignore, fall back to local
+      }
+    };
+    void loadDefaults();
   }, []);
 
   useEffect(() => {
@@ -213,16 +265,32 @@ export default function ImageGenPage() {
       if (style?.prompt) fullPrompt = `${style.prompt}\n\n${base}`;
       const backendImages = await generateImageFromPrompt(fullPrompt);
       const now = new Date().toISOString();
-      const newItems: GeneratedImage[] = backendImages.map((img, index) => ({
-        id: `${now}-${index}-${Math.random().toString(36).slice(2)}`,
-        url: (img.url || img.filename || "").startsWith("http")
-          ? (img.url || img.filename)!
-          : normalizeImageUrl((img.url || img.filename)!),
-        prompt: base,
-        styleName: style?.name,
-        createdAt: now,
-        tab: activeTab,
-      }));
+      const newItems: GeneratedImage[] = backendImages.map((img, index) => {
+        const raw = (img.url || img.filename || "") as string;
+        const filename =
+          (img as Record<string, unknown>).filename && typeof (img as Record<string, unknown>).filename === "string"
+            ? String((img as Record<string, unknown>).filename)
+            : (() => {
+                try {
+                  const u = new URL(raw, API_BASE);
+                  const pathname = u.pathname || "";
+                  const idx = pathname.lastIndexOf("/");
+                  return idx >= 0 ? pathname.slice(idx + 1) : "";
+                } catch {
+                  return "";
+                }
+              })();
+        return {
+          id: `${now}-${index}-${Math.random().toString(36).slice(2)}`,
+          url: raw.startsWith("http") ? raw : normalizeImageUrl(raw),
+          filename: filename || undefined,
+          prompt: base,
+          styleName: style?.name,
+          createdAt: now,
+          tab: activeTab,
+          location: defaultLocation,
+        };
+      });
       setImages((prev) => [...newItems, ...prev]);
       setStatus("Image generated.");
     } catch (err) {
@@ -247,16 +315,32 @@ export default function ImageGenPage() {
         style_id: selectedCharacterStyleId,
       });
       const now = new Date().toISOString();
-      const newItems: GeneratedImage[] = result.images.map((img, index) => ({
-        id: `${now}-${index}-${Math.random().toString(36).slice(2)}`,
-        url: (img.url || img.filename || "").startsWith("http")
-          ? (img.url || img.filename)!
-          : normalizeImageUrl((img.url || img.filename)!),
-        prompt: result.prompt,
-        styleName: result.style_name,
-        createdAt: now,
-        tab: "characters",
-      }));
+      const newItems: GeneratedImage[] = result.images.map((img, index) => {
+        const raw = (img.url || img.filename || "") as string;
+        const filename =
+          (img as Record<string, unknown>).filename && typeof (img as Record<string, unknown>).filename === "string"
+            ? String((img as Record<string, unknown>).filename)
+            : (() => {
+                try {
+                  const u = new URL(raw, API_BASE);
+                  const pathname = u.pathname || "";
+                  const idx = pathname.lastIndexOf("/");
+                  return idx >= 0 ? pathname.slice(idx + 1) : "";
+                } catch {
+                  return "";
+                }
+              })();
+        return {
+          id: `${now}-${index}-${Math.random().toString(36).slice(2)}`,
+          url: raw.startsWith("http") ? raw : normalizeImageUrl(raw),
+          filename: filename || undefined,
+          prompt: result.prompt,
+          styleName: result.style_name,
+          createdAt: now,
+          tab: "characters",
+          location: defaultLocation,
+        };
+      });
       setImages((prev) => [...newItems, ...prev]);
       setStatus("Character image generated.");
     } catch (err) {
@@ -291,6 +375,59 @@ export default function ImageGenPage() {
     const n = imagesPerRow + delta;
     if (n >= 1 && n <= 8) setImagesPerRow(n);
   };
+
+  const toggleImageLocation = useCallback(
+    async (imageId: string) => {
+      const target = images.find((img) => img.id === imageId);
+      if (!target) return;
+      if (!projectKey) {
+        setStatus("Set an active project in Admin to sync images.");
+        return;
+      }
+      if (!target.filename) {
+        setStatus("Cannot determine filename for this image.");
+        return;
+      }
+      // If currently in cloud, switch to local URL based on filename.
+      if (target.location === "cloud") {
+        const localUrl = normalizeImageUrl(`/images/${target.filename}?project_key=${encodeURIComponent(projectKey)}`);
+        setImages((prev) =>
+          prev.map((img) =>
+            img.id === imageId
+              ? {
+                  ...img,
+                  url: localUrl,
+                  location: "local",
+                }
+              : img,
+          ),
+        );
+        setStatus("Switched image to use local copy.");
+        return;
+      }
+      // local -> cloud: upload via API
+      try {
+        setStatus("Uploading image to cloud...");
+        const cloudUrl = await uploadImageToCloud(projectKey, target.filename);
+        setImages((prev) =>
+          prev.map((img) =>
+            img.id === imageId
+              ? {
+                  ...img,
+                  url: cloudUrl,
+                  location: "cloud",
+                }
+              : img,
+          ),
+        );
+        setStatus("Image uploaded to cloud.");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setStatus(`Error uploading image: ${message}`);
+      }
+    },
+    [images, projectKey],
+  );
 
   const visibleImages = images.filter((img) => img.tab === (activeTab === "styles" ? "image" : activeTab));
 
@@ -437,6 +574,7 @@ export default function ImageGenPage() {
           onImagesPerRowChange={handleImagesPerRowChange}
           onImagesPerRowStep={setImagesPerRowClamped}
           onDeleteImage={(id) => setImages((prev) => prev.filter((img) => img.id !== id))}
+          onToggleLocation={toggleImageLocation}
           emptyMessage="No images yet. Enter a prompt and click Generate."
         />
       </div>

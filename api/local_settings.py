@@ -53,6 +53,8 @@ DEFAULT_IMAGE_SETTINGS = {
     "width": 720,
     "height": 1280,
     "style": "high resolution cartoon, movie style",
+    # Default location for ImageGen outputs: "local" or "cloud"
+    "location": "local",
 }
 
 DEFAULT_THEME_SETTINGS = {

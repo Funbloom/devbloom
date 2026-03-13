@@ -18,7 +18,8 @@ export function ResultsPanel({
   onImagesPerRowStep,
   onDeleteImage,
   emptyMessage = "No images yet. Enter a prompt and click Generate.",
-}: Props) {
+  onToggleLocation,
+}: Props & { onToggleLocation: (id: string) => void }) {
   return (
     <div className="imagegen-right">
       <div className="imagegen-panel">
@@ -70,6 +71,18 @@ export function ResultsPanel({
                 {img.styleName && (
                   <div className="imagegen-card-style">Style: {img.styleName}</div>
                 )}
+                <div className="imagegen-card-location-row">
+                  <span className="imagegen-card-location">
+                    {img.location === "cloud" ? "Cloud" : "Local"}
+                  </span>
+                  <button
+                    type="button"
+                    className="imagegen-delete-button"
+                    onClick={() => onToggleLocation(img.id)}
+                  >
+                    {img.location === "cloud" ? "Use local" : "Save to cloud"}
+                  </button>
+                </div>
                 <div className="imagegen-card-prompt" title={img.prompt}>
                   {img.prompt}
                 </div>

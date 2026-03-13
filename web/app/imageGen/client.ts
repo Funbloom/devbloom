@@ -113,6 +113,26 @@ export async function putImageGenerated(
   });
 }
 
+export async function uploadImageToCloud(
+  projectKey: string,
+  filename: string
+): Promise<string> {
+  const response = await fetch(`${API_BASE}/tools/image_to_cloud`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_key: projectKey, filename }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(body.detail ?? `Upload failed: ${response.status}`);
+  }
+  const data = (await response.json()) as { url?: string };
+  if (!data.url) {
+    throw new Error("Upload succeeded but no URL was returned.");
+  }
+  return data.url;
+}
+
 export type GenerateCharacterImageParams = {
   role?: string;
   physical_description?: string;

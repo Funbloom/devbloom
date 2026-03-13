@@ -90,6 +90,7 @@ export default function AdminPage() {
     width: 720,
     height: 1280,
     style: "high resolution cartoon, movie style",
+    location: "local" as "local" | "cloud",
   });
   const [imageDefaultsStatus, setImageDefaultsStatus] = useState<string | null>(null);
   const [uiTheme, setUiTheme] = useState<"original" | "ocean" | "forest">("ocean");
@@ -102,8 +103,7 @@ export default function AdminPage() {
     currentProjectSources?: SourceItem[];
     otherSources?: SourceItem[];
   }>({ state: "idle" });
-  const [showTests, setShowTests] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [activeTab, setActiveTab] = useState<"rag" | "settings" | "tests">("rag");
 
   const loadSources = async () => {
     setIsLoading(true);
@@ -153,6 +153,7 @@ export default function AdminPage() {
         width?: number;
         height?: number;
         style?: string;
+        location?: "local" | "cloud" | string;
       };
       setImageDefaults((prev) => ({
         ...prev,
@@ -575,6 +576,7 @@ export default function AdminPage() {
           width: imageDefaults.width,
           height: imageDefaults.height,
           style: imageDefaults.style,
+          location: imageDefaults.location,
         }),
       });
       if (!response.ok) {
@@ -586,6 +588,7 @@ export default function AdminPage() {
         width?: number;
         height?: number;
         style?: string;
+        location?: "local" | "cloud" | string;
       };
       setImageDefaults((prev) => ({
         ...prev,
@@ -630,16 +633,41 @@ export default function AdminPage() {
       <div className="admin-shell">
         <div className="admin-header">
           <div className="admin-header-left">
-            <div className="admin-title">Admin: RAG Sources</div>
+            <div className="admin-title">Admin</div>
           </div>
-          <button className="admin-link" onClick={() => setShowTests((prev) => !prev)}>
-            Tests
-          </button>
-          <button className="admin-link" onClick={() => setShowSettings((prev) => !prev)}>
-            Settings
-          </button>
+          <div className="admin-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "rag"}
+              className={activeTab === "rag" ? "admin-tab active" : "admin-tab"}
+              onClick={() => setActiveTab("rag")}
+            >
+              RAG
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "settings"}
+              className={activeTab === "settings" ? "admin-tab active" : "admin-tab"}
+              onClick={() => setActiveTab("settings")}
+            >
+              Settings
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "tests"}
+              className={activeTab === "tests" ? "admin-tab active" : "admin-tab"}
+              onClick={() => setActiveTab("tests")}
+            >
+              Tests
+            </button>
+          </div>
         </div>
 
+        {activeTab === "rag" && (
+        <>
         <div className="admin-card">
           <div className="admin-card-title">Project Config</div>
           <div className="admin-project-active">
@@ -1073,8 +1101,10 @@ export default function AdminPage() {
             </div>
           )}
         </div>
+        </>)
+        }
 
-        {showTests && (
+        {activeTab === "tests" && (
           <div className="admin-card admin-test-card">
             <div className="admin-card-title">Tests</div>
             <div className="admin-test-row">
@@ -1169,7 +1199,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {showSettings && (
+        {activeTab === "settings" && (
           <div className="admin-card admin-test-card">
             <div className="admin-card-title">Settings</div>
             <div className="admin-test-block">
@@ -1248,6 +1278,21 @@ export default function AdminPage() {
                       }))
                     }
                   />
+                </label>
+                <label className="admin-field">
+                  <span>ImageGen Location</span>
+                  <select
+                    value={imageDefaults.location}
+                    onChange={(e) =>
+                      setImageDefaults((prev) => ({
+                        ...prev,
+                        location: e.target.value === "cloud" ? "cloud" : "local",
+                      }))
+                    }
+                  >
+                    <option value="local">Local</option>
+                    <option value="cloud">Cloud</option>
+                  </select>
                 </label>
                 <button onClick={() => void saveImageDefaults()}>Save Defaults</button>
               </div>

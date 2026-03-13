@@ -6,6 +6,7 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from local_settings import load_image_generated, save_image_generated
+from image_tool import safe_resolve_path, validate_image_filename
 
 
 tools_router = APIRouter()
@@ -18,6 +19,11 @@ class ImagePromptRequest(BaseModel):
 class ImageGeneratedPutBody(BaseModel):
     project_key: str = Field(min_length=1)
     images: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ImageToCloudBody(BaseModel):
+    project_key: str = Field(min_length=1)
+    filename: str = Field(min_length=1)
 
 
 @tools_router.post("/tools/generate_image_prompt")
@@ -74,3 +80,38 @@ def put_image_generated_route(body: ImageGeneratedPutBody) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
+@tools_router.post("/tools/image_to_cloud")
+def image_to_cloud_route(body: ImageToCloudBody) -> dict:
+    """Upload a locally stored generated image to cloud storage (Supabase) and return its public URL."""
+    try:
+        safe_name = validate_image_filename(body.filename)
+        # Resolve local path for this project's image
+        path = safe_resolve_path(safe_name, body.project_key)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="Image file not found.")
+
+        data = path.read_bytes()
+        import mimetypes
+
+        mime_type, _ = mimetypes.guess_type(path.name)
+        content_type = mime_type or "image/png"
+
+        # Lazy import so Supabase is only required when this endpoint is used.
+        try:
+            from image_storage import upload_image_to_supabase
+        except Exception as exc:  # pragma: no cover - import-time failure
+            raise HTTPException(status_code=500, detail=f"Cloud storage not configured: {exc}") from exc
+
+        storage_path = f"generated/{body.project_key}/{safe_name}"
+        public_url = upload_image_to_supabase(data, storage_path, content_type=content_type)
+        if not public_url:
+            raise HTTPException(status_code=500, detail="Upload to cloud storage failed.")
+
+        return {"url": public_url}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - unexpected
+        raise HTTPException(status_code=500, detail=f"Failed to upload image to cloud: {exc}") from exc

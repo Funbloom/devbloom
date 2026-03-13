@@ -216,6 +216,7 @@ main {
   height: 100%;
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   padding: 24px;
 }
 
@@ -512,6 +513,18 @@ main {
 }
 
 .imagegen-card-style {
+  color: #9aa3b2;
+}
+
+.imagegen-card-location-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.imagegen-card-location {
+  font-size: 11px;
   color: #9aa3b2;
 }
 
@@ -1058,6 +1071,26 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.admin-tab {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #2a2f3a;
+  background: #11141c;
+  color: #e6e6e6;
+  font-size: 13px;
+}
+
+.admin-tab.active {
+  background: var(--primary);
+  color: var(--primary-text);
+  border-color: var(--primary);
 }
 
 .admin-header-left {

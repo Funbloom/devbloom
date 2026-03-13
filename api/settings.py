@@ -19,6 +19,7 @@ class ImageDefaults(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     style: Optional[str] = None
+    location: Optional[Literal["local", "cloud"]] = None
 
 
 class ThemeSettings(BaseModel):
@@ -41,6 +42,9 @@ def update_image_defaults(body: ImageDefaults) -> dict:
         payload["height"] = int(payload["height"])
     if "style" in payload:
         payload["style"] = str(payload["style"]).strip()
+    if "location" in payload:
+        loc = str(payload["location"]).lower()
+        payload["location"] = "cloud" if loc == "cloud" else "local"
     return save_image_defaults(payload)
 
 
