@@ -389,7 +389,7 @@ export default function StoryboardPage() {
     }
   };
 
-  const addTileClick = async () => {
+  const addTileAfter = async (afterIndex: number) => {
     if (!selectedId) return;
     const prompt = "New tile";
     setIsSaving(true);
@@ -406,7 +406,31 @@ export default function StoryboardPage() {
         throw new Error((body as { detail?: string }).detail ?? `Create failed: ${response.status}`);
       }
       const created = (await response.json()) as Tile;
-      setTiles((prev) => [...prev, created].sort((a, b) => a.tile_number - b.tile_number));
+
+      const current = [...tiles, created].sort((a, b) => a.tile_number - b.tile_number);
+      const withoutCreated = current.filter((t) => t.id !== created.id);
+      const targetIndex = Math.min(afterIndex + 1, withoutCreated.length);
+      withoutCreated.splice(targetIndex, 0, created);
+      const reordered = withoutCreated.map((t, i) => ({ ...t, tile_number: i + 1 }));
+
+      setTiles(reordered);
+
+      const ids = reordered.map((t) => t.id);
+      const reorderResponse = await fetch(
+        `${API_BASE}/storyboard/${created.storyboard_id}/tiles/reorder`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tile_ids: ids }),
+        },
+      );
+      if (!reorderResponse.ok) {
+        const body = await reorderResponse.json().catch(() => ({}));
+        throw new Error(
+          (body as { detail?: string }).detail ?? `Reorder failed: ${reorderResponse.status}`,
+        );
+      }
+
       setNewTilePrompt("");
       setNewTileImage("");
     } catch (err) {
@@ -608,7 +632,7 @@ export default function StoryboardPage() {
             newTileImage={newTileImage}
             onNewTilePromptChange={setNewTilePrompt}
             onNewTileImageChange={setNewTileImage}
-            onAddTile={addTileClick}
+            onAddTileAfter={addTileAfter}
             editingTileId={editingTileId}
             editingTilePrompt={editingTilePrompt}
             onEditTileStart={startEditTile}

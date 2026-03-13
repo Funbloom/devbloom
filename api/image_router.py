@@ -18,7 +18,7 @@ from storyboard import list_styles
 image_router = APIRouter()
 
 CHARACTER_PROMPT_SUFFIX = (
-    " Full-body game character, standing in a neutral A-pose, on a plain green background without shadows."
+    " Full-body game character, standing in a neutral A-pose, on a plain bright green background without shadows."
     "Show the character twice, once in a front view and once in a side view. Clear silhouette, suitable for character sheet reference."
 )
 

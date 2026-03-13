@@ -275,6 +275,24 @@ main {
   gap: 12px;
 }
 
+.agent-actions {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #2a2f3a;
+  background: #11141c;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-actions-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9aa3b2;
+}
+
 .chat-header {
   font-size: 18px;
   font-weight: 600;
@@ -521,6 +539,24 @@ main {
   display: flex;
   gap: 12px;
   align-items: flex-start;
+}
+
+.message-user .bubble {
+  background: rgba(59, 130, 246, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.message-assistant .bubble {
+  background: rgba(16, 185, 129, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.message-system .bubble {
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
 }
 
 .role {
@@ -857,7 +893,7 @@ textarea {
 }
 
 button {
-  padding: 0 18px;
+  padding: 8px 18px;
   border-radius: 10px;
   border: none;
   background: var(--primary);

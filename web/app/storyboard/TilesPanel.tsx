@@ -40,7 +40,7 @@ type Props = {
   newTileImage: string;
   onNewTilePromptChange: (value: string) => void;
   onNewTileImageChange: (value: string) => void;
-  onAddTile: () => void;
+  onAddTileAfter: (index: number) => void;
 
   editingTileId: string | null;
   editingTilePrompt: string;
@@ -68,7 +68,7 @@ export function TilesPanel(props: Props) {
     newTileImage,
     onNewTilePromptChange,
     onNewTileImageChange,
-    onAddTile,
+    onAddTileAfter,
     onReorderTiles,
     onGenerateTile,
     onUpdateTileInputs,
@@ -296,33 +296,53 @@ export function TilesPanel(props: Props) {
                         )}
                       </div>
                     </div>
-                    <div className="edit-actions">
+                    <div
+                      className="edit-actions"
+                      style={{
+                        marginTop: 8,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
+                    >
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => void onReorderTiles(index, Math.max(0, index - 1))}
+                          disabled={isSaving || index === 0}
+                          title="Move tile left"
+                        >
+                          ←
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void onReorderTiles(index, Math.min(tiles.length - 1, index + 1))
+                          }
+                          disabled={isSaving || index === tiles.length - 1}
+                          title="Move tile right"
+                        >
+                          →
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-link"
+                          onClick={() => onDeleteTile(tile.id)}
+                          disabled={isSaving}
+                          title="Delete tile"
+                        >
+                          Delete
+                        </button>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => void onReorderTiles(index, Math.max(0, index - 1))}
-                        disabled={isSaving || index === 0}
-                        title="Move tile left"
-                      >
-                        ←
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void onReorderTiles(index, Math.min(tiles.length - 1, index + 1))
-                        }
-                        disabled={isSaving || index === tiles.length - 1}
-                        title="Move tile right"
-                      >
-                        →
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-link"
-                        onClick={() => onDeleteTile(tile.id)}
+                        onClick={() => onAddTileAfter(index)}
                         disabled={isSaving}
-                        title="Delete tile"
+                        title="Add new tile after this one"
+                        style={{ marginLeft: "auto" }}
                       >
-                        Delete
+                        Add New Tile
                       </button>
                     </div>
                   </div>
@@ -330,22 +350,6 @@ export function TilesPanel(props: Props) {
               );
             })}
           </div>
-
-          {!presentationMode && (
-            <div
-              style={{
-                marginTop: 16,
-                paddingTop: 8,
-                borderTop: "1px solid #222836",
-                display: "flex",
-                justifyContent: "flex-start",
-              }}
-            >
-              <button type="button" onClick={() => void onAddTile()} disabled={isSaving}>
-                Add New Tile
-              </button>
-            </div>
-          )}
         </div>
       )}
       <div className="status">

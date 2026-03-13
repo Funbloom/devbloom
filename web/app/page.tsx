@@ -243,19 +243,9 @@ export default function HomePage() {
 
     const targetAgent = agentId;
     const userMessage: ChatMessage = { role: "user", content: trimmed };
-    const wantsPdf = /\b(pdf)\b/i.test(trimmed) || (/save/i.test(trimmed) && /pdf/i.test(trimmed));
-    const wantsDocx =
-      /\b(docx|word|google doc|google docs)\b/i.test(trimmed) ||
-      (/save/i.test(trimmed) && /(docx|word)/i.test(trimmed));
-    const wantsXlsx =
-      /\b(xlsx|excel|spreadsheet)\b/i.test(trimmed) ||
-      (/save|export|create/i.test(trimmed) && /(xlsx|excel|spreadsheet)/i.test(trimmed));
     const assistantMessage: ChatMessage = {
       role: "assistant",
       content: "",
-      pdf: wantsPdf ? { status: "saving" } : undefined,
-      docx: wantsDocx ? { status: "saving" } : undefined,
-      xlsx: wantsXlsx ? { status: "saving" } : undefined,
     };
 
     updateHistory(targetAgent, (prev) => [...prev, userMessage, assistantMessage]);
@@ -575,6 +565,174 @@ export default function HomePage() {
     await sendMessage();
   };
 
+  const getLastAssistantIndex = (): number => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg.role === "assistant" && msg.content.trim() !== "") {
+        return i;
+      }
+    }
+    return -1;
+  };
+
+  const exportLastAsPdf = async () => {
+    const idx = getLastAssistantIndex();
+    if (idx === -1) {
+      setStatus("No assistant answer to export.");
+      return;
+    }
+    const msg = messages[idx];
+    const content = msg.content.trim();
+    if (!content) {
+      setStatus("Last assistant answer is empty.");
+      return;
+    }
+    const title = `${activeAgent?.name ?? "Agent"} – Notes`;
+    try {
+      setStatus("Saving PDF...");
+      const storedProjectKey = window.localStorage.getItem("activeProjectKey");
+      const body: Record<string, unknown> = {
+        title,
+        content,
+        project_key: storedProjectKey || undefined,
+      };
+      const response = await fetch(`${API_BASE}/tools/export_pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const errBody = (await response.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(errBody.detail ?? `PDF export failed: ${response.status}`);
+      }
+      const result = (await response.json()) as {
+        filename?: string;
+        download_url?: string;
+        path?: string;
+      };
+      const filename = result.filename ?? "document.pdf";
+      const rawUrl = result.download_url;
+      const downloadUrl = rawUrl
+        ? rawUrl.startsWith("http")
+          ? rawUrl
+          : `${API_BASE}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`
+        : `${API_BASE}/downloads/${filename}`;
+      updateHistory(agentId, (prev) => {
+        const next = [...prev];
+        const current = next[idx];
+        if (current && current.role === "assistant") {
+          next[idx] = {
+            ...current,
+            pdf: {
+              status: "saved",
+              filename,
+              downloadUrl,
+              path: result.path,
+            },
+          };
+        }
+        return next;
+      });
+      setStatus("PDF saved.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      updateHistory(agentId, (prev) => {
+        const next = [...prev];
+        const current = next[idx];
+        if (current && current.role === "assistant") {
+          next[idx] = {
+            ...current,
+            pdf: {
+              status: "error",
+              error: message,
+            },
+          };
+        }
+        return next;
+      });
+      setStatus(`Error: ${message}`);
+    }
+  };
+
+  const exportLastAsDocx = async () => {
+    const idx = getLastAssistantIndex();
+    if (idx === -1) {
+      setStatus("No assistant answer to export.");
+      return;
+    }
+    const msg = messages[idx];
+    const content = msg.content.trim();
+    if (!content) {
+      setStatus("Last assistant answer is empty.");
+      return;
+    }
+    const title = `${activeAgent?.name ?? "Agent"} – Notes`;
+    try {
+      setStatus("Saving DOCX...");
+      const storedProjectKey = window.localStorage.getItem("activeProjectKey");
+      const body: Record<string, unknown> = {
+        title,
+        content,
+        project_key: storedProjectKey || undefined,
+      };
+      const response = await fetch(`${API_BASE}/tools/export_docx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const errBody = (await response.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(errBody.detail ?? `DOCX export failed: ${response.status}`);
+      }
+      const result = (await response.json()) as {
+        filename?: string;
+        download_url?: string;
+        path?: string;
+      };
+      const filename = result.filename ?? "document.docx";
+      const rawUrl = result.download_url;
+      const downloadUrl = rawUrl
+        ? rawUrl.startsWith("http")
+          ? rawUrl
+          : `${API_BASE}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`
+        : `${API_BASE}/downloads/${filename}`;
+      updateHistory(agentId, (prev) => {
+        const next = [...prev];
+        const current = next[idx];
+        if (current && current.role === "assistant") {
+          next[idx] = {
+            ...current,
+            docx: {
+              status: "saved",
+              filename,
+              downloadUrl,
+              path: result.path,
+            },
+          };
+        }
+        return next;
+      });
+      setStatus("DOCX saved.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      updateHistory(agentId, (prev) => {
+        const next = [...prev];
+        const current = next[idx];
+        if (current && current.role === "assistant") {
+          next[idx] = {
+            ...current,
+            docx: {
+              status: "error",
+              error: message,
+            },
+          };
+        }
+        return next;
+      });
+      setStatus(`Error: ${message}`);
+    }
+  };
+
   const stopStreaming = () => {
     abortRef.current?.abort();
     setIsStreaming(false);
@@ -692,7 +850,16 @@ export default function HomePage() {
                 </div>
               )}
               {messages.map((msg, idx) => (
-                <div className="message" key={idx}>
+              <div
+                className={`message ${
+                  msg.role === "user"
+                    ? "message-user"
+                    : msg.role === "assistant"
+                    ? "message-assistant"
+                    : "message-system"
+                }`}
+                key={idx}
+              >
                   <div className="role">{getRoleLabel(msg.role)}</div>
                   <div className="bubble">
                     {editingIndex === idx && msg.role === "user" ? (
@@ -884,14 +1051,6 @@ export default function HomePage() {
                   status || ""
                 )}
               </div>
-              <div className="input-row">
-                <button type="button" onClick={() => void condenseConversation()} disabled={isStreaming || messages.length === 0}>
-                  Condense
-                </button>
-                <button type="button" onClick={() => void clearContext()} disabled={isStreaming}>
-                  Clear Context
-                </button>
-              </div>
             </div>
           </div>
           <div className="chat-right">
@@ -913,6 +1072,40 @@ export default function HomePage() {
                   </div>
                 </button>
               ))}
+            </div>
+            <div className="agent-actions">
+              <div className="agent-actions-title">Conversation</div>
+              <button
+                type="button"
+                onClick={() => void condenseConversation()}
+                disabled={isStreaming || messages.length === 0}
+              >
+                Summarize conversation
+              </button>
+              <button
+                type="button"
+                onClick={() => void clearContext()}
+                disabled={isStreaming}
+              >
+                Clear context / memory
+              </button>
+              <div className="agent-actions-title" style={{ marginTop: 12 }}>
+                Export last answer
+              </div>
+              <button
+                type="button"
+                onClick={() => void exportLastAsPdf()}
+                disabled={isStreaming || messages.length === 0}
+              >
+                Save as PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => void exportLastAsDocx()}
+                disabled={isStreaming || messages.length === 0}
+              >
+                Save as DOCX
+              </button>
             </div>
           </div>
         </div>

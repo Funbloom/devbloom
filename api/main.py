@@ -138,12 +138,6 @@ def _choose_tool_name(user_message: str) -> Optional[str]:
         return "crop_image"
     if "convert" in lower:
         return "convert_image"
-    if "docx" in lower or "word" in lower:
-        return "export_docx"
-    if "xlsx" in lower or "excel" in lower or "spreadsheet" in lower:
-        return "export_xlsx"
-    if "pdf" in lower:
-        return "export_pdf"
     if "image" in lower or "draw" in lower or "picture" in lower:
         return "generate_image"
     return None
