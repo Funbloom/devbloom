@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { Character, Location, Storyboard, Tile } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
+import { API_BASE } from "../lib/api";
 
 function imageSrc(url: string | null | undefined): string {
   if (!url) return "";

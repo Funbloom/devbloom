@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { fetchApi, API_BASE } from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
 
 type SourceItem = {
   id: string;
@@ -35,7 +37,6 @@ type ToolPathsResponse = {
   IMAGES_OUTPUT_DIR?: string;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
 const AGENTS = [
   { id: "creative_director", name: "Creative Director" },
   { id: "art_director", name: "Art Director" },
@@ -103,13 +104,17 @@ export default function AdminPage() {
     currentProjectSources?: SourceItem[];
     otherSources?: SourceItem[];
   }>({ state: "idle" });
-  const [activeTab, setActiveTab] = useState<"rag" | "settings" | "tests">("rag");
+  const [activeTab, setActiveTab] = useState<"rag" | "settings" | "tests" | "users">("rag");
+  const { authUser, session } = useAuth();
+  const [users, setUsers] = useState<{ id: string; email: string; created_at?: string; role?: string }[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
 
   const loadSources = async () => {
     setIsLoading(true);
     setStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/rag/sources`);
+      const response = await fetchApi("/rag/sources");
       if (!response.ok) {
         throw new Error(`Load failed: ${response.status}`);
       }
@@ -127,7 +132,7 @@ export default function AdminPage() {
     setIsProjectsLoading(true);
     setProjectStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/projects`);
+      const response = await fetchApi("/projects");
       if (!response.ok) {
         throw new Error(`Load failed: ${response.status}`);
       }
@@ -141,10 +146,28 @@ export default function AdminPage() {
     }
   };
 
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    setUsersError(null);
+    try {
+      const response = await fetchApi("/users");
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const data = (await response.json()) as { id: string; email: string; created_at?: string; role?: string }[];
+      setUsers(data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setUsersError(message);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
   const loadImageDefaults = async () => {
     setImageDefaultsStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/settings/image_defaults`);
+      const response = await fetchApi("/settings/image_defaults");
       if (!response.ok) {
         throw new Error(`Load failed: ${response.status}`);
       }
@@ -168,7 +191,7 @@ export default function AdminPage() {
   const loadUiTheme = async () => {
     setUiThemeStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/settings/ui_theme`);
+      const response = await fetchApi("/settings/ui_theme");
       if (!response.ok) {
         throw new Error(`Load failed: ${response.status}`);
       }
@@ -187,6 +210,7 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
+    if (!session) return;
     const stored = window.localStorage.getItem("activeProjectKey");
     if (stored) {
       setActiveProjectKey(stored);
@@ -199,7 +223,7 @@ export default function AdminPage() {
     void loadProjects();
     void loadImageDefaults();
     void loadUiTheme();
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     if (projects.length === 0) {
@@ -263,7 +287,7 @@ export default function AdminPage() {
         agentIds.forEach((agentId) => formData.append("agent_ids", agentId));
       }
 
-      const response = await fetch(`${API_BASE}/rag/upload_pdf`, {
+      const response = await fetchApi("/rag/upload_pdf", {
         method: "POST",
         body: formData,
       });
@@ -293,7 +317,7 @@ export default function AdminPage() {
     if (!item.source_path) return;
     setStatus("Updating source...");
     try {
-      const response = await fetch(`${API_BASE}/rag/sources/${item.id}/refresh`, {
+      const response = await fetchApi(`/rag/sources/${item.id}/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
@@ -328,7 +352,7 @@ export default function AdminPage() {
       return;
     }
     try {
-      const response = await fetch(`${API_BASE}/projects`, {
+      const response = await fetchApi("/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -365,7 +389,7 @@ export default function AdminPage() {
       return;
     }
     try {
-      const response = await fetch(`${API_BASE}/projects/${editProjectKey}`, {
+      const response = await fetchApi(`/projects/${editProjectKey}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -390,7 +414,7 @@ export default function AdminPage() {
     if (!confirmed) return;
     setProjectStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/projects/${project.project_key}`, {
+      const response = await fetchApi(`/projects/${project.project_key}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -426,7 +450,7 @@ export default function AdminPage() {
 
     setStatus("Deleting...");
     try {
-      const response = await fetch(`${API_BASE}/rag/sources/${item.id}`, {
+      const response = await fetchApi(`/rag/sources/${item.id}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -456,7 +480,7 @@ export default function AdminPage() {
         project_key: activeProjectKey || undefined,
       };
 
-      const response = await fetch(`${API_BASE}/tools/export_pdf`, {
+      const response = await fetchApi("/tools/export_pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -500,7 +524,7 @@ export default function AdminPage() {
     setPathsStatus({ state: "idle" });
     try {
       const query = activeProjectKey ? `?project_key=${activeProjectKey}` : "";
-      const response = await fetch(`${API_BASE}/tools/paths${query}`);
+      const response = await fetchApi(`/tools/paths${query}`);
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || `Request failed: ${response.status}`);
@@ -527,7 +551,7 @@ export default function AdminPage() {
       return;
     }
     try {
-      const response = await fetch(`${API_BASE}/rag/sources`);
+      const response = await fetchApi("/rag/sources");
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || `Load failed: ${response.status}`);
@@ -568,7 +592,7 @@ export default function AdminPage() {
   const saveImageDefaults = async () => {
     setImageDefaultsStatus("Saving...");
     try {
-      const response = await fetch(`${API_BASE}/settings/image_defaults`, {
+      const response = await fetchApi("/settings/image_defaults", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -604,7 +628,7 @@ export default function AdminPage() {
   const saveUiTheme = async () => {
     setUiThemeStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/settings/ui_theme`, {
+      const response = await fetchApi("/settings/ui_theme", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ theme: uiTheme }),
@@ -663,6 +687,20 @@ export default function AdminPage() {
             >
               Tests
             </button>
+            {authUser?.is_admin && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "users"}
+                className={activeTab === "users" ? "admin-tab active" : "admin-tab"}
+                onClick={() => {
+                  setActiveTab("users");
+                  loadUsers();
+                }}
+              >
+                Users
+              </button>
+            )}
           </div>
         </div>
 
@@ -1195,6 +1233,38 @@ export default function AdminPage() {
             )}
             {ragTestStatus.state === "error" && (
               <div className="admin-test-status error">Error: {ragTestStatus.message}</div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "users" && (
+          <div className="admin-card admin-test-card">
+            <div className="admin-card-title">Users</div>
+            {usersError && <div className="admin-test-status error">{usersError}</div>}
+            {usersLoading && <div className="admin-test-status">Loading users…</div>}
+            {!usersLoading && !usersError && (
+              <div className="admin-users-table-wrap" style={{ overflowX: "auto" }}>
+                <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", padding: "0.5rem" }}>Email</th>
+                      <th style={{ textAlign: "left", padding: "0.5rem" }}>ID</th>
+                      <th style={{ textAlign: "left", padding: "0.5rem" }}>Created</th>
+                      <th style={{ textAlign: "left", padding: "0.5rem" }}>Role</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((u) => (
+                      <tr key={u.id}>
+                        <td style={{ padding: "0.5rem" }}>{u.email}</td>
+                        <td style={{ padding: "0.5rem", fontSize: "0.85em" }}>{u.id}</td>
+                        <td style={{ padding: "0.5rem" }}>{u.created_at ? new Date(u.created_at).toLocaleString() : "—"}</td>
+                        <td style={{ padding: "0.5rem" }}>{u.role ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}

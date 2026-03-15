@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Character, Location, Storyboard, Style } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
+import { fetchApi, API_BASE } from "../lib/api";
 
 type GeneratedImageItem = { id: string; url: string; prompt?: string; tab?: string };
 
@@ -111,8 +111,8 @@ export function StoryboardSidebar(props: Props) {
     }
     setLoadingGeneratedImages(true);
     try {
-      const response = await fetch(
-        `${API_BASE}/tools/image_generated?project_key=${encodeURIComponent(projectKey)}`
+      const response = await fetchApi(
+        `/tools/image_generated?project_key=${encodeURIComponent(projectKey)}`
       );
       if (!response.ok) {
         setGeneratedCharacterImages([]);
@@ -149,8 +149,8 @@ export function StoryboardSidebar(props: Props) {
     }
     setLoadingGeneratedLocationImages(true);
     try {
-      const response = await fetch(
-        `${API_BASE}/tools/image_generated?project_key=${encodeURIComponent(projectKey)}`
+      const response = await fetchApi(
+        `/tools/image_generated?project_key=${encodeURIComponent(projectKey)}`
       );
       if (!response.ok) {
         setGeneratedLocationImages([]);

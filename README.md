@@ -62,5 +62,18 @@ Optional: set `STORYBOARD_IMAGES_BUCKET` in `api/.env` if you use a different bu
 
 If the bucket is missing or upload fails, the API still saves the image locally and stores the local URL; images will then only work on that machine until you regenerate with Storage configured.
 
+## Google Sign-In (OAuth)
+
+If you see **Error 400: redirect_uri_mismatch** when using “Sign in with Google”, add Supabase’s callback URL in Google Cloud Console:
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services** → **Credentials**.
+2. Edit your **OAuth 2.0 Client ID** (Web application) used by Supabase.
+3. Under **Authorized redirect URIs**, add:
+   - `https://<your-project-ref>.supabase.co/auth/v1/callback`  
+   Example: `https://slxhjrdnaundthsjfrkm.supabase.co/auth/v1/callback`
+4. Save.
+
+In **Supabase Dashboard** → **Authentication** → **URL Configuration**, set **Site URL** (e.g. `http://localhost:3000`) and add **Redirect URLs** (e.g. `http://localhost:3000/**`) so Supabase can send users back to your app after login.
+
 **Character and location images** (uploaded in the storyboard sidebar) are also uploaded to the same bucket under `characters/<storyboard_id>/...` and `locations/<storyboard_id>/...`, so they work from any machine too.
 

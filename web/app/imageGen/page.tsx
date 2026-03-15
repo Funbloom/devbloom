@@ -15,6 +15,8 @@ import {
   uploadImageToCloud,
 } from "./client";
 import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
+import { useAuth } from "../contexts/AuthContext";
+import { fetchApi } from "../lib/api";
 import { CharactersTabPanel } from "./CharactersTabPanel";
 import { ImageTabPanel } from "./ImageTabPanel";
 import { ResultsPanel } from "./ResultsPanel";
@@ -129,6 +131,7 @@ function StylesAddForm({
 }
 
 export default function ImageGenPage() {
+  const { session } = useAuth();
   const [projectKey, setProjectKey] = useState("");
   const [styles, setStyles] = useState<Awaited<ReturnType<typeof getStyles>>>([]);
   const [selectedStyleId, setSelectedStyleId] = useState<string>("__none");
@@ -159,9 +162,10 @@ export default function ImageGenPage() {
   }, []);
 
   useEffect(() => {
+    if (!session) return;
     const loadDefaults = async () => {
       try {
-        const response = await fetch(`${API_BASE}/settings/image_defaults`);
+        const response = await fetchApi("/settings/image_defaults");
         if (!response.ok) return;
         const data = (await response.json()) as { location?: string };
         const loc = data.location === "cloud" ? "cloud" : "local";
@@ -171,7 +175,7 @@ export default function ImageGenPage() {
       }
     };
     void loadDefaults();
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     let cancelled = false;

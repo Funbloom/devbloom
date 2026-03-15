@@ -2,6 +2,7 @@ import "./globals.css";
 
 import { AppHeader } from "./components/AppHeader";
 import { ThemeInitializer } from "./components/ThemeInitializer";
+import { AuthProvider, AuthGuard } from "./contexts/AuthContext";
 
 export const metadata = {
   title: "DevBloom Studio",
@@ -16,11 +17,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <div className="app-layout">
-          <ThemeInitializer />
-          <AppHeader />
-          {children}
-        </div>
+        <AuthProvider>
+          <div className="app-layout">
+            <ThemeInitializer />
+            <AppHeader />
+            <AuthGuard>{children}</AuthGuard>
+          </div>
+        </AuthProvider>
       </body>
     </html>
   );

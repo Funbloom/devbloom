@@ -11,3 +11,5 @@ requests
 python-docx
 openpyxl
 mcp
+PyJWT
+jwcrypto

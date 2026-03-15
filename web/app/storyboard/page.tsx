@@ -5,8 +5,7 @@ import { useEffect, useState } from "react";
 import type { Character, Location, Storyboard, StoryboardDetailResponse, Style, Tile } from "./types";
 import { StoryboardSidebar } from "./StoryboardSidebar";
 import { TilesPanel } from "./TilesPanel";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
+import { fetchApi, API_BASE } from "../lib/api";
 const STORAGE_KEY_PROJECT = "activeProjectKey";
 const STORAGE_KEY_STORYBOARD = "storyboardSelectedId";
 
@@ -59,11 +58,11 @@ export default function StoryboardPage() {
     setStatus(null);
     try {
       const storedProjectKey = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY_PROJECT) : null;
-      const url =
+      const path =
         storedProjectKey && storedProjectKey.trim() !== ""
-          ? `${API_BASE}/storyboard?project_key=${encodeURIComponent(storedProjectKey)}`
-          : `${API_BASE}/storyboard`;
-      const response = await fetch(url);
+          ? `/storyboard?project_key=${encodeURIComponent(storedProjectKey)}`
+          : "/storyboard";
+      const response = await fetchApi(path);
       if (!response.ok) {
         throw new Error(`Load failed: ${response.status}`);
       }
@@ -89,7 +88,7 @@ export default function StoryboardPage() {
     setIsLoading(true);
     setStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/storyboard/${id}`);
+      const response = await fetchApi(`/storyboard/${id}`);
       if (!response.ok) {
         throw new Error(`Load failed: ${response.status}`);
       }
@@ -109,7 +108,7 @@ export default function StoryboardPage() {
 
   const loadStyles = async () => {
     try {
-      const response = await fetch(`${API_BASE}/storyboard/styles`);
+      const response = await fetchApi("/storyboard/styles");
       if (response.ok) {
         const data = (await response.json()) as Style[];
         setStyles(Array.isArray(data) ? data : []);
@@ -154,7 +153,7 @@ export default function StoryboardPage() {
         style: newStyle.trim() || undefined,
         project_key: storedProjectKey || undefined,
       };
-      const response = await fetch(`${API_BASE}/storyboard`, {
+      const response = await fetchApi("/storyboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -181,7 +180,7 @@ export default function StoryboardPage() {
     setIsSaving(true);
     setStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/storyboard/${selectedId}`, { method: "DELETE" });
+      const response = await fetchApi(`/storyboard/${selectedId}`, { method: "DELETE" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error((body as { detail?: string }).detail ?? `Delete failed: ${response.status}`);
@@ -204,7 +203,7 @@ export default function StoryboardPage() {
     setStatus(null);
     try {
       const payload = { style: newStyle };
-      const response = await fetch(`${API_BASE}/storyboard/${selectedId}`, {
+      const response = await fetchApi(`/storyboard/${selectedId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -230,7 +229,7 @@ export default function StoryboardPage() {
     setStatus(null);
     try {
       const payload = { style: style ? style.prompt : "" };
-      const response = await fetch(`${API_BASE}/storyboard/${selectedId}`, {
+      const response = await fetchApi(`/storyboard/${selectedId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -262,7 +261,7 @@ export default function StoryboardPage() {
       if (newCharacterFile) {
         const formData = new FormData();
         formData.append("file", newCharacterFile);
-        const uploadResponse = await fetch(`${API_BASE}/storyboard/${selectedId}/characters/image`, {
+        const uploadResponse = await fetchApi(`/storyboard/${selectedId}/characters/image`, {
           method: "POST",
           body: formData,
         });
@@ -279,7 +278,7 @@ export default function StoryboardPage() {
       }
 
       const payload = { name, image: imageUrl };
-      const response = await fetch(`${API_BASE}/storyboard/${selectedId}/characters`, {
+      const response = await fetchApi(`/storyboard/${selectedId}/characters`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -312,7 +311,7 @@ export default function StoryboardPage() {
       if (newLocationFile) {
         const formData = new FormData();
         formData.append("file", newLocationFile);
-        const uploadResponse = await fetch(`${API_BASE}/storyboard/${selectedId}/locations/image`, {
+        const uploadResponse = await fetchApi(`/storyboard/${selectedId}/locations/image`, {
           method: "POST",
           body: formData,
         });
@@ -329,7 +328,7 @@ export default function StoryboardPage() {
       }
 
       const payload = { name, image: imageUrl };
-      const response = await fetch(`${API_BASE}/storyboard/${selectedId}/locations`, {
+      const response = await fetchApi(`/storyboard/${selectedId}/locations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -356,7 +355,7 @@ export default function StoryboardPage() {
     setIsSaving(true);
     setStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/storyboard/locations/${id}`, { method: "DELETE" });
+      const response = await fetchApi(`/storyboard/locations/${id}`, { method: "DELETE" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error((body as { detail?: string }).detail ?? `Delete failed: ${response.status}`);
@@ -375,7 +374,7 @@ export default function StoryboardPage() {
     setIsSaving(true);
     setStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/storyboard/characters/${id}`, { method: "DELETE" });
+      const response = await fetchApi(`/storyboard/characters/${id}`, { method: "DELETE" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error((body as { detail?: string }).detail ?? `Delete failed: ${response.status}`);
@@ -396,7 +395,7 @@ export default function StoryboardPage() {
     setStatus(null);
     try {
       const payload = { prompt };
-      const response = await fetch(`${API_BASE}/storyboard/${selectedId}/tiles`, {
+      const response = await fetchApi(`/storyboard/${selectedId}/tiles`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -416,8 +415,8 @@ export default function StoryboardPage() {
       setTiles(reordered);
 
       const ids = reordered.map((t) => t.id);
-      const reorderResponse = await fetch(
-        `${API_BASE}/storyboard/${created.storyboard_id}/tiles/reorder`,
+      const reorderResponse = await fetchApi(
+        `/storyboard/${created.storyboard_id}/tiles/reorder`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -459,7 +458,7 @@ export default function StoryboardPage() {
     setStatus(null);
     try {
       const payload = { prompt: newPrompt };
-      const response = await fetch(`${API_BASE}/storyboard/tiles/${tile.id}`, {
+      const response = await fetchApi(`/storyboard/tiles/${tile.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -485,7 +484,7 @@ export default function StoryboardPage() {
     setIsSaving(true);
     setStatus("Generating tile image...");
     try {
-      const response = await fetch(`${API_BASE}/storyboard/tiles/${tile.id}/generate`, {
+      const response = await fetchApi(`/storyboard/tiles/${tile.id}/generate`, {
         method: "POST",
       });
       if (!response.ok) {
@@ -517,7 +516,7 @@ export default function StoryboardPage() {
       const [moved] = current.splice(fromIndex, 1);
       current.splice(toIndex, 0, moved);
       const ids = current.map((t) => t.id);
-      const response = await fetch(`${API_BASE}/storyboard/${moved.storyboard_id}/tiles/reorder`, {
+      const response = await fetchApi(`/storyboard/${moved.storyboard_id}/tiles/reorder`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tile_ids: ids }),
@@ -543,7 +542,7 @@ export default function StoryboardPage() {
     setIsSaving(true);
     setStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/storyboard/tiles/${tileId}`, {
+      const response = await fetchApi(`/storyboard/tiles/${tileId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -567,7 +566,7 @@ export default function StoryboardPage() {
     setIsSaving(true);
     setStatus(null);
     try {
-      const response = await fetch(`${API_BASE}/storyboard/tiles/${tileId}`, { method: "DELETE" });
+      const response = await fetchApi(`/storyboard/tiles/${tileId}`, { method: "DELETE" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error((body as { detail?: string }).detail ?? `Delete failed: ${response.status}`);

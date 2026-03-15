@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { fetchApi, API_BASE } from "./lib/api";
+import { useAuth } from "./contexts/AuthContext";
 
 type Role = "user" | "assistant" | "system";
 
@@ -101,7 +103,6 @@ const AGENTS: AgentInfo[] = [
     image: buildAvatar("P", "#8b5cf6"),
   },
 ];
-const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
 
 function parseSseLines(buffer: string): { events: SseEvent[]; rest: string } {
   const lines = buffer.split("\n");
@@ -141,6 +142,7 @@ function parseSseLines(buffer: string): { events: SseEvent[]; rest: string } {
 }
 
 export default function HomePage() {
+  const { session } = useAuth();
   const [agentId, setAgentId] = useState<string>(AGENTS[0]?.id ?? "creative_director");
   const [historyByAgent, setHistoryByAgent] = useState<Record<string, ChatMessage[]>>(
     () => Object.fromEntries(AGENTS.map((agent) => [agent.id, []])),
@@ -177,7 +179,7 @@ export default function HomePage() {
 
   const loadHistory = async (targetAgent: string) => {
     try {
-      const response = await fetch(`${API_BASE}/chat/history/${targetAgent}`);
+      const response = await fetchApi(`/chat/history/${targetAgent}`);
       if (!response.ok) {
         throw new Error(`History load failed: ${response.status}`);
       }
@@ -203,7 +205,7 @@ export default function HomePage() {
       })),
     };
     try {
-      const response = await fetch(`${API_BASE}/chat/history/${targetAgent}`, {
+      const response = await fetchApi(`/chat/history/${targetAgent}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -228,8 +230,9 @@ export default function HomePage() {
   };
 
   useEffect(() => {
+    if (!session) return;
     void loadHistory(agentId);
-  }, [agentId]);
+  }, [session, agentId]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -267,7 +270,7 @@ export default function HomePage() {
         },
         debug_prompts: debugPrompts || undefined,
       };
-      const response = await fetch(`${API_BASE}/chat/stream`, {
+      const response = await fetchApi(`/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -596,7 +599,7 @@ export default function HomePage() {
         content,
         project_key: storedProjectKey || undefined,
       };
-      const response = await fetch(`${API_BASE}/tools/export_pdf`, {
+      const response = await fetchApi(`/tools/export_pdf`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -675,7 +678,7 @@ export default function HomePage() {
         content,
         project_key: storedProjectKey || undefined,
       };
-      const response = await fetch(`${API_BASE}/tools/export_docx`, {
+      const response = await fetchApi(`/tools/export_docx`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -774,7 +777,7 @@ export default function HomePage() {
   const clearContext = async () => {
     setStatus("Clearing context...");
     try {
-      const response = await fetch(`${API_BASE}/chat/history/${agentId}`, {
+      const response = await fetchApi(`/chat/history/${agentId}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -792,7 +795,7 @@ export default function HomePage() {
     if (messages.length === 0 || isStreaming) return;
     setStatus("Condensing...");
     try {
-      const response = await fetch(`${API_BASE}/chat/condense/${agentId}`, {
+      const response = await fetchApi(`/chat/condense/${agentId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

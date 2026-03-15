@@ -10,7 +10,12 @@ from typing import Any, AsyncGenerator, List, Literal, Optional
 from uuid import UUID
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+
+# Load env before any module that reads os.getenv() at import time (e.g. auth.py)
+_env_file = ".env" if sys.platform == "win32" else "env"
+load_dotenv(Path(__file__).resolve().parent / _env_file)
+
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from openai import OpenAI
@@ -41,15 +46,12 @@ from storyboard_routes import storyboard_router
 from settings import settings_router
 from tools import tools_router
 from skills_loader import build_available_skills_xml, get_skill_content
+from auth import get_current_user, require_admin
 
 try:
     from mcp_client import call_mcp_tool
 except ImportError:
     call_mcp_tool = None
-
-_env_file = ".env" if sys.platform == "win32" else "env"
-load_dotenv(Path(__file__).parent / _env_file)
-
 
 @asynccontextmanager
 async def lifespan(_app: Any):
@@ -229,8 +231,67 @@ def health() -> dict:
     return {"ok": True}
 
 
+@app.get("/auth/me")
+def auth_me(user: dict = Depends(get_current_user)) -> dict:
+    """Return current user and role for the frontend (e.g. to show admin tab)."""
+    return user
+
+
+def _user_row(u: Any) -> dict:
+    """Normalize a user record from Supabase (dict or object) to a small dict."""
+    if hasattr(u, "model_dump"):
+        u = u.model_dump()
+    elif not isinstance(u, dict):
+        u = {"id": getattr(u, "id", None), "email": getattr(u, "email", None), "created_at": getattr(u, "created_at", None), "user_metadata": getattr(u, "user_metadata", None) or {}}
+    meta = u.get("user_metadata") if isinstance(u.get("user_metadata"), dict) else {}
+    return {
+        "id": u.get("id"),
+        "email": u.get("email"),
+        "created_at": u.get("created_at"),
+        "role": meta.get("role"),
+    }
+
+
+def _extract_users_from_response(response: Any) -> list:
+    """Handle various Supabase auth.admin.list_users() response shapes."""
+    users = getattr(response, "users", None) or getattr(response, "data", None)
+    if users is not None and isinstance(users, list):
+        return users
+    if hasattr(response, "model_dump"):
+        d = response.model_dump()
+        users = d.get("users") or d.get("data")
+        if isinstance(users, list):
+            return users
+    return []
+
+
+@app.get("/users")
+def list_users(admin: dict = Depends(require_admin)) -> list:
+    """List all users (admin only). Uses Supabase Auth Admin API."""
+    try:
+        supabase = get_supabase_client()
+        # Try with pagination; some clients use page=, per_page=
+        try:
+            response = supabase.auth.admin.list_users(page=1, per_page=1000)
+        except TypeError:
+            response = supabase.auth.admin.list_users(per_page=1000)
+        users = _extract_users_from_response(response)
+        result = [_user_row(u) for u in users]
+        # If Auth API returned no users but we have an admin, show current user so list isn't empty
+        if not result and admin.get("email"):
+            result = [{
+                "id": admin.get("id"),
+                "email": admin.get("email"),
+                "created_at": None,
+                "role": "admin" if admin.get("is_admin") else None,
+            }]
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to list users: {exc}") from exc
+
+
 @app.get("/chat/history/{agent_id}")
-def get_chat_history(agent_id: str) -> dict:
+def get_chat_history(agent_id: str, user: dict = Depends(get_current_user)) -> dict:
     path = get_history_path(agent_id)
     if not path.exists():
         return {"messages": []}
@@ -245,7 +306,7 @@ def get_chat_history(agent_id: str) -> dict:
 
 
 @app.post("/chat/history/{agent_id}")
-def save_chat_history(agent_id: str, body: HistoryPayload) -> dict:
+def save_chat_history(agent_id: str, body: HistoryPayload, user: dict = Depends(get_current_user)) -> dict:
     path = get_history_path(agent_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     messages = body.messages[-MAX_HISTORY_ITEMS:]
@@ -258,7 +319,7 @@ def save_chat_history(agent_id: str, body: HistoryPayload) -> dict:
 
 
 @app.delete("/chat/history/{agent_id}")
-def clear_chat_history(agent_id: str) -> dict:
+def clear_chat_history(agent_id: str, user: dict = Depends(get_current_user)) -> dict:
     path = get_history_path(agent_id)
     try:
         if path.exists():
@@ -269,7 +330,7 @@ def clear_chat_history(agent_id: str) -> dict:
 
 
 @app.post("/chat/condense/{agent_id}")
-def condense_chat_history(agent_id: str, body: CondensePayload) -> dict:
+def condense_chat_history(agent_id: str, body: CondensePayload, user: dict = Depends(get_current_user)) -> dict:
     """Summarize the conversation into one paragraph of valuable information. Returns { summary }."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -298,17 +359,17 @@ def condense_chat_history(agent_id: str, body: CondensePayload) -> dict:
         raise HTTPException(status_code=500, detail=f"Condense failed: {exc}") from exc
 
 
-app.include_router(rag_router)
-app.include_router(projects_router)
-app.include_router(storyboard_router)
-app.include_router(pdf_router)
-app.include_router(image_router)
-app.include_router(settings_router)
-app.include_router(tools_router)
+app.include_router(rag_router, dependencies=[Depends(get_current_user)])
+app.include_router(projects_router, dependencies=[Depends(get_current_user)])
+app.include_router(storyboard_router, dependencies=[Depends(get_current_user)])
+app.include_router(pdf_router, dependencies=[Depends(get_current_user)])
+app.include_router(image_router, dependencies=[Depends(get_current_user)])
+app.include_router(settings_router, dependencies=[Depends(get_current_user)])
+app.include_router(tools_router, dependencies=[Depends(get_current_user)])
 
 
 @app.post("/chat/stream")
-async def chat_stream(body: ChatRequest) -> StreamingResponse:
+async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user)) -> StreamingResponse:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         async def missing_key() -> AsyncGenerator[bytes, None]:
