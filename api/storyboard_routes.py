@@ -1,11 +1,14 @@
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+
+from auth import get_current_user
 
 from image_tool import build_image_filename, build_image_url, save_bytes_to_file
 from image_storage import upload_image_to_supabase
 from rag import get_supabase_client
+from usage import check_can_generate_images, increment_usage
 from storyboard import (
     add_character,
     add_location,
@@ -17,6 +20,7 @@ from storyboard import (
     delete_storyboard,
     delete_style,
     delete_tile,
+    ensure_storyboard_access,
     get_storyboard_full,
     list_storyboards,
     list_styles,
@@ -36,6 +40,7 @@ class StoryboardCreate(BaseModel):
     name: str = Field(min_length=1)
     style: Optional[str] = None
     project_key: Optional[str] = None
+    is_public: bool = True
 
 
 class StoryboardUpdate(BaseModel):
@@ -90,65 +95,124 @@ class StyleCreate(BaseModel):
 
 @storyboard_router.get("/storyboard/styles")
 def api_list_styles() -> list[dict[str, Any]]:
+    """Public: list all styles (no auth required)."""
     return list_styles()
 
 
 @storyboard_router.post("/storyboard/styles")
-def api_add_style(body: StyleCreate) -> dict[str, Any]:
+def api_add_style(
+    body: StyleCreate,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     return add_style(name=body.name, prompt=body.prompt)
 
 
 @storyboard_router.delete("/storyboard/styles/{style_id}")
-def api_delete_style(style_id: str) -> dict[str, Any]:
+def api_delete_style(
+    style_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     return delete_style(style_id)
 
 
 @storyboard_router.get("/storyboard")
-def api_list_storyboards(project_key: Optional[str] = None) -> list[dict[str, Any]]:
-    return list_storyboards(project_key=project_key)
+def api_list_storyboards(
+    project_key: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    return list_storyboards(project_key=project_key, user_id=user.get("id"))
 
 
 @storyboard_router.post("/storyboard")
-def api_create_storyboard(body: StoryboardCreate) -> dict[str, Any]:
-    return create_storyboard(name=body.name, style=body.style, project_key=body.project_key)
+def api_create_storyboard(
+    body: StoryboardCreate,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    return create_storyboard(
+        name=body.name,
+        style=body.style,
+        project_key=body.project_key,
+        is_public=body.is_public,
+        user_id=user.get("id"),
+    )
 
 
 @storyboard_router.get("/storyboard/{storyboard_id}")
-def api_get_storyboard(storyboard_id: str) -> dict[str, Any]:
-    return get_storyboard_full(storyboard_id)
+def api_get_storyboard(
+    storyboard_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    return get_storyboard_full(storyboard_id, current_user_id=user.get("id"))
 
 
 @storyboard_router.patch("/storyboard/{storyboard_id}")
-def api_update_storyboard(storyboard_id: str, body: StoryboardUpdate) -> dict[str, Any]:
+def api_update_storyboard(
+    storyboard_id: str,
+    body: StoryboardUpdate,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     if body.name is None and body.style is None:
         raise HTTPException(status_code=400, detail="No fields to update.")
-    return update_storyboard(storyboard_id, name=body.name, style=body.style)
+    return update_storyboard(
+        storyboard_id,
+        name=body.name,
+        style=body.style,
+        current_user_id=user.get("id"),
+    )
 
 
 @storyboard_router.delete("/storyboard/{storyboard_id}")
-def api_delete_storyboard(storyboard_id: str) -> dict[str, Any]:
-    return delete_storyboard(storyboard_id)
+def api_delete_storyboard(
+    storyboard_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    return delete_storyboard(storyboard_id, current_user_id=user.get("id"))
 
 
 @storyboard_router.post("/storyboard/{storyboard_id}/characters")
-def api_add_character(storyboard_id: str, body: CharacterCreate) -> dict[str, Any]:
-    return add_character(storyboard_id, name=body.name, image=body.image)
+def api_add_character(
+    storyboard_id: str,
+    body: CharacterCreate,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    return add_character(
+        storyboard_id,
+        name=body.name,
+        image=body.image,
+        current_user_id=user.get("id"),
+    )
 
 
 @storyboard_router.patch("/storyboard/characters/{character_id}")
-def api_update_character(character_id: str, body: CharacterUpdate) -> dict[str, Any]:
+def api_update_character(
+    character_id: str,
+    body: CharacterUpdate,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     if body.name is None and body.image is None:
         raise HTTPException(status_code=400, detail="No fields to update.")
-    return update_character(character_id, name=body.name, image=body.image)
+    return update_character(
+        character_id,
+        name=body.name,
+        image=body.image,
+        current_user_id=user.get("id"),
+    )
 
 
 @storyboard_router.delete("/storyboard/characters/{character_id}")
-def api_delete_character(character_id: str) -> dict[str, Any]:
-    return delete_character(character_id)
+def api_delete_character(
+    character_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    return delete_character(character_id, current_user_id=user.get("id"))
 
 
 @storyboard_router.post("/storyboard/{storyboard_id}/tiles")
-def api_add_tile(storyboard_id: str, body: TileCreate) -> dict[str, Any]:
+def api_add_tile(
+    storyboard_id: str,
+    body: TileCreate,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     return add_tile(
         storyboard_id,
         prompt=body.prompt,
@@ -156,11 +220,16 @@ def api_add_tile(storyboard_id: str, body: TileCreate) -> dict[str, Any]:
         tile_number=body.tile_number,
         location_id=body.location_id,
         character_ids=body.character_ids,
+        current_user_id=user.get("id"),
     )
 
 
 @storyboard_router.patch("/storyboard/tiles/{tile_id}")
-def api_update_tile(tile_id: str, body: TileUpdate) -> dict[str, Any]:
+def api_update_tile(
+    tile_id: str,
+    body: TileUpdate,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     if (
         body.prompt is None
         and body.image is None
@@ -176,24 +245,41 @@ def api_update_tile(tile_id: str, body: TileUpdate) -> dict[str, Any]:
         tile_number=body.tile_number,
         location_id=body.location_id,
         character_ids=body.character_ids,
+        current_user_id=user.get("id"),
     )
 
 
 @storyboard_router.delete("/storyboard/tiles/{tile_id}")
-def api_delete_tile(tile_id: str) -> dict[str, Any]:
-    return delete_tile(tile_id)
+def api_delete_tile(
+    tile_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    return delete_tile(tile_id, current_user_id=user.get("id"))
 
 
 @storyboard_router.patch("/storyboard/{storyboard_id}/tiles/reorder")
-def api_reorder_tiles(storyboard_id: str, body: TilesReorder) -> dict[str, Any]:
-    return reorder_tiles(storyboard_id, tile_ids_in_order=body.tile_ids)
+def api_reorder_tiles(
+    storyboard_id: str,
+    body: TilesReorder,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    return reorder_tiles(
+        storyboard_id,
+        tile_ids_in_order=body.tile_ids,
+        current_user_id=user.get("id"),
+    )
 
 
 @storyboard_router.post("/storyboard/{storyboard_id}/characters/image")
-async def api_upload_character_image(storyboard_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+async def api_upload_character_image(
+    storyboard_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     """Upload an image for a storyboard character and return a URL that can be stored in the DB."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="filename is required.")
+    ensure_storyboard_access(storyboard_id, user.get("id"))
     try:
         supabase = get_supabase_client()
         sb = (
@@ -231,27 +317,53 @@ async def api_upload_character_image(storyboard_id: str, file: UploadFile = File
 
 
 @storyboard_router.post("/storyboard/{storyboard_id}/locations")
-def api_add_location(storyboard_id: str, body: LocationCreate) -> dict[str, Any]:
-    return add_location(storyboard_id, name=body.name, image=body.image)
+def api_add_location(
+    storyboard_id: str,
+    body: LocationCreate,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    return add_location(
+        storyboard_id,
+        name=body.name,
+        image=body.image,
+        current_user_id=user.get("id"),
+    )
 
 
 @storyboard_router.patch("/storyboard/locations/{location_id}")
-def api_update_location(location_id: str, body: LocationUpdate) -> dict[str, Any]:
+def api_update_location(
+    location_id: str,
+    body: LocationUpdate,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     if body.name is None and body.image is None:
         raise HTTPException(status_code=400, detail="No fields to update.")
-    return update_location(location_id, name=body.name, image=body.image)
+    return update_location(
+        location_id,
+        name=body.name,
+        image=body.image,
+        current_user_id=user.get("id"),
+    )
 
 
 @storyboard_router.delete("/storyboard/locations/{location_id}")
-def api_delete_location(location_id: str) -> dict[str, Any]:
-    return delete_location(location_id)
+def api_delete_location(
+    location_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    return delete_location(location_id, current_user_id=user.get("id"))
 
 
 @storyboard_router.post("/storyboard/{storyboard_id}/locations/image")
-async def api_upload_location_image(storyboard_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+async def api_upload_location_image(
+    storyboard_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     """Upload an image for a storyboard location and return a URL that can be stored in the DB."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="filename is required.")
+    ensure_storyboard_access(storyboard_id, user.get("id"))
     try:
         supabase = get_supabase_client()
         sb = (
@@ -289,7 +401,13 @@ async def api_upload_location_image(storyboard_id: str, file: UploadFile = File(
 
 
 @storyboard_router.post("/storyboard/tiles/{tile_id}/generate")
-def api_generate_tile(tile_id: str) -> dict[str, Any]:
-  """Generate an image for a tile and update the tile's image field."""
-  return generate_tile_image(tile_id)
+def api_generate_tile(
+    tile_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Generate an image for a tile and update the tile's image field."""
+    check_can_generate_images(user.get("id") or "", user.get("is_admin") or False, count=1)
+    result = generate_tile_image(tile_id, current_user_id=user.get("id"))
+    increment_usage(user.get("id") or "", 1)
+    return result
 

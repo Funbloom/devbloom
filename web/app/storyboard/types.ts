@@ -10,6 +10,7 @@ export type Storyboard = {
   name: string;
   style?: string | null;
   project_key?: string | null;
+  user_id?: string | null;
 };
 
 export type Character = {

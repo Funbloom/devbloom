@@ -12,25 +12,37 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def list_storyboards(project_key: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Return all storyboards, optionally filtered by project_key."""
+def list_storyboards(
+    project_key: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Return storyboards: public (user_id is null) or owned by user_id. Optionally filter by project_key."""
     try:
         supabase = get_supabase_client()
         query = (
             supabase.table("storyboards")
-            .select("id,name,style,project_key,created_at,updated_at")
+            .select("id,name,style,project_key,user_id,created_at,updated_at")
             .order("created_at", desc=False)
         )
         if project_key:
             query = query.eq("project_key", project_key)
         result = query.execute()
-        return result.data or []
+        rows = result.data or []
+        if user_id:
+            rows = [r for r in rows if r.get("user_id") is None or r.get("user_id") == user_id]
+        return rows
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to list storyboards: {exc}") from exc
 
 
-def create_storyboard(name: str, style: Optional[str] = None, project_key: Optional[str] = None) -> Dict[str, Any]:
-    """Create a new storyboard."""
+def create_storyboard(
+    name: str,
+    style: Optional[str] = None,
+    project_key: Optional[str] = None,
+    is_public: bool = True,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a new storyboard. When is_public is False and user_id is set, storyboard is private to that user."""
     cleaned_name = (name or "").strip()
     if not cleaned_name:
         raise HTTPException(status_code=400, detail="name is required.")
@@ -44,6 +56,8 @@ def create_storyboard(name: str, style: Optional[str] = None, project_key: Optio
             "created_at": now,
             "updated_at": now,
         }
+        if not is_public and user_id:
+            payload["user_id"] = user_id
         result = supabase.table("storyboards").insert(payload).execute()
         return (result.data or [payload])[0]
     except HTTPException:
@@ -52,8 +66,8 @@ def create_storyboard(name: str, style: Optional[str] = None, project_key: Optio
         raise HTTPException(status_code=500, detail=f"Failed to create storyboard: {exc}") from exc
 
 
-def get_storyboard_full(storyboard_id: str) -> Dict[str, Any]:
-    """Return a storyboard with its characters, locations, and tiles."""
+def get_storyboard_full(storyboard_id: str, current_user_id: Optional[str] = None) -> Dict[str, Any]:
+    """Return a storyboard with its characters, locations, and tiles. Private boards only if current_user_id matches owner."""
     sid = (storyboard_id or "").strip()
     if not sid:
         raise HTTPException(status_code=400, detail="storyboard_id is required.")
@@ -61,7 +75,7 @@ def get_storyboard_full(storyboard_id: str) -> Dict[str, Any]:
         supabase = get_supabase_client()
         sb_result = (
             supabase.table("storyboards")
-            .select("id,name,style,project_key,created_at,updated_at")
+            .select("id,name,style,project_key,user_id,created_at,updated_at")
             .eq("id", sid)
             .limit(1)
             .execute()
@@ -69,6 +83,9 @@ def get_storyboard_full(storyboard_id: str) -> Dict[str, Any]:
         if not sb_result.data:
             raise HTTPException(status_code=404, detail="storyboard not found.")
         storyboard = sb_result.data[0]
+        owner_id = storyboard.get("user_id")
+        if owner_id and current_user_id != owner_id:
+            raise HTTPException(status_code=403, detail="You do not have access to this storyboard.")
 
         chars_result = (
             supabase.table("storyboard_characters")
@@ -103,7 +120,37 @@ def get_storyboard_full(storyboard_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to load storyboard: {exc}") from exc
 
 
-def update_storyboard(storyboard_id: str, name: Optional[str] = None, style: Optional[str] = None) -> Dict[str, Any]:
+def ensure_storyboard_access(storyboard_id: str, current_user_id: Optional[str]) -> None:
+    """Raise 403 if storyboard is private and current_user_id is not the owner. Call before uploads."""
+    try:
+        supabase = get_supabase_client()
+        _check_storyboard_owner(supabase, (storyboard_id or "").strip(), current_user_id)
+    except HTTPException:
+        raise
+
+
+def _check_storyboard_owner(supabase: Any, storyboard_id: str, current_user_id: Optional[str]) -> None:
+    """Raise 403 if storyboard is private and current_user_id is not the owner."""
+    r = (
+        supabase.table("storyboards")
+        .select("user_id")
+        .eq("id", storyboard_id)
+        .limit(1)
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(status_code=404, detail="storyboard not found.")
+    owner_id = (r.data[0] or {}).get("user_id")
+    if owner_id and current_user_id != owner_id:
+        raise HTTPException(status_code=403, detail="You do not have access to this storyboard.")
+
+
+def update_storyboard(
+    storyboard_id: str,
+    name: Optional[str] = None,
+    style: Optional[str] = None,
+    current_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
     sid = (storyboard_id or "").strip()
     if not sid:
         raise HTTPException(status_code=400, detail="storyboard_id is required.")
@@ -120,6 +167,7 @@ def update_storyboard(storyboard_id: str, name: Optional[str] = None, style: Opt
     payload["updated_at"] = _now_iso()
     try:
         supabase = get_supabase_client()
+        _check_storyboard_owner(supabase, sid, current_user_id)
         result = (
             supabase.table("storyboards")
             .update(payload)
@@ -135,12 +183,13 @@ def update_storyboard(storyboard_id: str, name: Optional[str] = None, style: Opt
         raise HTTPException(status_code=500, detail=f"Failed to update storyboard: {exc}") from exc
 
 
-def delete_storyboard(storyboard_id: str) -> Dict[str, Any]:
+def delete_storyboard(storyboard_id: str, current_user_id: Optional[str] = None) -> Dict[str, Any]:
     sid = (storyboard_id or "").strip()
     if not sid:
         raise HTTPException(status_code=400, detail="storyboard_id is required.")
     try:
         supabase = get_supabase_client()
+        _check_storyboard_owner(supabase, sid, current_user_id)
         result = (
             supabase.table("storyboards")
             .delete()
@@ -216,7 +265,12 @@ def delete_style(style_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to delete style: {exc}") from exc
 
 
-def add_character(storyboard_id: str, name: str, image: Optional[str] = None) -> Dict[str, Any]:
+def add_character(
+    storyboard_id: str,
+    name: str,
+    image: Optional[str] = None,
+    current_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
     sid = (storyboard_id or "").strip()
     if not sid:
         raise HTTPException(status_code=400, detail="storyboard_id is required.")
@@ -225,6 +279,7 @@ def add_character(storyboard_id: str, name: str, image: Optional[str] = None) ->
         raise HTTPException(status_code=400, detail="name is required.")
     try:
         supabase = get_supabase_client()
+        _check_storyboard_owner(supabase, sid, current_user_id)
         now = _now_iso()
         payload: Dict[str, Any] = {
             "storyboard_id": sid,
@@ -241,7 +296,12 @@ def add_character(storyboard_id: str, name: str, image: Optional[str] = None) ->
         raise HTTPException(status_code=500, detail=f"Failed to add character: {exc}") from exc
 
 
-def update_character(character_id: str, name: Optional[str] = None, image: Optional[str] = None) -> Dict[str, Any]:
+def update_character(
+    character_id: str,
+    name: Optional[str] = None,
+    image: Optional[str] = None,
+    current_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
     cid = (character_id or "").strip()
     if not cid:
         raise HTTPException(status_code=400, detail="character_id is required.")
@@ -258,6 +318,9 @@ def update_character(character_id: str, name: Optional[str] = None, image: Optio
     payload["updated_at"] = _now_iso()
     try:
         supabase = get_supabase_client()
+        char = supabase.table("storyboard_characters").select("storyboard_id").eq("id", cid).limit(1).execute()
+        if char.data:
+            _check_storyboard_owner(supabase, (char.data[0] or {}).get("storyboard_id"), current_user_id)
         result = (
             supabase.table("storyboard_characters")
             .update(payload)
@@ -273,12 +336,15 @@ def update_character(character_id: str, name: Optional[str] = None, image: Optio
         raise HTTPException(status_code=500, detail=f"Failed to update character: {exc}") from exc
 
 
-def delete_character(character_id: str) -> Dict[str, Any]:
+def delete_character(character_id: str, current_user_id: Optional[str] = None) -> Dict[str, Any]:
     cid = (character_id or "").strip()
     if not cid:
         raise HTTPException(status_code=400, detail="character_id is required.")
     try:
         supabase = get_supabase_client()
+        char = supabase.table("storyboard_characters").select("storyboard_id").eq("id", cid).limit(1).execute()
+        if char.data:
+            _check_storyboard_owner(supabase, (char.data[0] or {}).get("storyboard_id"), current_user_id)
         result = (
             supabase.table("storyboard_characters")
             .delete()
@@ -294,7 +360,12 @@ def delete_character(character_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to delete character: {exc}") from exc
 
 
-def add_location(storyboard_id: str, name: str, image: Optional[str] = None) -> Dict[str, Any]:
+def add_location(
+    storyboard_id: str,
+    name: str,
+    image: Optional[str] = None,
+    current_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
     sid = (storyboard_id or "").strip()
     if not sid:
         raise HTTPException(status_code=400, detail="storyboard_id is required.")
@@ -303,6 +374,7 @@ def add_location(storyboard_id: str, name: str, image: Optional[str] = None) -> 
         raise HTTPException(status_code=400, detail="name is required.")
     try:
         supabase = get_supabase_client()
+        _check_storyboard_owner(supabase, sid, current_user_id)
         now = _now_iso()
         payload: Dict[str, Any] = {
             "storyboard_id": sid,
@@ -319,7 +391,12 @@ def add_location(storyboard_id: str, name: str, image: Optional[str] = None) -> 
         raise HTTPException(status_code=500, detail=f"Failed to add location: {exc}") from exc
 
 
-def update_location(location_id: str, name: Optional[str] = None, image: Optional[str] = None) -> Dict[str, Any]:
+def update_location(
+    location_id: str,
+    name: Optional[str] = None,
+    image: Optional[str] = None,
+    current_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
     lid = (location_id or "").strip()
     if not lid:
         raise HTTPException(status_code=400, detail="location_id is required.")
@@ -336,6 +413,9 @@ def update_location(location_id: str, name: Optional[str] = None, image: Optiona
     payload["updated_at"] = _now_iso()
     try:
         supabase = get_supabase_client()
+        loc = supabase.table("storyboard_locations").select("storyboard_id").eq("id", lid).limit(1).execute()
+        if loc.data:
+            _check_storyboard_owner(supabase, (loc.data[0] or {}).get("storyboard_id"), current_user_id)
         result = (
             supabase.table("storyboard_locations")
             .update(payload)
@@ -351,12 +431,15 @@ def update_location(location_id: str, name: Optional[str] = None, image: Optiona
         raise HTTPException(status_code=500, detail=f"Failed to update location: {exc}") from exc
 
 
-def delete_location(location_id: str) -> Dict[str, Any]:
+def delete_location(location_id: str, current_user_id: Optional[str] = None) -> Dict[str, Any]:
     lid = (location_id or "").strip()
     if not lid:
         raise HTTPException(status_code=400, detail="location_id is required.")
     try:
         supabase = get_supabase_client()
+        loc = supabase.table("storyboard_locations").select("storyboard_id").eq("id", lid).limit(1).execute()
+        if loc.data:
+            _check_storyboard_owner(supabase, (loc.data[0] or {}).get("storyboard_id"), current_user_id)
         result = (
             supabase.table("storyboard_locations")
             .delete()
@@ -372,12 +455,15 @@ def delete_location(location_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to delete location: {exc}") from exc
 
 
-def delete_tile(tile_id: str) -> Dict[str, Any]:
+def delete_tile(tile_id: str, current_user_id: Optional[str] = None) -> Dict[str, Any]:
     tid = (tile_id or "").strip()
     if not tid:
         raise HTTPException(status_code=400, detail="tile_id is required.")
     try:
         supabase = get_supabase_client()
+        tile = supabase.table("storyboard_tiles").select("storyboard_id").eq("id", tid).limit(1).execute()
+        if tile.data:
+            _check_storyboard_owner(supabase, (tile.data[0] or {}).get("storyboard_id"), current_user_id)
         result = (
             supabase.table("storyboard_tiles")
             .delete()
@@ -417,6 +503,7 @@ def add_tile(
     tile_number: Optional[int] = None,
     location_id: Optional[str] = None,
     character_ids: Optional[List[str]] = None,
+    current_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     sid = (storyboard_id or "").strip()
     if not sid:
@@ -426,6 +513,7 @@ def add_tile(
         raise HTTPException(status_code=400, detail="prompt is required.")
     try:
         supabase = get_supabase_client()
+        _check_storyboard_owner(supabase, sid, current_user_id)
         number = tile_number or _next_tile_number(supabase, sid)
         now = _now_iso()
         payload: Dict[str, Any] = {
@@ -455,6 +543,7 @@ def update_tile(
     tile_number: Optional[int] = None,
     location_id: Optional[str] = None,
     character_ids: Optional[List[str]] = None,
+    current_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     tid = (tile_id or "").strip()
     if not tid:
@@ -480,6 +569,9 @@ def update_tile(
     payload["updated_at"] = _now_iso()
     try:
         supabase = get_supabase_client()
+        tile = supabase.table("storyboard_tiles").select("storyboard_id").eq("id", tid).limit(1).execute()
+        if tile.data:
+            _check_storyboard_owner(supabase, (tile.data[0] or {}).get("storyboard_id"), current_user_id)
         result = (
             supabase.table("storyboard_tiles")
             .update(payload)
@@ -495,7 +587,11 @@ def update_tile(
         raise HTTPException(status_code=500, detail=f"Failed to update tile: {exc}") from exc
 
 
-def reorder_tiles(storyboard_id: str, tile_ids_in_order: List[str]) -> Dict[str, Any]:
+def reorder_tiles(
+    storyboard_id: str,
+    tile_ids_in_order: List[str],
+    current_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
     sid = (storyboard_id or "").strip()
     if not sid:
         raise HTTPException(status_code=400, detail="storyboard_id is required.")
@@ -503,6 +599,7 @@ def reorder_tiles(storyboard_id: str, tile_ids_in_order: List[str]) -> Dict[str,
         raise HTTPException(status_code=400, detail="tile_ids_in_order cannot be empty.")
     try:
         supabase = get_supabase_client()
+        _check_storyboard_owner(supabase, sid, current_user_id)
         for index, tile_id in enumerate(tile_ids_in_order, start=1):
             tid = (tile_id or "").strip()
             if not tid:
@@ -521,7 +618,7 @@ def reorder_tiles(storyboard_id: str, tile_ids_in_order: List[str]) -> Dict[str,
         raise HTTPException(status_code=500, detail=f"Failed to reorder tiles: {exc}") from exc
 
 
-def generate_tile_image(tile_id: str) -> Dict[str, Any]:
+def generate_tile_image(tile_id: str, current_user_id: Optional[str] = None) -> Dict[str, Any]:
     tid = (tile_id or "").strip()
     if not tid:
         raise HTTPException(status_code=400, detail="tile_id is required.")
@@ -540,6 +637,7 @@ def generate_tile_image(tile_id: str) -> Dict[str, Any]:
         storyboard_id = tile.get("storyboard_id")
         if not storyboard_id:
             raise HTTPException(status_code=400, detail="tile has no storyboard_id.")
+        _check_storyboard_owner(supabase, storyboard_id, current_user_id)
 
         sb_result = (
             supabase.table("storyboards")

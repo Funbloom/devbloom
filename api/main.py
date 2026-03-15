@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, List, Literal, Optional
 from uuid import UUID
 
+import requests
 from dotenv import load_dotenv
 
 # Load env before any module that reads os.getenv() at import time (e.g. auth.py)
@@ -47,6 +48,7 @@ from settings import settings_router
 from tools import tools_router
 from skills_loader import build_available_skills_xml, get_skill_content
 from auth import get_current_user, require_admin
+from usage import get_usage_for_users
 
 try:
     from mcp_client import call_mcp_tool
@@ -238,17 +240,47 @@ def auth_me(user: dict = Depends(get_current_user)) -> dict:
 
 
 def _user_row(u: Any) -> dict:
-    """Normalize a user record from Supabase (dict or object) to a small dict."""
+    """Normalize a user record from Supabase (dict or object) to a small dict.
+    Supports both email and OAuth (e.g. Google) users: email can come from
+    top-level or from identities[].identity_data.email; provider from identities[].provider
+    or app_metadata.provider / app_metadata.providers; role from user_metadata.role.
+    """
     if hasattr(u, "model_dump"):
         u = u.model_dump()
     elif not isinstance(u, dict):
-        u = {"id": getattr(u, "id", None), "email": getattr(u, "email", None), "created_at": getattr(u, "created_at", None), "user_metadata": getattr(u, "user_metadata", None) or {}}
+        u = {"id": getattr(u, "id", None), "email": getattr(u, "email", None), "created_at": getattr(u, "created_at", None), "user_metadata": getattr(u, "user_metadata", None) or {}, "identities": getattr(u, "identities", None) or [], "app_metadata": getattr(u, "app_metadata", None) or {}}
     meta = u.get("user_metadata") if isinstance(u.get("user_metadata"), dict) else {}
+    app_meta = u.get("app_metadata") if isinstance(u.get("app_metadata"), dict) else {}
+    identities = u.get("identities") or []
+    # Provider: identities[].provider, else app_metadata.provider, else app_metadata.providers[0]
+    provider = None
+    email = u.get("email")
+    for ident in identities:
+        if hasattr(ident, "model_dump"):
+            ident = ident.model_dump()
+        if isinstance(ident, dict):
+            if not provider:
+                provider = ident.get("provider")
+            if not email:
+                id_data = ident.get("identity_data") or {}
+                email = id_data.get("email") if isinstance(id_data, dict) else None
+    if not provider:
+        provider = app_meta.get("provider")
+    if not provider and isinstance(app_meta.get("providers"), list) and app_meta["providers"]:
+        provider = app_meta["providers"][0]
+    if not provider and identities:
+        provider = "email"
+    # Role: user_metadata.role or app_metadata.role
+    role = meta.get("role") or app_meta.get("role")
+    # Normalize empty strings to None so frontend can show "—"
+    def _norm(v):
+        return v if (v is not None and str(v).strip() != "") else None
     return {
         "id": u.get("id"),
-        "email": u.get("email"),
+        "email": _norm(email),
         "created_at": u.get("created_at"),
-        "role": meta.get("role"),
+        "role": _norm(role),
+        "provider": _norm(provider),
     }
 
 
@@ -265,17 +297,58 @@ def _extract_users_from_response(response: Any) -> list:
     return []
 
 
+def _fetch_users_via_auth_api() -> list:
+    """Fetch all users (email + OAuth) via Supabase Auth REST API. Avoids SDK filtering."""
+    base_url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+    if not base_url or not service_key:
+        return []
+    url = f"{base_url}/auth/v1/admin/users"
+    headers = {"Authorization": f"Bearer {service_key}", "apikey": service_key}
+    per_page = 1000
+    page = 1
+    all_users: list = []
+    while True:
+        resp = requests.get(url, headers=headers, params={"per_page": per_page, "page": page}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        batch = data.get("users") or data.get("audience") or []
+        if not isinstance(batch, list):
+            break
+        all_users.extend(batch)
+        if len(batch) < per_page:
+            break
+        page += 1
+    return all_users
+
+
 @app.get("/users")
 def list_users(admin: dict = Depends(require_admin)) -> list:
-    """List all users (admin only). Uses Supabase Auth Admin API."""
+    """List all users (admin only). Uses Supabase Auth Admin API. Includes email and OAuth (e.g. Google) users."""
     try:
-        supabase = get_supabase_client()
-        # Try with pagination; some clients use page=, per_page=
+        users: list = []
+        # Prefer direct Auth REST API so we get all users (SDK may filter or paginate differently)
         try:
-            response = supabase.auth.admin.list_users(page=1, per_page=1000)
-        except TypeError:
-            response = supabase.auth.admin.list_users(per_page=1000)
-        users = _extract_users_from_response(response)
+            users = _fetch_users_via_auth_api()
+        except Exception:
+            pass
+        if not users:
+            supabase = get_supabase_client()
+            per_page = 1000
+            page = 1
+            while True:
+                try:
+                    response = supabase.auth.admin.list_users(page=page, per_page=per_page)
+                except TypeError:
+                    if page == 1:
+                        response = supabase.auth.admin.list_users(per_page=per_page)
+                    else:
+                        break
+                batch = _extract_users_from_response(response)
+                users.extend(batch)
+                if len(batch) < per_page:
+                    break
+                page += 1
         result = [_user_row(u) for u in users]
         # If Auth API returned no users but we have an admin, show current user so list isn't empty
         if not result and admin.get("email"):
@@ -284,7 +357,18 @@ def list_users(admin: dict = Depends(require_admin)) -> list:
                 "email": admin.get("email"),
                 "created_at": None,
                 "role": "admin" if admin.get("is_admin") else None,
+                "provider": "email",
             }]
+        user_ids = [r["id"] for r in result if r.get("id")]
+        usage = get_usage_for_users(user_ids)
+        for r in result:
+            uid = r.get("id")
+            if uid and uid in usage:
+                r["images_today"] = usage[uid]["images_today"]
+                r["images_total"] = usage[uid]["images_total"]
+            else:
+                r["images_today"] = 0
+                r["images_total"] = 0
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to list users: {exc}") from exc
@@ -361,9 +445,11 @@ def condense_chat_history(agent_id: str, body: CondensePayload, user: dict = Dep
 
 app.include_router(rag_router, dependencies=[Depends(get_current_user)])
 app.include_router(projects_router, dependencies=[Depends(get_current_user)])
-app.include_router(storyboard_router, dependencies=[Depends(get_current_user)])
+# storyboard_router: GET /storyboard/styles is public; other routes require auth (see storyboard_routes)
+app.include_router(storyboard_router)
 app.include_router(pdf_router, dependencies=[Depends(get_current_user)])
-app.include_router(image_router, dependencies=[Depends(get_current_user)])
+# image_router: GET /images is public (browser <img> doesn't send Bearer); POST tools/* require auth
+app.include_router(image_router)
 app.include_router(settings_router, dependencies=[Depends(get_current_user)])
 app.include_router(tools_router, dependencies=[Depends(get_current_user)])
 

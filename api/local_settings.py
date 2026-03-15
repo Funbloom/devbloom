@@ -12,21 +12,31 @@ def _validate_project_key(project_key: str) -> str:
     if not key:
         raise ValueError("project_key is required")
     # Sanitize to a safe directory name under .local_data:
-    # - replace any disallowed character with "_"
-    # - disallow path separators or traversal sequences
     key = re.sub(r"[^a-zA-Z0-9_.-]+", "_", key)
     if "/" in key or "\\" in key or ".." in key:
         raise ValueError("project_key contains invalid path characters")
     return key
 
 
-def get_image_generated_path(project_key: str) -> Path:
+def _safe_user_id(user_id: str) -> str:
+    """Sanitize user_id for use as a directory name (e.g. UUID)."""
+    uid = (user_id or "").strip()
+    uid = re.sub(r"[^a-zA-Z0-9_.-]+", "_", uid)
+    if "/" in uid or "\\" in uid or ".." in uid or not uid:
+        raise ValueError("user_id contains invalid path characters")
+    return uid
+
+
+def get_image_generated_path(project_key: str, user_id: str | None = None) -> Path:
     safe_key = _validate_project_key(project_key)
+    if user_id:
+        safe_uid = _safe_user_id(user_id)
+        return LOCAL_DATA_DIR / "users" / safe_uid / safe_key / "image_generated.json"
     return LOCAL_DATA_DIR / safe_key / "image_generated.json"
 
 
-def load_image_generated(project_key: str) -> dict:
-    path = get_image_generated_path(project_key)
+def load_image_generated(project_key: str, user_id: str | None = None) -> dict:
+    path = get_image_generated_path(project_key, user_id)
     if not path.exists():
         return {"images": []}
     try:
@@ -41,8 +51,8 @@ def load_image_generated(project_key: str) -> dict:
         return {"images": []}
 
 
-def save_image_generated(project_key: str, images: list) -> dict:
-    path = get_image_generated_path(project_key)
+def save_image_generated(project_key: str, images: list, user_id: str | None = None) -> dict:
+    path = get_image_generated_path(project_key, user_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {"images": images}
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

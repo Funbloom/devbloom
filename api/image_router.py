@@ -1,9 +1,11 @@
 import mimetypes
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from auth import get_current_user
+from usage import check_can_generate_images, increment_usage
 from image_tool import (
     convert_image,
     crop_image,
@@ -95,8 +97,12 @@ def _build_character_prompt(
 
 
 @image_router.post("/tools/generate_character_image")
-def generate_character_image_route(body: GenerateCharacterImageRequest) -> dict:
+def generate_character_image_route(
+    body: GenerateCharacterImageRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
     """Assemble character prompt on the server and generate image(s). Returns images + style_name if a style was used."""
+    check_can_generate_images(user.get("id") or "", user.get("is_admin") or False, count=1)
     role = (body.role or "").strip() or None
     physical = (body.physical_description or "").strip() or None
     age = (body.age or "").strip() or None
@@ -128,19 +134,32 @@ def generate_character_image_route(body: GenerateCharacterImageRequest) -> dict:
             prompt=prompt,
             negative_prompt=(body.negative_prompt or "").strip() or None,
         )
+        n = len(result.get("images") or [])
+        if n > 0:
+            increment_usage(user.get("id") or "", n)
         out: dict = dict(result)
         out["prompt"] = prompt
         if style_name:
             out["style_name"] = style_name
         return out
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @image_router.post("/tools/generate_image")
-def generate_image_route(body: GenerateImageRequest) -> dict:
+def generate_image_route(
+    body: GenerateImageRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    check_can_generate_images(
+        user.get("id") or "",
+        user.get("is_admin") or False,
+        count=body.num_images,
+    )
     try:
-        return generate_image(
+        result = generate_image(
             prompt=body.prompt,
             negative_prompt=body.negative_prompt,
             width=body.width,
@@ -150,12 +169,21 @@ def generate_image_route(body: GenerateImageRequest) -> dict:
             model=body.model or "gemini-image-2",
             project_key=body.project_key,
         )
+        n = len(result.get("images") or [])
+        if n > 0:
+            increment_usage(user.get("id") or "", n)
+        return result
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @image_router.post("/tools/resize_image")
-def resize_image_route(body: ResizeImageRequest) -> dict:
+def resize_image_route(
+    body: ResizeImageRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
     try:
         return resize_image(
             input_filename=body.input_filename,
@@ -170,7 +198,10 @@ def resize_image_route(body: ResizeImageRequest) -> dict:
 
 
 @image_router.post("/tools/crop_image")
-def crop_image_route(body: CropImageRequest) -> dict:
+def crop_image_route(
+    body: CropImageRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
     try:
         return crop_image(
             input_filename=body.input_filename,
@@ -186,7 +217,10 @@ def crop_image_route(body: CropImageRequest) -> dict:
 
 
 @image_router.post("/tools/convert_image")
-def convert_image_route(body: ConvertImageRequest) -> dict:
+def convert_image_route(
+    body: ConvertImageRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
     try:
         return convert_image(
             input_filename=body.input_filename,

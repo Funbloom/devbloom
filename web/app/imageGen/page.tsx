@@ -152,6 +152,7 @@ export default function ImageGenPage() {
   const [selectedCharacterStyleId, setSelectedCharacterStyleId] = useState<string>("__none");
   const [isManagingStyles, setIsManagingStyles] = useState(false);
   const [defaultLocation, setDefaultLocation] = useState<ImageLocation>("local");
+  const [isPrivate, setIsPrivate] = useState(false);
 
   /** Only persist after initial load for this project has completed; avoids overwriting saved data with [] on mount. */
   const loadCompletedForProjectRef = useRef<string | null>(null);
@@ -189,7 +190,7 @@ export default function ImageGenPage() {
     if (!projectKey) return;
     loadCompletedForProjectRef.current = null;
     let cancelled = false;
-    getImageGenerated(projectKey)
+    getImageGenerated(projectKey, { private: isPrivate })
       .then(({ images: raw }) => {
         if (!cancelled) {
           setImages(parseStoredImages(raw));
@@ -203,18 +204,18 @@ export default function ImageGenPage() {
         }
       });
     return () => { cancelled = true; };
-  }, [projectKey]);
+  }, [projectKey, isPrivate]);
 
   const persistImages = useCallback(
     async (list: GeneratedImage[]) => {
       if (!projectKey) return;
       try {
-        await putImageGenerated(projectKey, list.map(toPayload));
+        await putImageGenerated(projectKey, list.map(toPayload), { private: isPrivate });
       } catch {
         // ignore
       }
     },
-    [projectKey]
+    [projectKey, isPrivate]
   );
 
   useEffect(() => {
@@ -442,6 +443,14 @@ export default function ImageGenPage() {
           <div className="imagegen-panel">
             <h2 className="imagegen-panel-title">Image Generation</h2>
             <div className="imagegen-panel-body">
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
+                <input
+                  type="checkbox"
+                  checked={isPrivate}
+                  onChange={(e) => setIsPrivate(e.target.checked)}
+                />
+                <span>Private (save under my account)</span>
+              </label>
               <div className="sidebar-tabs" role="tablist">
                 <button
                   type="button"

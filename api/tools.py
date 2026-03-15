@@ -1,10 +1,11 @@
 import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+from auth import get_current_user
 from local_settings import load_image_generated, save_image_generated
 from image_tool import safe_resolve_path, validate_image_filename
 
@@ -19,6 +20,7 @@ class ImagePromptRequest(BaseModel):
 class ImageGeneratedPutBody(BaseModel):
     project_key: str = Field(min_length=1)
     images: list[dict[str, Any]] = Field(default_factory=list)
+    private: bool = False
 
 
 class ImageToCloudBody(BaseModel):
@@ -64,19 +66,28 @@ def generate_image_prompt(body: ImagePromptRequest) -> dict:
 
 
 @tools_router.get("/tools/image_generated")
-def get_image_generated_route(project_key: str) -> dict:
-    """Load persisted image list for the given project_key from .local_data/{project_key}/image_generated.json."""
+def get_image_generated_route(
+    project_key: str,
+    private: bool = False,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Load persisted image list. When private=True, data is scoped to the current user."""
     try:
-        return load_image_generated(project_key)
+        user_id = user.get("id") if private else None
+        return load_image_generated(project_key, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @tools_router.put("/tools/image_generated")
-def put_image_generated_route(body: ImageGeneratedPutBody) -> dict:
-    """Persist image list for the given project_key to .local_data/{project_key}/image_generated.json."""
+def put_image_generated_route(
+    body: ImageGeneratedPutBody,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Persist image list. When private=True, data is scoped to the current user."""
     try:
-        return save_image_generated(body.project_key, body.images)
+        user_id = user.get("id") if body.private else None
+        return save_image_generated(body.project_key, body.images, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

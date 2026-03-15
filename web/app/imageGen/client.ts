@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchApi } from "../lib/api";
 import type { Style } from "../storyboard/types";
 import { API_BASE } from "./config";
 
@@ -33,7 +34,7 @@ export async function generateImageFromPrompt(
   if (options?.negativePrompt?.trim()) {
     body.negative_prompt = options.negativePrompt.trim();
   }
-  const response = await fetch(`${API_BASE}/tools/generate_image`, {
+  const response = await fetchApi("/tools/generate_image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -47,7 +48,7 @@ export async function generateImageFromPrompt(
 }
 
 export async function generateImagePrompt(conceptPrompt: string): Promise<string> {
-  const response = await fetch(`${API_BASE}/tools/generate_image_prompt`, {
+  const response = await fetchApi("/tools/generate_image_prompt", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt: conceptPrompt }),
@@ -92,10 +93,13 @@ export async function deleteStyle(styleId: string): Promise<void> {
   }
 }
 
-export async function getImageGenerated(projectKey: string): Promise<{ images: unknown[] }> {
-  const response = await fetch(
-    `${API_BASE}/tools/image_generated?project_key=${encodeURIComponent(projectKey)}`
-  );
+export async function getImageGenerated(
+  projectKey: string,
+  options?: { private?: boolean }
+): Promise<{ images: unknown[] }> {
+  const params = new URLSearchParams({ project_key: projectKey });
+  if (options?.private) params.set("private", "true");
+  const response = await fetchApi(`/tools/image_generated?${params.toString()}`);
   if (!response.ok) return { images: [] };
   const data = (await response.json()) as { images?: unknown[] };
   const raw = data.images ?? [];
@@ -104,12 +108,17 @@ export async function getImageGenerated(projectKey: string): Promise<{ images: u
 
 export async function putImageGenerated(
   projectKey: string,
-  images: Record<string, unknown>[]
+  images: Record<string, unknown>[],
+  options?: { private?: boolean }
 ): Promise<void> {
-  await fetch(`${API_BASE}/tools/image_generated`, {
+  await fetchApi("/tools/image_generated", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_key: projectKey, images }),
+    body: JSON.stringify({
+      project_key: projectKey,
+      images,
+      private: options?.private ?? false,
+    }),
   });
 }
 
@@ -159,7 +168,7 @@ export async function generateCharacterImage(
     negative_prompt: params.negative_prompt?.trim() || null,
     style_id: params.style_id?.trim() && params.style_id !== "__none" ? params.style_id.trim() : null,
   };
-  const response = await fetch(`${API_BASE}/tools/generate_character_image`, {
+  const response = await fetchApi("/tools/generate_character_image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

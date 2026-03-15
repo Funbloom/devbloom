@@ -106,7 +106,15 @@ export default function AdminPage() {
   }>({ state: "idle" });
   const [activeTab, setActiveTab] = useState<"rag" | "settings" | "tests" | "users">("rag");
   const { authUser, session } = useAuth();
-  const [users, setUsers] = useState<{ id: string; email: string; created_at?: string; role?: string }[]>([]);
+  const [users, setUsers] = useState<{
+    id: string;
+    email?: string | null;
+    created_at?: string;
+    role?: string;
+    provider?: string;
+    images_today?: number;
+    images_total?: number;
+  }[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
 
@@ -154,7 +162,15 @@ export default function AdminPage() {
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      const data = (await response.json()) as { id: string; email: string; created_at?: string; role?: string }[];
+      const data = (await response.json()) as {
+        id: string;
+        email?: string | null;
+        created_at?: string;
+        role?: string;
+        provider?: string;
+        images_today?: number;
+        images_total?: number;
+      }[];
       setUsers(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -1248,18 +1264,24 @@ export default function AdminPage() {
                   <thead>
                     <tr>
                       <th style={{ textAlign: "left", padding: "0.5rem" }}>Email</th>
+                      <th style={{ textAlign: "left", padding: "0.5rem" }}>Provider</th>
                       <th style={{ textAlign: "left", padding: "0.5rem" }}>ID</th>
                       <th style={{ textAlign: "left", padding: "0.5rem" }}>Created</th>
                       <th style={{ textAlign: "left", padding: "0.5rem" }}>Role</th>
+                      <th style={{ textAlign: "right", padding: "0.5rem" }}>Images today</th>
+                      <th style={{ textAlign: "right", padding: "0.5rem" }}>Images total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {users.map((u) => (
                       <tr key={u.id}>
-                        <td style={{ padding: "0.5rem" }}>{u.email}</td>
+                        <td style={{ padding: "0.5rem" }}>{u.email || "—"}</td>
+                        <td style={{ padding: "0.5rem" }}>{u.provider || "—"}</td>
                         <td style={{ padding: "0.5rem", fontSize: "0.85em" }}>{u.id}</td>
                         <td style={{ padding: "0.5rem" }}>{u.created_at ? new Date(u.created_at).toLocaleString() : "—"}</td>
-                        <td style={{ padding: "0.5rem" }}>{u.role ?? "—"}</td>
+                        <td style={{ padding: "0.5rem" }}>{u.role || "—"}</td>
+                        <td style={{ padding: "0.5rem", textAlign: "right" }}>{u.images_today ?? 0}</td>
+                        <td style={{ padding: "0.5rem", textAlign: "right" }}>{u.images_total ?? 0}</td>
                       </tr>
                     ))}
                   </tbody>

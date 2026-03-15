@@ -24,6 +24,8 @@ type Props = {
 
   newName: string;
   onNewNameChange: (value: string) => void;
+  newStoryboardPrivate: boolean;
+  onNewStoryboardPrivateChange: (value: boolean) => void;
   onCreateStoryboard: () => void;
   onDeleteStoryboard: () => void;
   onSelectStoryboard: (id: string) => void;
@@ -81,6 +83,8 @@ export function StoryboardSidebar(props: Props) {
     locations,
     newName,
     onNewNameChange,
+    newStoryboardPrivate,
+    onNewStoryboardPrivateChange,
     onCreateStoryboard,
     onDeleteStoryboard,
     onSelectStoryboard,
@@ -227,7 +231,12 @@ export function StoryboardSidebar(props: Props) {
               disabled={isSaving}
             >
               <div className="agent-meta">
-                <div className="agent-first-name">{sb.name}</div>
+                <div className="agent-first-name">
+                  {sb.name}
+                  {sb.user_id && (
+                    <span style={{ marginLeft: "0.35rem", fontSize: "0.75rem", opacity: 0.8 }} title="Private">(private)</span>
+                  )}
+                </div>
                 {sb.project_key && <div className="agent-role">{sb.project_key}</div>}
               </div>
             </button>
@@ -241,6 +250,14 @@ export function StoryboardSidebar(props: Props) {
             value={newName}
             onChange={(e) => onNewNameChange(e.target.value)}
           />
+          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem" }}>
+            <input
+              type="checkbox"
+              checked={newStoryboardPrivate}
+              onChange={(e) => onNewStoryboardPrivateChange(e.target.checked)}
+            />
+            <span>Private</span>
+          </label>
           <button
             type="button"
             onClick={() => void onCreateStoryboard()}

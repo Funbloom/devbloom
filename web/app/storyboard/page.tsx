@@ -27,6 +27,7 @@ export default function StoryboardPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   const [newName, setNewName] = useState("");
+  const [newStoryboardPrivate, setNewStoryboardPrivate] = useState(false);
   const [newStyle, setNewStyle] = useState("");
   const [styles, setStyles] = useState<Style[]>([]);
 
@@ -152,6 +153,7 @@ export default function StoryboardPage() {
         name: trimmed,
         style: newStyle.trim() || undefined,
         project_key: storedProjectKey || undefined,
+        is_public: !newStoryboardPrivate,
       };
       const response = await fetchApi("/storyboard", {
         method: "POST",
@@ -166,6 +168,7 @@ export default function StoryboardPage() {
       setStoryboards((prev) => [...prev, created]);
       setSelectedId(created.id);
       setNewName("");
+      setNewStoryboardPrivate(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setStatus(`Error creating storyboard: ${message}`);
@@ -594,6 +597,8 @@ export default function StoryboardPage() {
             locations={locations}
             newName={newName}
             onNewNameChange={setNewName}
+            newStoryboardPrivate={newStoryboardPrivate}
+            onNewStoryboardPrivateChange={setNewStoryboardPrivate}
             onCreateStoryboard={createStoryboard}
             onDeleteStoryboard={deleteCurrentStoryboard}
             onSelectStoryboard={setSelectedId}
