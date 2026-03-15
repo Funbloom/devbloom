@@ -77,3 +77,23 @@ In **Supabase Dashboard** → **Authentication** → **URL Configuration**, set 
 
 **Character and location images** (uploaded in the storyboard sidebar) are also uploaded to the same bucket under `characters/<storyboard_id>/...` and `locations/<storyboard_id>/...`, so they work from any machine too.
 
+## EC2 / Production
+
+To run the API on EC2 (or any host):
+
+1. **Backend (`api/env`)**  
+   Set `CORS_ORIGINS` to your frontend URL(s), comma-separated, e.g.  
+   `CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com`  
+   (If unset, it defaults to localhost for local dev.)
+
+2. **Frontend (`web/.env.local` or build env)**  
+   Set `NEXT_PUBLIC_API_URL_BASE` to your API base URL, e.g.  
+   `NEXT_PUBLIC_API_URL_BASE=https://api.yourdomain.com`
+
+3. **Supabase**  
+   In Dashboard → Authentication → URL Configuration, set **Site URL** and add **Redirect URLs** for your production frontend (e.g. `https://yourdomain.com/**`).
+
+4. **Run the API** (e.g. on EC2):  
+   `uvicorn main:app --host 0.0.0.0 --port 8000`  
+   Use a process manager (systemd, supervisord) or reverse proxy (nginx) in front. Serve the Next.js app separately (e.g. `npm run build && npm start`, or static export behind nginx).
+

@@ -67,9 +67,16 @@ async def lifespan(_app: Any):
 
 app = FastAPI(lifespan=lifespan)
 
+# CORS: use CORS_ORIGINS env (comma-separated) for production (e.g. EC2). Default: localhost for dev.
+_cors_origins_raw = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000",
+)
+CORS_ORIGINS = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
