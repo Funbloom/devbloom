@@ -143,13 +143,32 @@ def _choose_tool_name(user_message: str) -> Optional[str]:
     if not user_message:
         return None
     lower = user_message.strip().lower()
+    # Respect explicit text-only / no-image instructions
+    if any(phrase in lower for phrase in ("text only", "no image", "don't generate an image", "do not generate an image")):
+        return None
+
+    # More specific intent checks instead of any occurrence of "image"/"picture"
     if "resize" in lower:
         return "resize_image"
     if "crop" in lower:
         return "crop_image"
     if "convert" in lower:
         return "convert_image"
-    if "image" in lower or "draw" in lower or "picture" in lower:
+    # Strong signals that the user wants an image
+    if any(
+        phrase in lower
+        for phrase in (
+            "generate image",
+            "generate a image",
+            "create image",
+            "create a image",
+            "draw ",
+            "draw a",
+            "picture of",
+            "image of",
+            "generate a picture",
+        )
+    ):
         return "generate_image"
     return None
 

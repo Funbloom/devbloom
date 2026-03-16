@@ -2,8 +2,55 @@
 
 Use these with the main README’s **EC2 / Production** section.
 
-- **nginx-gamedevking.conf.example** — Copy to `/etc/nginx/conf.d/gamedevking.conf`, replace `yourdomain.com`, then `sudo nginx -t && sudo systemctl reload nginx`. Run certbot for HTTPS.
+- **nginx-gamedevking.conf.example** — Generic template; replace `yourdomain.com` with your domain.
+
+- **nginx-gamedevking-dev.conf.example** — Ready for **dev.funbloomstudio.com** (A record → EC2). Copy to `/etc/nginx/conf.d/gamedevking.conf`, run `sudo nginx -t`, then **start** nginx if needed: `sudo systemctl start nginx` (or `sudo systemctl enable --now nginx` to start and enable on boot). For later config changes use `sudo systemctl reload nginx`. HTTPS: `sudo certbot --nginx -d dev.funbloomstudio.com`.
+
 - **gamedev-api.service.example** — Copy to `/etc/systemd/system/gamedev-api.service`. Set `WorkingDirectory`, `EnvironmentFile`, and `ExecStart` to your app path (e.g. `/home/ec2-user/gamedev-king/api`). Then `sudo systemctl daemon-reload && sudo systemctl enable --now gamedev-api`.
+
 - **gamedev-web.service.example** — Copy to `/etc/systemd/system/gamedev-web.service`. Set `WorkingDirectory` and `NEXT_PUBLIC_API_URL_BASE` to your API URL. Then `sudo systemctl daemon-reload && sudo systemctl enable --now gamedev-web`.
 
 Replace `/home/ec2-user/gamedev-king` and `ec2-user` if your app lives elsewhere or runs as another user.
+
+**If you get "Bad message"** when enabling the service, the unit file likely has Windows line endings. On the EC2 box run: `sudo sed -i 's/\r$//' /etc/systemd/system/gamedev-api.service` then `sudo systemctl daemon-reload && sudo systemctl enable --now gamedev-api`.
+
+## Common commands (EC2)
+
+**Check status**
+- **nginx**: `sudo systemctl status nginx`
+- **API**: `sudo systemctl status gamedev-api`
+- **web**: `sudo systemctl status gamedev-web`
+
+**Start**
+- **nginx**: `sudo systemctl start nginx`
+- **API**: `sudo systemctl start gamedev-api`
+- **web**: `sudo systemctl start gamedev-web`
+
+**Stop**
+- **nginx**: `sudo systemctl stop nginx`
+- **API**: `sudo systemctl stop gamedev-api`
+- **web**: `sudo systemctl stop gamedev-web`
+
+**Restart**
+-  'sudo systemctl daemon-reload'
+- **nginx**: `sudo systemctl restart nginx`
+- **API**: `sudo systemctl restart gamedev-api`
+- **web**: `sudo systemctl restart gamedev-web`
+
+**View logs**
+- **API**: `sudo journalctl -u gamedev-api -n 50 --no-pager`
+- **web**: `sudo journalctl -u gamedev-web -n 50 --no-pager`
+
+## SSH into the EC2 server
+
+- **Basic SSH (recommended)**  
+  `ssh ec2-user@dev.funbloomstudio.com`
+
+- **With key file explicitly**  
+  `ssh -i /path/to/your-key.pem ec2-user@dev.funbloomstudio.com`
+
+- **Using public DNS name instead of domain**  
+  `ssh -i /path/to/your-key.pem ec2-user@ec2-XX-XX-XX-XX.us-west-2.compute.amazonaws.com`
+
+Replace `/path/to/your-key.pem` with your actual key path, and `ec2-user` only if your instance uses a different default user.
+

@@ -5,7 +5,7 @@
 # Then: sudo systemctl daemon-reload && sudo systemctl enable --now gamedev-web
 
 [Unit]
-Description=Game Dev King Web (Next.js)
+Description=DevBloom (Next.js)
 After=network.target
 
 [Service]
@@ -14,7 +14,7 @@ User=ec2-user
 Group=ec2-user
 WorkingDirectory=/home/ec2-user/gamedev-king/web
 Environment=NODE_ENV=production
-Environment=NEXT_PUBLIC_API_URL_BASE=https://yourdomain.com/api
+Environment=NEXT_PUBLIC_API_URL_BASE=https://dev.funbloomstudio.com/api
 ExecStart=/usr/bin/npm start
 Restart=on-failure
 RestartSec=5

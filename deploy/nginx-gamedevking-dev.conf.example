@@ -1,0 +1,34 @@
+# Nginx config for Game Dev King — dev.funbloomstudio.com (EC2).
+# A record: dev.funbloomstudio.com → your EC2 IP.
+# Copy to /etc/nginx/conf.d/gamedevking.conf (or sites-available on Ubuntu).
+# Then: sudo nginx -t
+# If nginx isn't running: sudo systemctl start nginx (or sudo systemctl enable --now nginx)
+# For config changes later: sudo systemctl reload nginx
+# HTTPS: sudo certbot --nginx -d dev.funbloomstudio.com
+
+# Same domain, path-based: web at dev.funbloomstudio.com/, API at dev.funbloomstudio.com/api/
+server {
+    listen 80;
+    server_name dev.funbloomstudio.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+    }
+}

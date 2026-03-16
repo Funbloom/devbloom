@@ -192,12 +192,19 @@ export default function AdminPage() {
         width?: number;
         height?: number;
         style?: string;
-        location?: "local" | "cloud" | string;
+        location?: "local" | "cloud";
       };
-      setImageDefaults((prev) => ({
-        ...prev,
-        ...data,
-      }));
+      setImageDefaults((prev) => {
+        const next = {
+          ...prev,
+          ...data,
+        };
+        // Ensure location always stays within the \"local\" | \"cloud\" union
+        if (next.location !== "local" && next.location !== "cloud") {
+          next.location = prev.location;
+        }
+        return next;
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setImageDefaultsStatus(`Error: ${message}`);
@@ -628,7 +635,7 @@ export default function AdminPage() {
         width?: number;
         height?: number;
         style?: string;
-        location?: "local" | "cloud" | string;
+        location?: "local" | "cloud";
       };
       setImageDefaults((prev) => ({
         ...prev,
@@ -798,12 +805,15 @@ export default function AdminPage() {
                   ...
                 </button>
               </div>
+              {/* Non-standard directory picker attributes: cast to any to satisfy TS */}
               <input
                 ref={projectPathPickerRef}
                 type="file"
                 className="admin-hidden-input"
-                webkitdirectory="true"
-                directory="true"
+                {...({
+                  webkitdirectory: "true",
+                  directory: "true",
+                } as any)}
                 onChange={(e) => {
                   const files = e.target.files;
                   if (!files || files.length === 0) return;
@@ -896,8 +906,10 @@ export default function AdminPage() {
                             ref={editPathPickerRef}
                             type="file"
                             className="admin-hidden-input"
-                            webkitdirectory="true"
-                            directory="true"
+                            {...({
+                              webkitdirectory: "true",
+                              directory: "true",
+                            } as any)}
                             onChange={(e) => {
                               const files = e.target.files;
                               if (!files || files.length === 0) return;

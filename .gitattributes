@@ -1,0 +1,3 @@
+# Deploy: systemd and nginx configs must use LF on Linux
+deploy/*.service* text eol=lf
+deploy/*.conf* text eol=lf

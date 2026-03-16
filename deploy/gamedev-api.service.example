@@ -4,7 +4,7 @@
 # Then: sudo systemctl daemon-reload && sudo systemctl enable --now gamedev-api
 
 [Unit]
-Description=Game Dev King API (FastAPI)
+Description=DevBloom API
 After=network.target
 
 [Service]
@@ -12,7 +12,7 @@ Type=simple
 User=ec2-user
 Group=ec2-user
 WorkingDirectory=/home/ec2-user/gamedev-king/api
-EnvironmentFile=/home/ec2-user/gamedev-king/api/env
+EnvironmentFile=/home/ec2-user/gamedev-king/api/.env
 ExecStart=/home/ec2-user/gamedev-king/api/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
