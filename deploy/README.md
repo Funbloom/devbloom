@@ -12,6 +12,12 @@ Use these with the main README’s **EC2 / Production** section.
 
 Replace `/home/ec2-user/gamedev-king` and `ec2-user` if your app lives elsewhere or runs as another user.
 
+### Deploy from S3 (no build on EC2)
+
+- **build-and-upload.bat** (run on Windows from repo root or `deploy/`): builds web (Next.js standalone), zips web + api, uploads to `s3://devbloom/releases/` as a timestamped zip and as `latest.zip`. Requires AWS CLI configured and `npm` in PATH.
+- **ec2-deploy.sh** (run on EC2): downloads `latest.zip` (or a given key) from that bucket, extracts into `APP_ROOT` (default `/home/ec2-user/gamedev-king`), restores existing `api/.env`, installs API Python deps, restarts `gamedev-api` and `gamedev-web`. Prereqs: AWS CLI (or instance role), `unzip`, `rsync`, Node, Python 3 + venv.
+- **gamedev-web-standalone.service.example** — Use this for the web service when deploying via S3 (standalone build). It runs `node server.js` instead of `npm start`. Copy over `gamedev-web.service` and run `sudo systemctl daemon-reload && sudo systemctl restart gamedev-web`.
+
 **If you get "Bad message"** when enabling the service, the unit file likely has Windows line endings. On the EC2 box run: `sudo sed -i 's/\r$//' /etc/systemd/system/gamedev-api.service` then `sudo systemctl daemon-reload && sudo systemctl enable --now gamedev-api`.
 
 ## Common commands (EC2)

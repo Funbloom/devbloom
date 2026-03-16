@@ -1,0 +1,21 @@
+# Use this when deploying the web app via S3/standalone (build-and-upload.bat + ec2-deploy.sh).
+# Copy to /etc/systemd/system/gamedev-web.service (replacing the npm-start version).
+# WorkingDirectory is the web folder that contains server.js from the standalone build.
+
+[Unit]
+Description=DevBloom (Next.js standalone)
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/gamedev-king/web
+Environment=NODE_ENV=production
+Environment=NEXT_PUBLIC_API_URL_BASE=https://dev.funbloomstudio.com/api
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
