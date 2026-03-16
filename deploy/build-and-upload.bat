@@ -2,6 +2,12 @@
 setlocal EnableDelayedExpansion
 set S3_BUCKET=devbloom
 set S3_PREFIX=releases
+:: Optional: set AWS_PROFILE to your SSO profile name (from "aws configure sso") so upload uses that profile
+set AWS_PROFILE=%AWS_PROFILE%
+
+:: Build --profile argument only if AWS_PROFILE is set
+set "AWS_PROFILE_ARG="
+if defined AWS_PROFILE set "AWS_PROFILE_ARG=--profile %AWS_PROFILE%"
 
 :: Repo root (one level up from deploy)
 set ROOT=%~dp0..
@@ -12,14 +18,33 @@ for /f "tokens=*" %%i in ('powershell -NoProfile -Command "Get-Date -Format 'yyy
 set ZIPNAME=gamedev-king-%TS%.zip
 set STAGING=%ROOT%\deploy\staging
 
-echo [1/6] Building web (Next.js)...
+echo [0/7] AWS credentials...
+if defined AWS_PROFILE (
+  echo Signing in with SSO profile: %AWS_PROFILE%
+  aws sso login %AWS_PROFILE_ARG%
+) else (
+  echo Using default profile with access keys.
+)
+aws sts get-caller-identity %AWS_PROFILE_ARG% 2>nul
+if errorlevel 1 (
+  echo.
+  echo ERROR: AWS credentials are invalid or expired.
+  echo Run this in a terminal to see the exact error:
+  echo   aws sts get-caller-identity
+  echo Then run "aws configure" with a valid Access Key ID and Secret from IAM.
+  echo Credentials file: %%USERPROFILE%%\.aws\credentials
+  exit /b 1
+)
+echo.
+
+echo [1/7] Building web (Next.js)...
 cd "%ROOT%\web"
 call npm ci
 call npm run build
 if errorlevel 1 ( echo Build failed. & exit /b 1 )
 cd "%ROOT%"
 
-echo [2/6] Preparing standalone web output...
+echo [2/7] Preparing standalone web output...
 set WEB_STANDALONE=%ROOT%\web\.next\standalone
 set WEB_OUT=%STAGING%\gamedev-king\web
 mkdir "%STAGING%\gamedev-king" 2>nul
@@ -33,23 +58,23 @@ if exist "%ROOT%\web\public" (
   xcopy /E /I /Y "%ROOT%\web\public\*" "%WEB_OUT%\public\" >nul
 )
 
-echo [3/6] Copying API (excluding .venv, __pycache__, .env)...
+echo [3/7] Copying API (excluding .venv, __pycache__, .env)...
 set API_OUT=%STAGING%\gamedev-king\api
 mkdir "%API_OUT%" 2>nul
 robocopy "%ROOT%\api" "%API_OUT%" /E /XD .venv __pycache__ .git /XF .env /NFL /NDL /NJH /NJS /NC /NS /NP
 if errorlevel 8 ( echo Robocopy had errors. & exit /b 1 )
 
-echo [4/6] Creating archive %ZIPNAME%...
+echo [4/7] Creating archive %ZIPNAME%...
 cd "%STAGING%"
 tar -a -c -f "%ROOT%\deploy\%ZIPNAME%" gamedev-king
 cd "%ROOT%"
 
-echo [5/6] Uploading to s3://%S3_BUCKET%/%S3_PREFIX%/...
-aws s3 cp "%ROOT%\deploy\%ZIPNAME%" "s3://%S3_BUCKET%/%S3_PREFIX%/%ZIPNAME%" --no-progress
+echo [5/7] Uploading to s3://%S3_BUCKET%/%S3_PREFIX%/...
+aws s3 cp "%ROOT%\deploy\%ZIPNAME%" "s3://%S3_BUCKET%/%S3_PREFIX%/%ZIPNAME%" --no-progress %AWS_PROFILE_ARG%
 if errorlevel 1 ( echo S3 upload failed. Check AWS CLI and credentials. & exit /b 1 )
-aws s3 cp "s3://%S3_BUCKET%/%S3_PREFIX%/%ZIPNAME%" "s3://%S3_BUCKET%/%S3_PREFIX%/latest.zip" --no-progress
+aws s3 cp "s3://%S3_BUCKET%/%S3_PREFIX%/%ZIPNAME%" "s3://%S3_BUCKET%/%S3_PREFIX%/latest.zip" --no-progress %AWS_PROFILE_ARG%
 
-echo [6/6] Cleaning staging...
+echo [6/7] Cleaning staging...
 rd /s /q "%STAGING%" 2>nul
 
 echo.

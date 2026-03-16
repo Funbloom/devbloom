@@ -215,3 +215,4 @@ debug_prompts.txt
 .local_data/
 docs
 web/.env.local
+deploy/staging
