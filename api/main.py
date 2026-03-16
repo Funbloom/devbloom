@@ -119,6 +119,24 @@ DEBUG_PROMPTS_PATH = LOCAL_DATA_DIR / "debug_prompts.txt"
 HISTORY_PREFIX = "feed_"
 MAX_HISTORY_ITEMS = 200
 
+
+def _safe_path_segment(raw: Optional[str], fallback: str) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return fallback
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]", "_", value)
+    return cleaned or fallback
+
+
+_history_dir_env = os.getenv("CHAT_HISTORY_DIR")
+if _history_dir_env:
+    _history_base = Path(_history_dir_env)
+    if not _history_base.is_absolute():
+        _history_base = (PROJECT_ROOT / _history_dir_env).resolve()
+    HISTORY_BASE_DIR = _history_base
+else:
+    HISTORY_BASE_DIR = LOCAL_DATA_DIR / "history"
+
 # Keywords that suggest the user might want export or image tools (for tool_choice optimization).
 _TOOL_TRIGGER_PHRASES = (
     "export", "save to pdf", "save as pdf", "save to docx", "save as docx",
@@ -207,10 +225,12 @@ def normalize_agent_id(agent_id: Optional[str]) -> str:
     return cleaned if cleaned in AGENT_PERSONA_FILES else "creative_director"
 
 
-def get_history_path(agent_id: str) -> Path:
+def get_history_path(agent_id: str, user: dict, project_key: Optional[str]) -> Path:
     safe_agent = normalize_agent_id(agent_id)
+    safe_user = _safe_path_segment(str(user.get("id") or user.get("email")), "anonymous")
+    safe_project = _safe_path_segment(project_key, "no_project")
     filename = f"{HISTORY_PREFIX}{safe_agent}.json"
-    return LOCAL_DATA_DIR / "history" / filename
+    return HISTORY_BASE_DIR / safe_user / safe_project / filename
 
 
 def load_persona_text(agent_id: str) -> str:
@@ -401,8 +421,12 @@ def list_users(admin: dict = Depends(require_admin)) -> list:
 
 
 @app.get("/chat/history/{agent_id}")
-def get_chat_history(agent_id: str, user: dict = Depends(get_current_user)) -> dict:
-    path = get_history_path(agent_id)
+def get_chat_history(
+    agent_id: str,
+    user: dict = Depends(get_current_user),
+    project_key: Optional[str] = None,
+) -> dict:
+    path = get_history_path(agent_id, user, project_key)
     if not path.exists():
         return {"messages": []}
     try:
@@ -416,8 +440,13 @@ def get_chat_history(agent_id: str, user: dict = Depends(get_current_user)) -> d
 
 
 @app.post("/chat/history/{agent_id}")
-def save_chat_history(agent_id: str, body: HistoryPayload, user: dict = Depends(get_current_user)) -> dict:
-    path = get_history_path(agent_id)
+def save_chat_history(
+    agent_id: str,
+    body: HistoryPayload,
+    user: dict = Depends(get_current_user),
+    project_key: Optional[str] = None,
+) -> dict:
+    path = get_history_path(agent_id, user, project_key)
     path.parent.mkdir(parents=True, exist_ok=True)
     messages = body.messages[-MAX_HISTORY_ITEMS:]
     payload = {"messages": [msg.model_dump() for msg in messages]}
@@ -429,8 +458,12 @@ def save_chat_history(agent_id: str, body: HistoryPayload, user: dict = Depends(
 
 
 @app.delete("/chat/history/{agent_id}")
-def clear_chat_history(agent_id: str, user: dict = Depends(get_current_user)) -> dict:
-    path = get_history_path(agent_id)
+def clear_chat_history(
+    agent_id: str,
+    user: dict = Depends(get_current_user),
+    project_key: Optional[str] = None,
+) -> dict:
+    path = get_history_path(agent_id, user, project_key)
     try:
         if path.exists():
             path.unlink()

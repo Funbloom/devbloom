@@ -177,9 +177,16 @@ export default function HomePage() {
     }));
   };
 
+  const getActiveProjectKey = () => {
+    if (typeof window === "undefined") return null;
+    return window.localStorage.getItem("activeProjectKey");
+  };
+
   const loadHistory = async (targetAgent: string) => {
     try {
-      const response = await fetchApi(`/chat/history/${targetAgent}`);
+      const projectKey = getActiveProjectKey();
+      const query = projectKey ? `?project_key=${encodeURIComponent(projectKey)}` : "";
+      const response = await fetchApi(`/chat/history/${targetAgent}${query}`);
       if (!response.ok) {
         throw new Error(`History load failed: ${response.status}`);
       }
@@ -198,6 +205,8 @@ export default function HomePage() {
   };
 
   const saveHistory = async (targetAgent: string, nextMessages: ChatMessage[]) => {
+    const projectKey = getActiveProjectKey();
+    const query = projectKey ? `?project_key=${encodeURIComponent(projectKey)}` : "";
     const payload = {
       messages: nextMessages.map((msg) => ({
         role: msg.role,
@@ -205,7 +214,7 @@ export default function HomePage() {
       })),
     };
     try {
-      const response = await fetchApi(`/chat/history/${targetAgent}`, {
+      const response = await fetchApi(`/chat/history/${targetAgent}${query}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

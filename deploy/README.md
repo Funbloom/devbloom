@@ -43,11 +43,8 @@ Replace `/home/ec2-user/gamedev-king` and `ec2-user` if your app lives elsewhere
 
 ## SSH into the EC2 server
 
-- **Basic SSH (recommended)**  
-  `ssh ec2-user@dev.funbloomstudio.com`
-
 - **With key file explicitly**  
-  `ssh -i /path/to/your-key.pem ec2-user@dev.funbloomstudio.com`
+  `ssh -i .\Oregon_DevBloom.pem ec2-user@dev.funbloomstudio.com`
 
 - **Using public DNS name instead of domain**  
   `ssh -i /path/to/your-key.pem ec2-user@ec2-XX-XX-XX-XX.us-west-2.compute.amazonaws.com`
