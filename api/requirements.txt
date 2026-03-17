@@ -8,9 +8,10 @@ python-multipart
 reportlab
 pillow
 requests
+onnxruntime==1.17.3
 python-docx
 openpyxl
 mcp
 PyJWT
 jwcrypto
-rembg[gpu,cli]
+rembg[cpu]
