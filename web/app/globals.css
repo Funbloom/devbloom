@@ -230,6 +230,46 @@ main {
   gap: 16px;
 }
 
+.project-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #161a22;
+  border: 1px solid #2a2f3a;
+}
+
+.project-title {
+  font-weight: 600;
+  color: #e6e6e6;
+}
+
+.project-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.project-controls select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #2a2f3a;
+  background: #0f1115;
+  color: #e6e6e6;
+}
+
+.project-meta {
+  font-size: 12px;
+  color: #9aa3b2;
+}
+
+.project-error {
+  font-size: 12px;
+  color: #fca5a5;
+}
+
 .chat-main {
   flex: 1 1 0;
   display: flex;

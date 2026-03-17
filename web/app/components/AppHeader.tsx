@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { fetchApi } from "../lib/api";
 
 const PAGES: { path: string; label: string }[] = [
   { path: "/", label: "Agents" },
@@ -27,12 +29,58 @@ export function AppHeader() {
   const pathname = usePathname();
   const currentLabel = getCurrentPageLabel(pathname ?? "");
   const { authUser, user, signOut, loading } = useAuth();
+  const [activeProjectKey, setActiveProjectKey] = useState("");
+  const [activeProjectName, setActiveProjectName] = useState("");
+
+  useEffect(() => {
+    const refreshProject = async () => {
+      const stored = window.localStorage.getItem("activeProjectKey") || "";
+      const storedName = window.localStorage.getItem("activeProjectName") || "";
+      setActiveProjectKey(stored);
+      if (!stored) {
+        setActiveProjectName("");
+        return;
+      }
+      if (storedName) {
+        setActiveProjectName(storedName);
+        return;
+      }
+      try {
+        const response = await fetchApi("/projects");
+        if (!response.ok) {
+          setActiveProjectName(stored);
+          return;
+        }
+        const data = (await response.json()) as { project_key: string; display_name: string }[];
+        const match = data.find((project) => project.project_key === stored);
+        const name = match?.display_name || stored;
+        setActiveProjectName(name);
+        window.localStorage.setItem("activeProjectName", name);
+      } catch {
+        setActiveProjectName(stored);
+      }
+    };
+    void refreshProject();
+    const handleProjectChange = () => {
+      void refreshProject();
+    };
+    window.addEventListener("activeProjectChanged", handleProjectChange);
+    window.addEventListener("storage", handleProjectChange);
+    return () => {
+      window.removeEventListener("activeProjectChanged", handleProjectChange);
+      window.removeEventListener("storage", handleProjectChange);
+    };
+  }, []);
+
+  const headerTitle = activeProjectName
+    ? `DevBloom Studio (${activeProjectName})`
+    : "DevBloom Studio (select a project...)";
 
   return (
     <header className="app-header">
       <div className="app-header-page">{currentLabel}</div>
       <Link href="/" className="app-header-title">
-        DevBloom Studio
+        {headerTitle}
       </Link>
       <nav className="app-header-nav">
         {PAGES.map(({ path, label }) => {

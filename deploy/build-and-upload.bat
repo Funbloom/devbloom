@@ -2,6 +2,8 @@
 setlocal EnableDelayedExpansion
 set S3_BUCKET=devbloom
 set S3_PREFIX=releases
+:: Production API URL - baked into the Next.js build so the browser calls this instead of localhost
+set PRODUCTION_API_URL=https://dev.funbloomstudio.com/api
 :: Optional: set AWS_PROFILE to your SSO profile name (from "aws configure sso") so upload uses that profile
 set AWS_PROFILE=%AWS_PROFILE%
 
@@ -37,8 +39,10 @@ if errorlevel 1 (
 )
 echo.
 
-echo [1/7] Building web (Next.js)...
+echo [1/7] Building web (Next.js) with API URL: %PRODUCTION_API_URL%
 cd "%ROOT%\web"
+set NEXT_PUBLIC_API_URL_BASE=%PRODUCTION_API_URL%
+set NEXT_PUBLIC_API_URL=%PRODUCTION_API_URL%
 call npm ci
 call npm run build
 if errorlevel 1 ( echo Build failed. & exit /b 1 )

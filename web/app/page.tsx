@@ -57,6 +57,7 @@ type AgentInfo = {
   image: string;
 };
 
+
 type SseEvent = {
   event: string;
   data: string;
@@ -170,6 +171,14 @@ export default function HomePage() {
     setAutoScroll(true);
   }, [agentId]);
 
+  useEffect(() => {
+    if (!session) return;
+    const stored = window.localStorage.getItem("activeProjectKey") || "";
+    if (stored) {
+      void loadHistory(agentId);
+    }
+  }, [session, agentId]);
+
   const updateHistory = (targetAgent: string, updater: (prev: ChatMessage[]) => ChatMessage[]) => {
     setHistoryByAgent((prev) => ({
       ...prev,
@@ -240,7 +249,15 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!session) return;
-    void loadHistory(agentId);
+    const handleProjectChange = () => {
+      void loadHistory(agentId);
+    };
+    window.addEventListener("activeProjectChanged", handleProjectChange);
+    window.addEventListener("storage", handleProjectChange);
+    return () => {
+      window.removeEventListener("activeProjectChanged", handleProjectChange);
+      window.removeEventListener("storage", handleProjectChange);
+    };
   }, [session, agentId]);
 
   useEffect(() => {

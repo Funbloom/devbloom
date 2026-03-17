@@ -59,6 +59,7 @@ export default function AdminPage() {
   const [scope, setScope] = useState<"generic" | "project">("generic");
   const [projectKey, setProjectKey] = useState("");
   const [activeProjectKey, setActiveProjectKey] = useState("");
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [projectStatus, setProjectStatus] = useState<string | null>(null);
   const [newProject, setNewProject] = useState({
     project_key: "",
@@ -104,7 +105,9 @@ export default function AdminPage() {
     currentProjectSources?: SourceItem[];
     otherSources?: SourceItem[];
   }>({ state: "idle" });
-  const [activeTab, setActiveTab] = useState<"rag" | "settings" | "tests" | "users">("rag");
+  const [activeTab, setActiveTab] = useState<"projects" | "rag" | "settings" | "tests" | "users">(
+    "projects",
+  );
   const { authUser, session } = useAuth();
   const [users, setUsers] = useState<{
     id: string;
@@ -151,6 +154,7 @@ export default function AdminPage() {
       setProjectStatus(`Error: ${message}`);
     } finally {
       setIsProjectsLoading(false);
+      setProjectsLoaded(true);
     }
   };
 
@@ -249,6 +253,7 @@ export default function AdminPage() {
   }, [session]);
 
   useEffect(() => {
+    if (!projectsLoaded) return;
     if (projects.length === 0) {
       if (activeProjectKey) {
         setActiveProjectKey("");
@@ -260,17 +265,15 @@ export default function AdminPage() {
       return;
     }
     const exists = projects.some((project) => project.project_key === activeProjectKey);
-    if (!exists) {
-      const nextKey = projects[0].project_key;
-      setActiveProjectKey(nextKey);
-      window.localStorage.setItem("activeProjectKey", nextKey);
+    if (activeProjectKey && !exists) {
+      setActiveProjectKey("");
+      window.localStorage.removeItem("activeProjectKey");
     }
-  }, [projects, activeProjectKey, scope]);
+  }, [projects, activeProjectKey, scope, projectsLoaded]);
 
   useEffect(() => {
     if (scope === "project") {
-      const fallbackKey = activeProjectKey || projects[0]?.project_key || "";
-      setProjectKey((prev) => prev || fallbackKey);
+      setProjectKey((prev) => prev || activeProjectKey || "");
     } else {
       setProjectKey("");
     }
@@ -459,9 +462,13 @@ export default function AdminPage() {
     setActiveProjectKey(value);
     if (value) {
       window.localStorage.setItem("activeProjectKey", value);
+      const name = projects.find((project) => project.project_key === value)?.display_name || value;
+      window.localStorage.setItem("activeProjectName", name);
     } else {
       window.localStorage.removeItem("activeProjectKey");
+      window.localStorage.removeItem("activeProjectName");
     }
+    window.dispatchEvent(new Event("activeProjectChanged"));
     if (scope === "project") {
       setProjectKey(value);
     }
@@ -686,6 +693,15 @@ export default function AdminPage() {
             <button
               type="button"
               role="tab"
+              aria-selected={activeTab === "projects"}
+              className={activeTab === "projects" ? "admin-tab active" : "admin-tab"}
+              onClick={() => setActiveTab("projects")}
+            >
+              Projects
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={activeTab === "rag"}
               className={activeTab === "rag" ? "admin-tab active" : "admin-tab"}
               onClick={() => setActiveTab("rag")}
@@ -727,7 +743,7 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {activeTab === "rag" && (
+        {activeTab === "projects" && (
         <>
         <div className="admin-card">
           <div className="admin-card-title">Project Config</div>
@@ -948,7 +964,11 @@ export default function AdminPage() {
             </div>
           )}
         </div>
+        </>
+        )}
 
+        {activeTab === "rag" && (
+        <>
         <div className="admin-card">
           <div className="admin-card-title">Upload PDF / DOCX / XLSX</div>
           <div className="admin-form">
@@ -1167,8 +1187,8 @@ export default function AdminPage() {
             </div>
           )}
         </div>
-        </>)
-        }
+        </>
+        )}
 
         {activeTab === "tests" && (
           <div className="admin-card admin-test-card">

@@ -49,12 +49,6 @@ chmod +x deploy/ec2-deploy.sh
 ./deploy/ec2-deploy.sh
 ```
 
-Or deploy a specific zip by name:
-
-```bash
-./deploy/ec2-deploy.sh gamedev-king-20260316_1605.zip
-```
-
 The script will: download from `s3://devbloom/releases/latest.zip` (or the given key), extract, sync `web/` and `api/` into `/home/ec2-user/gamedev-king`, keep existing `api/.env`, run `pip install -r requirements.txt` in the API venv, and restart `gamedev-api` and `gamedev-web`.
 
 **5. Check services**
