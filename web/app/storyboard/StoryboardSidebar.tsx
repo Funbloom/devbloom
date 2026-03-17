@@ -10,7 +10,12 @@ type GeneratedImageItem = { id: string; url: string; prompt?: string; tab?: stri
 function imageSrc(url: string | null | undefined): string {
   if (!url) return "";
   if (url.startsWith("http")) return url;
-  return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+  const base = API_BASE.replace(/\/$/, "");
+  const raw = url.startsWith("/") ? url : `/${url}`;
+  if (base.endsWith("/api") && raw.startsWith("/api/")) {
+    return `${base}${raw.slice(4)}`;
+  }
+  return `${base}${raw}`;
 }
 
 type Props = {
@@ -58,18 +63,24 @@ function urlToCharacterImagePath(url: string, projectKey?: string): string {
   if (url.startsWith("http")) {
     try {
       const parsed = new URL(url);
-      const path = parsed.pathname + parsed.search;
-      if (projectKey && parsed.pathname.startsWith("/images/") && !parsed.search) {
-        return `${parsed.pathname}?project_key=${encodeURIComponent(projectKey)}`;
+      let path = parsed.pathname + parsed.search;
+      if (path.startsWith("/api/")) {
+        path = path.slice(4);
+      }
+      if (projectKey && path.startsWith("/images/") && !path.includes("project_key=")) {
+        return `${path}${path.includes("?") ? "&" : "?"}project_key=${encodeURIComponent(projectKey)}`;
       }
       return path;
     } catch {
       return url;
     }
   }
-  const path = url.startsWith("/") ? url : `/${url}`;
+  let path = url.startsWith("/") ? url : `/${url}`;
+  if (path.startsWith("/api/")) {
+    path = path.slice(4);
+  }
   if (projectKey && path.startsWith("/images/") && !path.includes("project_key=")) {
-    return `${path}?project_key=${encodeURIComponent(projectKey)}`;
+    return `${path}${path.includes("?") ? "&" : "?"}project_key=${encodeURIComponent(projectKey)}`;
   }
   return path;
 }
