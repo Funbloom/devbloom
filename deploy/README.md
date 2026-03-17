@@ -14,9 +14,60 @@ Replace `/home/ec2-user/gamedev-king` and `ec2-user` if your app lives elsewhere
 
 ### Deploy from S3 (no build on EC2)
 
-- **build-and-upload.bat** (run on Windows from repo root or `deploy/`): runs **aws login** (AWS CLI v2) so you can use your console/SSO credentials, then builds web (Next.js standalone), zips web + api, and uploads to `s3://devbloom/releases/` as a timestamped zip and as `latest.zip`. Requires [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and `npm` in PATH.
-- **ec2-deploy.sh** (run on EC2): downloads `latest.zip` (or a given key) from that bucket, extracts into `APP_ROOT` (default `/home/ec2-user/gamedev-king`), restores existing `api/.env`, installs API Python deps, restarts `gamedev-api` and `gamedev-web`. Prereqs: AWS CLI (or instance role), `unzip`, `rsync`, Node, Python 3 + venv.
-- **gamedev-web-standalone.service.example** — Use this for the web service when deploying via S3 (standalone build). It runs `node server.js` instead of `npm start`. Copy over `gamedev-web.service` and run `sudo systemctl daemon-reload && sudo systemctl restart gamedev-web`.
+- **build-and-upload.bat** (run on Windows): builds web (Next.js standalone), zips web + api, uploads to `s3://devbloom/releases/` as a timestamped zip and as `latest.zip`. Requires [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and `npm` in PATH. Use `aws configure` (access keys) or remove `login_session` from `~/.aws/config` so the CLI uses your credentials file.
+- **ec2-deploy.sh** (run on EC2): downloads the zip from S3, extracts into `APP_ROOT`, restores `api/.env`, installs API deps, restarts services. See **Get zip from S3 and deploy** below for the exact commands.
+- **gamedev-web-standalone.service.example** — Use this for the web service when deploying via S3. It runs `node server.js` instead of `npm start`. Copy to `/etc/systemd/system/gamedev-web.service` and run `sudo systemctl daemon-reload && sudo systemctl restart gamedev-web`.
+
+### Get zip from S3 and deploy (on EC2)
+
+Prereqs on the instance: AWS CLI (or IAM instance role with S3 read), `unzip`, `rsync`, Node.js, **Python 3.10+** (API dependency `mcp` requires it). The app must already exist at `APP_ROOT` (e.g. first deploy: clone the repo or create the directory and put `api/.env` in place). On Amazon Linux 2, install Python 3.11 if needed: `sudo dnf install python3.11`.
+
+**1. SSH into EC2**
+
+```bash
+ssh -i .\Oregon_DevBloom.pem ec2-user@dev.funbloomstudio.com
+```
+
+**2. Go to the app directory**
+
+```bash
+cd /home/ec2-user/gamedev-king
+```
+
+(If your app is elsewhere, set `APP_ROOT` when running the script in step 4.)
+
+**3. Ensure the deploy script is there**
+
+If you deploy from git, pull so `deploy/ec2-deploy.sh` exists. If you copied the repo once, the script should already be at `deploy/ec2-deploy.sh`.
+
+**4. Download the zip from S3 and deploy**
+
+Deploy the latest build (what you uploaded with `build-and-upload.bat`):
+
+```bash
+chmod +x deploy/ec2-deploy.sh
+./deploy/ec2-deploy.sh
+```
+
+Or deploy a specific zip by name:
+
+```bash
+./deploy/ec2-deploy.sh gamedev-king-20260316_1605.zip
+```
+
+The script will: download from `s3://devbloom/releases/latest.zip` (or the given key), extract, sync `web/` and `api/` into `/home/ec2-user/gamedev-king`, keep existing `api/.env`, run `pip install -r requirements.txt` in the API venv, and restart `gamedev-api` and `gamedev-web`.
+
+**5. Check services**
+
+```bash
+sudo systemctl status gamedev-api gamedev-web
+```
+
+To use a different app root (e.g. `/opt/gamedev-king`):
+
+```bash
+APP_ROOT=/opt/gamedev-king ./deploy/ec2-deploy.sh
+```
 
 **If you get "Bad message"** when enabling the service, the unit file likely has Windows line endings. On the EC2 box run: `sudo sed -i 's/\r$//' /etc/systemd/system/gamedev-api.service` then `sudo systemctl daemon-reload && sudo systemctl enable --now gamedev-api`.
 

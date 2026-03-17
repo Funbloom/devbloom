@@ -53,10 +53,34 @@ fi
 
 echo "Installing API dependencies..."
 cd "${APP_ROOT}/api"
-if [[ ! -d ".venv" ]]; then
-  python3 -m venv .venv
+# mcp requires Python 3.10+; prefer python3.11/3.10 if available
+PYTHON=""
+for p in python3.12 python3.11 python3.10 python3; do
+  if command -v "$p" &>/dev/null && $p -c 'import sys; exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+    PYTHON="$p"
+    break
+  fi
+done
+[[ -z "$PYTHON" ]] && PYTHON=python3
+NEED_VENV=1
+if [[ -d ".venv" ]]; then
+  if .venv/bin/python3 -c 'import sys; exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+    NEED_VENV=0
+  else
+    echo "Removing old .venv (Python < 3.10); recreating with $PYTHON"
+    rm -rf .venv
+  fi
 fi
-.venv/bin/pip install -q -r requirements.txt
+if [[ "$NEED_VENV" -eq 1 ]]; then
+  $PYTHON -m venv .venv
+fi
+.venv/bin/python3 -m pip install --upgrade pip -q
+if ! .venv/bin/pip install -r requirements.txt; then
+  echo ""
+  echo "Install failed. The 'mcp' package requires Python 3.10+. Current: $(.venv/bin/python3 --version 2>/dev/null || echo 'unknown')"
+  echo "On Amazon Linux 2: sudo dnf install python3.11  then run this script again."
+  exit 1
+fi
 
 echo "Restarting services..."
 sudo systemctl restart gamedev-api

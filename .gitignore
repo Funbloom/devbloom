@@ -216,3 +216,4 @@ debug_prompts.txt
 docs
 web/.env.local
 deploy/staging
+deploy/*.zip
