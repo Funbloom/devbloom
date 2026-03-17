@@ -8,6 +8,8 @@ type Props = {
   onImagesPerRowChange: (value: string) => void;
   onImagesPerRowStep: (delta: number) => void;
   onDeleteImage: (id: string) => void;
+  onRemoveBackground: (id: string) => void;
+  onToggleLocation: (id: string) => void;
   emptyMessage?: string;
 };
 
@@ -17,9 +19,10 @@ export function ResultsPanel({
   onImagesPerRowChange,
   onImagesPerRowStep,
   onDeleteImage,
+  onRemoveBackground,
   emptyMessage = "No images yet. Enter a prompt and click Generate.",
   onToggleLocation,
-}: Props & { onToggleLocation: (id: string) => void }) {
+}: Props) {
   return (
     <div className="imagegen-right">
       <div className="imagegen-panel">
@@ -86,6 +89,15 @@ export function ResultsPanel({
                 <div className="imagegen-card-prompt" title={img.prompt}>
                   {img.prompt}
                 </div>
+                <button
+                  type="button"
+                  className="imagegen-delete-button"
+                  onClick={() => onRemoveBackground(img.id)}
+                  disabled={!img.filename}
+                  title={!img.filename ? "No filename available" : "Remove background"}
+                >
+                  Remove Bkg
+                </button>
                 <button
                   type="button"
                   className="imagegen-delete-button"

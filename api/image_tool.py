@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import requests
+try:
+    from rembg import new_session, remove as rembg_remove  # type: ignore
+except Exception:
+    rembg_remove = None
+    new_session = None
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from rag import require_project_path, resolve_project_path
@@ -631,3 +636,70 @@ def run_convert_image_tool(args: dict) -> dict:
         output_filename=args.get("output_filename"),
         project_key=str(args.get("project_key", "")).strip() or None,
     )
+
+
+def remove_background(
+    input_filename: str,
+    output_filename: str | None = None,
+    project_key: Optional[str] = None,
+    model: str | None = None,
+    alpha_matting: bool | None = None,
+    alpha_matting_foreground_threshold: int | None = None,
+    alpha_matting_background_threshold: int | None = None,
+) -> dict:
+    safe_name = validate_image_filename(input_filename)
+    input_path = safe_resolve_path(safe_name, project_key)
+    if not input_path.exists():
+        raise ValueError("Input image not found.")
+    technique = (os.getenv("BKGROMOVALTECH") or "rembg").strip().lower()
+
+    output_name = output_filename or build_image_filename("nobg", "png")
+    output_name = sanitize_filename(output_name, "png")
+
+    if technique in {"rembg", "open", "opensource"}:
+        if rembg_remove is None:
+            raise ValueError("rembg is not installed. Install it or switch BKGROMOVALTECH to ClipDrop.")
+        input_bytes = input_path.read_bytes()
+        try:
+            session = None
+            if model and new_session is not None:
+                session = new_session(model_name=model)
+            def _clamp_threshold(value: int | None, default: int) -> int:
+                if value is None:
+                    return default
+                return max(0, min(255, int(value)))
+
+            output_bytes = rembg_remove(
+                input_bytes,
+                session=session,
+                alpha_matting=bool(alpha_matting) if alpha_matting is not None else False,
+                alpha_matting_foreground_threshold=_clamp_threshold(alpha_matting_foreground_threshold, 240),
+                alpha_matting_background_threshold=_clamp_threshold(alpha_matting_background_threshold, 10),
+            )
+        except Exception as exc:
+            raise ValueError(f"rembg failed: {exc}") from exc
+        output_path = save_bytes_to_file(output_bytes, output_name, project_key)
+    else:
+        api_key = os.getenv("CLIPDROP_API_KEY")
+        if not api_key:
+            raise ValueError("CLIPDROP_API_KEY is missing.")
+        with input_path.open("rb") as file_handle:
+            response = requests.post(
+                "https://clipdrop-api.co/remove-background/v1",
+                files={"image_file": (input_path.name, file_handle)},
+                headers={"x-api-key": api_key},
+                timeout=120,
+            )
+
+        if not response.ok:
+            try:
+                error_payload = response.json()
+            except ValueError:
+                error_payload = response.text
+            raise ValueError(f"Clipdrop request failed: {error_payload}")
+        output_path = save_bytes_to_file(response.content, output_name, project_key)
+    return {
+        "filename": output_name,
+        "url": build_image_url(output_name, project_key),
+        "path": str(output_path),
+    }

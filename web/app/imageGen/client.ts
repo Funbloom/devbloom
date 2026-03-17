@@ -142,6 +142,44 @@ export async function uploadImageToCloud(
   return data.url;
 }
 
+export async function removeBackground(
+  inputFilename: string,
+  projectKey: string,
+  options?: {
+    model?: string;
+    alphaMatting?: boolean;
+    alphaMattingForegroundThreshold?: number;
+    alphaMattingBackgroundThreshold?: number;
+  }
+): Promise<BackendImageResult> {
+  const body: Record<string, unknown> = {
+    input_filename: inputFilename,
+    project_key: projectKey,
+  };
+  if (options?.model) body.model = options.model;
+  if (typeof options?.alphaMatting === "boolean") body.alpha_matting = options.alphaMatting;
+  if (typeof options?.alphaMattingForegroundThreshold === "number") {
+    body.alpha_matting_foreground_threshold = options.alphaMattingForegroundThreshold;
+  }
+  if (typeof options?.alphaMattingBackgroundThreshold === "number") {
+    body.alpha_matting_background_threshold = options.alphaMattingBackgroundThreshold;
+  }
+  const response = await fetchApi("/tools/remove_background", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(body.detail ?? `Remove background failed: ${response.status}`);
+  }
+  const data = (await response.json()) as BackendImageResult | unknown;
+  if (!data || typeof (data as BackendImageResult).url !== "string") {
+    throw new Error("Remove background succeeded but no URL was returned.");
+  }
+  return data as BackendImageResult;
+}
+
 export type GenerateCharacterImageParams = {
   role?: string;
   physical_description?: string;

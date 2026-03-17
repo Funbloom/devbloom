@@ -11,6 +11,7 @@ from image_tool import (
     crop_image,
     generate_image,
     get_images_dir,
+    remove_background,
     resize_image,
     safe_resolve_path,
     validate_image_filename,
@@ -70,6 +71,16 @@ class ConvertImageRequest(BaseModel):
     quality: int | None = None
     output_filename: str | None = None
     project_key: str | None = None
+
+
+class RemoveBackgroundRequest(BaseModel):
+    input_filename: str
+    output_filename: str | None = None
+    project_key: str | None = None
+    model: str | None = None
+    alpha_matting: bool | None = None
+    alpha_matting_foreground_threshold: int | None = Field(default=None, ge=0, le=255)
+    alpha_matting_background_threshold: int | None = Field(default=None, ge=0, le=255)
 
 
 def _build_character_prompt(
@@ -228,6 +239,25 @@ def convert_image_route(
             quality=body.quality,
             output_filename=body.output_filename,
             project_key=body.project_key,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@image_router.post("/tools/remove_background")
+def remove_background_route(
+    body: RemoveBackgroundRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return remove_background(
+            input_filename=body.input_filename,
+            output_filename=body.output_filename,
+            project_key=body.project_key,
+            model=body.model,
+            alpha_matting=body.alpha_matting,
+            alpha_matting_foreground_threshold=body.alpha_matting_foreground_threshold,
+            alpha_matting_background_threshold=body.alpha_matting_background_threshold,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

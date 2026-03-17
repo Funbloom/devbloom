@@ -13,3 +13,4 @@ openpyxl
 mcp
 PyJWT
 jwcrypto
+rembg[gpu,cli]

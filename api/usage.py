@@ -1,6 +1,6 @@
 """User usage tracking: image generation count per day. Enforces daily limit (admins exempt)."""
 import os
-from datetime import date, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
 
@@ -10,7 +10,7 @@ MAX_IMAGES_PER_USER_PER_DAY = int(os.getenv("MAX_IMAGES_PER_USER_PER_DAY", "20")
 
 
 def _today_utc() -> date:
-    return date.now(timezone.utc)
+    return datetime.now(timezone.utc).date()
 
 
 def get_usage_today(user_id: str) -> int:

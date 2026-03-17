@@ -12,6 +12,7 @@ import {
   getStyles,
   normalizeImageUrl,
   putImageGenerated,
+  removeBackground,
   uploadImageToCloud,
 } from "./client";
 import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
@@ -21,6 +22,19 @@ import { CharactersTabPanel } from "./CharactersTabPanel";
 import { ImageTabPanel } from "./ImageTabPanel";
 import { ResultsPanel } from "./ResultsPanel";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
+
+function Tooltip({ text }: { text: string }) {
+  return (
+    <span className="imagegen-tooltip">
+      <button type="button" className="imagegen-tooltip-trigger" aria-label={text}>
+        i
+      </button>
+      <span className="imagegen-tooltip-content" role="tooltip">
+        {text}
+      </span>
+    </span>
+  );
+}
 
 function parseStoredImages(raw: unknown[]): GeneratedImage[] {
   return raw
@@ -132,6 +146,12 @@ function StylesAddForm({
 
 export default function ImageGenPage() {
   const { session } = useAuth();
+  const BG_DEFAULTS = {
+    model: "isnet-general-use",
+    alphaMatting: false,
+    fgThreshold: 240,
+    bgThreshold: 10,
+  };
   const [projectKey, setProjectKey] = useState("");
   const [styles, setStyles] = useState<Awaited<ReturnType<typeof getStyles>>>([]);
   const [selectedStyleId, setSelectedStyleId] = useState<string>("__none");
@@ -153,6 +173,10 @@ export default function ImageGenPage() {
   const [isManagingStyles, setIsManagingStyles] = useState(false);
   const [defaultLocation, setDefaultLocation] = useState<ImageLocation>("local");
   const [isPrivate, setIsPrivate] = useState(false);
+  const [bgModel, setBgModel] = useState(BG_DEFAULTS.model);
+  const [bgAlphaMatting, setBgAlphaMatting] = useState(BG_DEFAULTS.alphaMatting);
+  const [bgFgThreshold, setBgFgThreshold] = useState(BG_DEFAULTS.fgThreshold);
+  const [bgBgThreshold, setBgBgThreshold] = useState(BG_DEFAULTS.bgThreshold);
 
   /** Only persist after initial load for this project has completed; avoids overwriting saved data with [] on mount. */
   const loadCompletedForProjectRef = useRef<string | null>(null);
@@ -434,6 +458,57 @@ export default function ImageGenPage() {
     [images, projectKey],
   );
 
+  const handleRemoveBackground = useCallback(
+    async (imageId: string) => {
+      const target = images.find((img) => img.id === imageId);
+      if (!target) return;
+      if (!projectKey) {
+        setStatus("Set an active project in Admin to remove background.");
+        return;
+      }
+      if (!target.filename) {
+        setStatus("Cannot determine filename for this image.");
+        return;
+      }
+      try {
+        setStatus("Removing background...");
+        const result = await removeBackground(target.filename, projectKey, {
+          model: bgModel,
+          alphaMatting: bgAlphaMatting,
+          alphaMattingForegroundThreshold: bgFgThreshold,
+          alphaMattingBackgroundThreshold: bgBgThreshold,
+        });
+        const now = new Date().toISOString();
+        let url = typeof result.url === "string" ? result.url : "";
+        if (url && !url.startsWith("http")) {
+          url = normalizeImageUrl(url);
+        }
+        let location: ImageLocation = target.location ?? defaultLocation;
+        let finalUrl = url;
+        if (location === "cloud") {
+          const uploaded = await uploadImageToCloud(projectKey, result.filename || target.filename);
+          finalUrl = uploaded;
+        }
+        const newItem: GeneratedImage = {
+          id: `${now}-${Math.random().toString(36).slice(2)}`,
+          url: finalUrl,
+          filename: result.filename || target.filename,
+          prompt: target.prompt,
+          styleName: target.styleName,
+          createdAt: now,
+          tab: target.tab,
+          location,
+        };
+        setImages((prev) => [newItem, ...prev]);
+        setStatus("Background removed.");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setStatus(`Error removing background: ${message}`);
+      }
+    },
+    [images, projectKey, defaultLocation],
+  );
+
   const visibleImages = images.filter((img) => img.tab === (activeTab === "styles" ? "image" : activeTab));
 
   return (
@@ -577,6 +652,97 @@ export default function ImageGenPage() {
                   </div>
                 )}
               </div>
+              <div className="sidebar-panel-content" style={{ marginTop: 16 }}>
+                <div className="section-title" style={{ marginBottom: 8 }}>
+                  Background Removal
+                </div>
+                <div className="sidebar-item" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+                  <div className="imagegen-label-row">
+                    <label className="imagegen-label" htmlFor="bg-model">
+                      Model
+                    </label>
+                    <Tooltip text="Select the segmentation model. General models work for most images; portrait/anime models are specialized." />
+                  </div>
+                  <select
+                    id="bg-model"
+                    className="imagegen-select"
+                    value={bgModel}
+                    onChange={(e) => setBgModel(e.target.value)}
+                  >
+                    <option value="u2net">u2net</option>
+                    <option value="isnet-general-use">isnet-general-use</option>
+                    <option value="birefnet-general">birefnet-general</option>
+                    <option value="birefnet-portrait">birefnet-portrait</option>
+                    <option value="isnet-anime">isnet-anime</option>
+                  </select>
+
+                  <div className="imagegen-label-row">
+                    <label className="imagegen-label" htmlFor="bg-alpha-matting">
+                      Alpha matting
+                    </label>
+                    <Tooltip text="Enable alpha matting to refine soft edges like hair or fur. Can be slower." />
+                  </div>
+                  <select
+                    id="bg-alpha-matting"
+                    className="imagegen-select"
+                    value={bgAlphaMatting ? "true" : "false"}
+                    onChange={(e) => setBgAlphaMatting(e.target.value === "true")}
+                  >
+                    <option value="false">Off</option>
+                    <option value="true">On</option>
+                  </select>
+
+                  <div className="imagegen-label-row">
+                    <label className="imagegen-label" htmlFor="bg-fg-threshold">
+                      Foreground threshold
+                    </label>
+                    <Tooltip text="Higher values keep more pixels as foreground. Lower values make the cutout tighter." />
+                  </div>
+                  <select
+                    id="bg-fg-threshold"
+                    className="imagegen-select"
+                    value={String(bgFgThreshold)}
+                    onChange={(e) => setBgFgThreshold(Number(e.target.value))}
+                  >
+                    {[50, 80, 100, 160, 200, 220, 240, 255].map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="imagegen-label-row">
+                    <label className="imagegen-label" htmlFor="bg-bg-threshold">
+                      Background threshold
+                    </label>
+                    <Tooltip text="Higher values treat more pixels as background. Lower values preserve more detail." />
+                  </div>
+                  <select
+                    id="bg-bg-threshold"
+                    className="imagegen-select"
+                    value={String(bgBgThreshold)}
+                    onChange={(e) => setBgBgThreshold(Number(e.target.value))}
+                  >
+                    {[0, 5, 10, 20, 30, 40, 60, 80].map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="imagegen-delete-button"
+                    onClick={() => {
+                      setBgModel(BG_DEFAULTS.model);
+                      setBgAlphaMatting(BG_DEFAULTS.alphaMatting);
+                      setBgFgThreshold(BG_DEFAULTS.fgThreshold);
+                      setBgBgThreshold(BG_DEFAULTS.bgThreshold);
+                    }}
+                  >
+                    Reset to defaults
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -588,6 +754,7 @@ export default function ImageGenPage() {
           onImagesPerRowStep={setImagesPerRowClamped}
           onDeleteImage={(id) => setImages((prev) => prev.filter((img) => img.id !== id))}
           onToggleLocation={toggleImageLocation}
+          onRemoveBackground={handleRemoveBackground}
           emptyMessage="No images yet. Enter a prompt and click Generate."
         />
       </div>
