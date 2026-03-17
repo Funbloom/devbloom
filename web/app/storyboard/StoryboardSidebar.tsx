@@ -54,15 +54,24 @@ type Props = {
 
 type TabId = "styles" | "characters" | "locations";
 
-function urlToCharacterImagePath(url: string): string {
+function urlToCharacterImagePath(url: string, projectKey?: string): string {
   if (url.startsWith("http")) {
     try {
-      return new URL(url).pathname;
+      const parsed = new URL(url);
+      const path = parsed.pathname + parsed.search;
+      if (projectKey && parsed.pathname.startsWith("/images/") && !parsed.search) {
+        return `${parsed.pathname}?project_key=${encodeURIComponent(projectKey)}`;
+      }
+      return path;
     } catch {
       return url;
     }
   }
-  return url.startsWith("/") ? url : `/${url}`;
+  const path = url.startsWith("/") ? url : `/${url}`;
+  if (projectKey && path.startsWith("/images/") && !path.includes("project_key=")) {
+    return `${path}?project_key=${encodeURIComponent(projectKey)}`;
+  }
+  return path;
 }
 
 export function StoryboardSidebar(props: Props) {
@@ -201,13 +210,13 @@ export function StoryboardSidebar(props: Props) {
   }, [pickLocationImageGenOpen, projectKey, fetchGeneratedLocationImages]);
 
   const handlePickGeneratedCharacterImage = (img: GeneratedImageItem) => {
-    const path = urlToCharacterImagePath(img.url);
+    const path = urlToCharacterImagePath(img.url, projectKey);
     onNewCharacterImageChange(path);
     setPickImageGenOpen(false);
   };
 
   const handlePickGeneratedLocationImage = (img: GeneratedImageItem) => {
-    const path = urlToCharacterImagePath(img.url);
+    const path = urlToCharacterImagePath(img.url, projectKey);
     onNewLocationImageChange(path);
     setPickLocationImageGenOpen(false);
   };

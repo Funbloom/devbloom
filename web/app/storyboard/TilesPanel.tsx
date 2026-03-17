@@ -96,6 +96,17 @@ export function TilesPanel(props: Props) {
             <div className="chat-header">Tiles for {storyboard.name}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <div className="edit-actions" style={{ alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  className="admin-link"
+                  onClick={() => onAddTileAfter(tiles.length - 1)}
+                  disabled={isSaving}
+                  title="Add a new tile at the end"
+                >
+                  Add Tile
+                </button>
+              </div>
+              <div className="edit-actions" style={{ alignItems: "center", gap: 8 }}>
                 <label style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                   <input
                     type="checkbox"
@@ -130,7 +141,21 @@ export function TilesPanel(props: Props) {
             className={`storyboard-tiles-grid ${presentationMode ? "storyboard-tiles-grid--presentation" : ""}`}
             style={{ gridTemplateColumns: `repeat(${tilesPerRow}, 1fr)` }}
           >
-            {tiles.length === 0 && <div className="status">No tiles yet.</div>}
+            {tiles.length === 0 && (
+              <div className="status">
+                No tiles yet.
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="admin-link"
+                    onClick={() => onAddTileAfter(-1)}
+                    disabled={isSaving}
+                  >
+                    Add first tile
+                  </button>
+                </div>
+              </div>
+            )}
             {presentationMode
               ? tiles.map((tile) => {
                   const tileSrc = tile.image ? imageSrc(tile.image) : "";
