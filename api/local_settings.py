@@ -60,9 +60,7 @@ def save_image_generated(project_key: str, images: list, user_id: str | None = N
 
 DEFAULT_IMAGE_SETTINGS = {
     "num_images": 2,
-    "width": 720,
-    "height": 1280,
-    "style": "high resolution cartoon, movie style",
+    "quality": "medium",
     # Default location for ImageGen outputs: "local" or "cloud"
     "location": "local",
 }

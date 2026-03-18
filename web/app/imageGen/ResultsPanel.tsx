@@ -89,22 +89,36 @@ export function ResultsPanel({
                 <div className="imagegen-card-prompt" title={img.prompt}>
                   {img.prompt}
                 </div>
-                <button
-                  type="button"
-                  className="imagegen-delete-button"
-                  onClick={() => onRemoveBackground(img.id)}
-                  disabled={!img.filename}
-                  title={!img.filename ? "No filename available" : "Remove background"}
-                >
-                  Remove Bkg
-                </button>
-                <button
-                  type="button"
-                  className="imagegen-delete-button"
-                  onClick={() => onDeleteImage(img.id)}
-                >
-                  Delete
-                </button>
+                <div className="imagegen-card-actions">
+                  <button
+                    type="button"
+                    className="imagegen-delete-button imagegen-action-button"
+                    onClick={() => {
+                      if (!img.prompt) return;
+                      navigator.clipboard?.writeText(img.prompt).catch(() => {});
+                    }}
+                    disabled={!img.prompt}
+                    title={!img.prompt ? "No prompt to copy" : "Copy prompt to clipboard"}
+                  >
+                    Copy prompt
+                  </button>
+                  <button
+                    type="button"
+                    className="imagegen-delete-button imagegen-action-button"
+                    onClick={() => onRemoveBackground(img.id)}
+                    disabled={!img.filename}
+                    title={!img.filename ? "No filename available" : "Remove background"}
+                  >
+                    Remove Bkg
+                  </button>
+                  <button
+                    type="button"
+                    className="imagegen-delete-button"
+                    onClick={() => onDeleteImage(img.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
           ))}

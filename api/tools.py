@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from auth import get_current_user
 from local_settings import load_image_generated, save_image_generated
 from image_tool import safe_resolve_path, validate_image_filename
+from code_settings import IMAGE_PROMPT_MODEL
 
 
 tools_router = APIRouter()
@@ -55,7 +56,7 @@ def generate_image_prompt(body: ImagePromptRequest) -> dict:
     ]
     try:
         resp = client.chat.completions.create(
-            model="gpt-5-mini",
+            model=IMAGE_PROMPT_MODEL,
             messages=messages,
             stream=False,
         )

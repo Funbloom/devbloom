@@ -16,9 +16,7 @@ settings_router = APIRouter()
 
 class ImageDefaults(BaseModel):
     num_images: Optional[int] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    style: Optional[str] = None
+    quality: Optional[Literal["high", "medium", "low"]] = None
     location: Optional[Literal["local", "cloud"]] = None
 
 
@@ -36,12 +34,9 @@ def update_image_defaults(body: ImageDefaults) -> dict:
     payload = body.model_dump(exclude_none=True)
     if "num_images" in payload:
         payload["num_images"] = max(1, min(int(payload["num_images"]), 4))
-    if "width" in payload:
-        payload["width"] = int(payload["width"])
-    if "height" in payload:
-        payload["height"] = int(payload["height"])
-    if "style" in payload:
-        payload["style"] = str(payload["style"]).strip()
+    if "quality" in payload:
+        quality = str(payload["quality"]).lower()
+        payload["quality"] = quality if quality in ("high", "medium", "low") else "medium"
     if "location" in payload:
         loc = str(payload["location"]).lower()
         payload["location"] = "cloud" if loc == "cloud" else "local"

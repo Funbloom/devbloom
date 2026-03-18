@@ -30,6 +30,7 @@ from image_tool import (
     run_generate_image_tool,
     run_resize_image_tool,
 )
+from code_settings import GPT_MODEL_DEFAULT, CONDENSE_MODEL
 from pdf_export import get_gen_output_dir, run_export_pdf_tool
 from docx_export import run_export_docx_tool
 from xlsx_export import run_export_xlsx_tool
@@ -101,7 +102,7 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(default_factory=list)
     message: Optional[str] = None
     agent: Optional[str] = "creative_director"
-    model: Optional[str] = "gpt-5-mini"
+    model: Optional[str] = GPT_MODEL_DEFAULT
     rag: Optional[RagOptions] = None
     debug_prompts: Optional[bool] = False
 
@@ -492,7 +493,7 @@ def condense_chat_history(agent_id: str, body: CondensePayload, user: dict = Dep
         chat_messages.append({"role": m.role, "content": (m.content or "").strip() or "(empty)"})
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=CONDENSE_MODEL,
             messages=chat_messages,
             stream=False,
         )
@@ -694,7 +695,7 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                 include_tools = use_tools_this_turn or tool_iterations > 0 or forced_tool_name is not None
 
                 create_kwargs: dict[str, Any] = {
-                    "model": body.model or "gpt-5-mini",
+                    "model": body.model or GPT_MODEL_DEFAULT,
                     "messages": pending_messages,
                     "stream": True,
                 }

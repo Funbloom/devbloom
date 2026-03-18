@@ -10,6 +10,10 @@ type Props = {
   styles: Style[];
   selectedStyleId: string;
   onSelectedStyleIdChange: (value: string) => void;
+  sizePreset: "square" | "portrait" | "landscape";
+  onSizePresetChange: (value: "square" | "portrait" | "landscape") => void;
+  qualityPreset: "high" | "medium" | "low";
+  onQualityPresetChange: (value: "high" | "medium" | "low") => void;
   onGeneratePrompt: () => void;
   onGenerate: () => void;
   isGenerating: boolean;
@@ -25,6 +29,10 @@ export function ImageTabPanel({
   styles,
   selectedStyleId,
   onSelectedStyleIdChange,
+  sizePreset,
+  onSizePresetChange,
+  qualityPreset,
+  onQualityPresetChange,
   onGeneratePrompt,
   onGenerate,
   isGenerating,
@@ -83,6 +91,34 @@ export function ImageTabPanel({
             {s.name}
           </option>
         ))}
+      </select>
+
+      <label className="imagegen-label" htmlFor="imagegen-size">
+        Size
+      </label>
+      <select
+        id="imagegen-size"
+        className="imagegen-select"
+        value={sizePreset}
+        onChange={(e) => onSizePresetChange(e.target.value as "square" | "portrait" | "landscape")}
+      >
+        <option value="square">Square</option>
+        <option value="portrait">Portrait</option>
+        <option value="landscape">Landscape</option>
+      </select>
+
+      <label className="imagegen-label" htmlFor="imagegen-quality">
+        Quality
+      </label>
+      <select
+        id="imagegen-quality"
+        className="imagegen-select"
+        value={qualityPreset}
+        onChange={(e) => onQualityPresetChange(e.target.value as "high" | "medium" | "low")}
+      >
+        <option value="high">High (1024)</option>
+        <option value="medium">Medium (512)</option>
+        <option value="low">Low (256)</option>
       </select>
 
       <button

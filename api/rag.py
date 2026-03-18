@@ -14,11 +14,15 @@ from openpyxl import load_workbook
 from supabase import Client, create_client
 
 from local_paths import get_local_project_path, require_local_project_path
+from code_settings import (
+    EMBEDDING_MODEL,
+    RAG_MAX_TOP_K,
+    RAG_DEFAULT_TOP_K,
+    EMBEDDING_BATCH_SIZE,
+)
 
-EMBEDDING_MODEL = "text-embedding-3-small"
-MAX_TOP_K = 20
-DEFAULT_TOP_K = 12
-EMBEDDING_BATCH_SIZE = 50
+MAX_TOP_K = RAG_MAX_TOP_K
+DEFAULT_TOP_K = RAG_DEFAULT_TOP_K
 VALID_SCOPES = ("generic", "project", "hybrid")
 
 

@@ -28,12 +28,15 @@ export function normalizeImageUrl(url: string): string {
 
 export async function generateImageFromPrompt(
   prompt: string,
-  options?: { negativePrompt?: string }
+  options?: { negativePrompt?: string; width?: number; height?: number; numImages?: number }
 ): Promise<BackendImageResult[]> {
   const body: Record<string, unknown> = { prompt };
   if (options?.negativePrompt?.trim()) {
     body.negative_prompt = options.negativePrompt.trim();
   }
+  if (typeof options?.width === "number") body.width = options.width;
+  if (typeof options?.height === "number") body.height = options.height;
+  if (typeof options?.numImages === "number") body.num_images = options.numImages;
   const response = await fetchApi("/tools/generate_image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

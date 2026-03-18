@@ -89,9 +89,7 @@ export default function AdminPage() {
   const [debugPrompts, setDebugPrompts] = useState(false);
   const [imageDefaults, setImageDefaults] = useState({
     num_images: 2,
-    width: 720,
-    height: 1280,
-    style: "high resolution cartoon, movie style",
+    quality: "medium" as "high" | "medium" | "low",
     location: "local" as "local" | "cloud",
   });
   const [imageDefaultsStatus, setImageDefaultsStatus] = useState<string | null>(null);
@@ -193,9 +191,7 @@ export default function AdminPage() {
       }
       const data = (await response.json()) as {
         num_images?: number;
-        width?: number;
-        height?: number;
-        style?: string;
+        quality?: "high" | "medium" | "low";
         location?: "local" | "cloud";
       };
       setImageDefaults((prev) => {
@@ -627,9 +623,7 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           num_images: imageDefaults.num_images,
-          width: imageDefaults.width,
-          height: imageDefaults.height,
-          style: imageDefaults.style,
+          quality: imageDefaults.quality,
           location: imageDefaults.location,
         }),
       });
@@ -639,9 +633,7 @@ export default function AdminPage() {
       }
       const data = (await response.json()) as {
         num_images?: number;
-        width?: number;
-        height?: number;
-        style?: string;
+        quality?: "high" | "medium" | "low";
         location?: "local" | "cloud";
       };
       setImageDefaults((prev) => ({
@@ -1365,43 +1357,20 @@ export default function AdminPage() {
                   />
                 </label>
                 <label className="admin-field">
-                  <span>Width</span>
-                  <input
-                    type="number"
-                    value={imageDefaults.width}
+                  <span>Quality</span>
+                  <select
+                    value={imageDefaults.quality}
                     onChange={(e) =>
                       setImageDefaults((prev) => ({
                         ...prev,
-                        width: Number(e.target.value),
+                        quality: e.target.value as "high" | "medium" | "low",
                       }))
                     }
-                  />
-                </label>
-                <label className="admin-field">
-                  <span>Height</span>
-                  <input
-                    type="number"
-                    value={imageDefaults.height}
-                    onChange={(e) =>
-                      setImageDefaults((prev) => ({
-                        ...prev,
-                        height: Number(e.target.value),
-                      }))
-                    }
-                  />
-                </label>
-                <label className="admin-field admin-field-path">
-                  <span>Style</span>
-                  <input
-                    type="text"
-                    value={imageDefaults.style}
-                    onChange={(e) =>
-                      setImageDefaults((prev) => ({
-                        ...prev,
-                        style: e.target.value,
-                      }))
-                    }
-                  />
+                  >
+                    <option value="high">High (1024)</option>
+                    <option value="medium">Medium (512)</option>
+                    <option value="low">Low (256)</option>
+                  </select>
                 </label>
                 <label className="admin-field">
                   <span>ImageGen Location</span>

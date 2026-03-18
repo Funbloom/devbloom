@@ -602,6 +602,13 @@ main {
   font-size: 12px;
 }
 
+.imagegen-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .imagegen-card-style {
   color: #9aa3b2;
 }
@@ -636,6 +643,20 @@ main {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.imagegen-action-button {
+  background: rgba(59, 130, 246, 0.2);
+  color: #bfdbfe;
+}
+
+.imagegen-action-button:hover {
+  background: rgba(59, 130, 246, 0.32);
+  color: #eff6ff;
+}
+
+.imagegen-action-button:disabled {
+  opacity: 0.6;
 }
 
 .message {

@@ -19,25 +19,19 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from rag import require_project_path, resolve_project_path
 from local_settings import load_image_defaults
+from code_settings import (
+    ALLOWED_IMAGE_DIMENSIONS,
+    IMAGE_MAX_IMAGES,
+    IMAGE_MAX_PROMPT_LEN,
+)
 
 MAX_FILENAME_LEN = 120
 ALLOWED_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 ALLOWED_IMAGE_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
 ALLOWED_FORMATS = {"png", "jpg", "jpeg", "webp"}
-ALLOWED_DIMENSIONS = {
-    672,
-    768,
-    832,
-    864,
-    896,
-    1024,
-    1152,
-    1184,
-    1248,
-    1344,
-}
-MAX_PROMPT_LEN = 1000
-MAX_IMAGES = 4
+ALLOWED_DIMENSIONS = ALLOWED_IMAGE_DIMENSIONS
+MAX_PROMPT_LEN = IMAGE_MAX_PROMPT_LEN
+MAX_IMAGES = IMAGE_MAX_IMAGES
 
 
 def _shorten_prompt(prompt: str, max_len: int = MAX_PROMPT_LEN) -> str:
@@ -224,7 +218,9 @@ def _generate_image_gemini(
         aspect_ratio = "9:16"
 
     max_dim = max(width, height)
-    if max_dim <= 1024:
+    if max_dim <= 512:
+        image_size = "512"
+    elif max_dim <= 1024:
         image_size = "1K"
     elif max_dim <= 2048:
         image_size = "2K"
@@ -350,21 +346,24 @@ def generate_image(
         raise ValueError("Prompt is required.")
     prompt = _shorten_prompt(prompt, MAX_PROMPT_LEN)
 
-    width = _clamp_dimension(width)
-    height = _clamp_dimension(height)
-    quantity = max(1, min(num_images, MAX_IMAGES))
-
     # Prefer Gemini Nano Banana (Gemini 3.1 Flash Image) when configured.
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if gemini_key:
+        quantity = max(1, min(num_images, MAX_IMAGES))
+        safe_width = max(144, int(width))
+        safe_height = max(144, int(height))
         return _generate_image_gemini(
             prompt=prompt,
-            width=width,
-            height=height,
+            width=safe_width,
+            height=safe_height,
             quantity=quantity,
             project_key=project_key,
             reference_image_filenames=reference_image_filenames,
         )
+
+    width = _clamp_dimension(width)
+    height = _clamp_dimension(height)
+    quantity = max(1, min(num_images, MAX_IMAGES))
 
     api_key = os.getenv("LEONARDO_API_KEY")
     if not api_key:
@@ -590,9 +589,6 @@ def convert_image(
 def run_generate_image_tool(args: dict) -> dict:
     defaults = load_image_defaults()
     prompt = str(args.get("prompt", "")).strip()
-    style = str(defaults.get("style", "")).strip()
-    if style and "style" not in prompt.lower():
-        prompt = f"{prompt} Style: {style}."
     return generate_image(
         prompt=prompt,
         negative_prompt=args.get("negative_prompt"),

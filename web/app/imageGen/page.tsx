@@ -177,6 +177,12 @@ export default function ImageGenPage() {
   const [bgAlphaMatting, setBgAlphaMatting] = useState(BG_DEFAULTS.alphaMatting);
   const [bgFgThreshold, setBgFgThreshold] = useState(BG_DEFAULTS.fgThreshold);
   const [bgBgThreshold, setBgBgThreshold] = useState(BG_DEFAULTS.bgThreshold);
+  const [sizePreset, setSizePreset] = useState<"square" | "portrait" | "landscape">("square");
+  const [qualityPreset, setQualityPreset] = useState<"high" | "medium" | "low">("medium");
+  const [imageDefaults, setImageDefaults] = useState({
+    num_images: 2,
+    quality: "medium" as "high" | "medium" | "low",
+  });
 
   /** Only persist after initial load for this project has completed; avoids overwriting saved data with [] on mount. */
   const loadCompletedForProjectRef = useRef<string | null>(null);
@@ -192,9 +198,18 @@ export default function ImageGenPage() {
       try {
         const response = await fetchApi("/settings/image_defaults");
         if (!response.ok) return;
-        const data = (await response.json()) as { location?: string };
+        const data = (await response.json()) as {
+          location?: string;
+          num_images?: number;
+          quality?: "high" | "medium" | "low";
+        };
         const loc = data.location === "cloud" ? "cloud" : "local";
         setDefaultLocation(loc);
+        setImageDefaults((prev) => ({
+          ...prev,
+          num_images: typeof data.num_images === "number" ? data.num_images : prev.num_images,
+          quality: data.quality || prev.quality,
+        }));
       } catch {
         // ignore, fall back to local
       }
@@ -292,7 +307,27 @@ export default function ImageGenPage() {
       const style = selectedStyleId !== "__none" ? styles.find((s) => s.id === selectedStyleId) ?? null : null;
       let fullPrompt = base;
       if (style?.prompt) fullPrompt = `${style.prompt}\n\n${base}`;
-      const backendImages = await generateImageFromPrompt(fullPrompt);
+      const sizeMap: Record<"high" | "medium" | "low", number> = {
+        high: 1024,
+        medium: 512,
+        low: 256,
+      };
+      const quality = imageDefaults.quality || qualityPreset;
+      const baseSize = sizeMap[quality] ?? 1024;
+      let width = baseSize;
+      let height = baseSize;
+      if (sizePreset === "landscape") {
+        width = baseSize;
+        height = Math.max(1, Math.round((baseSize * 9) / 16));
+      } else if (sizePreset === "portrait") {
+        width = Math.max(1, Math.round((baseSize * 9) / 16));
+        height = baseSize;
+      }
+      const backendImages = await generateImageFromPrompt(fullPrompt, {
+        width,
+        height,
+        numImages: imageDefaults.num_images,
+      });
       const now = new Date().toISOString();
       const newItems: GeneratedImage[] = backendImages.map((img, index) => {
         const raw = (img.url || img.filename || "") as string;
@@ -565,6 +600,10 @@ export default function ImageGenPage() {
                     styles={styles}
                     selectedStyleId={selectedStyleId}
                     onSelectedStyleIdChange={setSelectedStyleId}
+                    sizePreset={sizePreset}
+                    onSizePresetChange={setSizePreset}
+                    qualityPreset={qualityPreset}
+                    onQualityPresetChange={setQualityPreset}
                     onGeneratePrompt={handleGeneratePrompt}
                     onGenerate={handleGenerate}
                     isGenerating={isGenerating}
