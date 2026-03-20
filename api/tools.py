@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from auth import get_current_user
 from local_settings import load_image_generated, save_image_generated
 from image_tool import safe_resolve_path, validate_image_filename
+from xlsx_jobs import enqueue_xlsx_job, get_xlsx_job
 from code_settings import IMAGE_PROMPT_MODEL
 
 
@@ -27,6 +28,13 @@ class ImageGeneratedPutBody(BaseModel):
 class ImageToCloudBody(BaseModel):
     project_key: str = Field(min_length=1)
     filename: str = Field(min_length=1)
+
+
+class XlsxExportRequest(BaseModel):
+    title: str = Field(min_length=1)
+    sheets: list = Field(default_factory=list)
+    filename: Optional[str] = None
+    project_key: Optional[str] = None
 
 
 @tools_router.post("/tools/generate_image_prompt")
@@ -127,3 +135,17 @@ def image_to_cloud_route(body: ImageToCloudBody) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - unexpected
         raise HTTPException(status_code=500, detail=f"Failed to upload image to cloud: {exc}") from exc
+
+
+@tools_router.post("/tools/export_xlsx_async")
+def export_xlsx_async(body: XlsxExportRequest, _user: dict = Depends(get_current_user)) -> dict:
+    job = enqueue_xlsx_job(body.model_dump())
+    return {"job_id": job["id"], "status": job["status"]}
+
+
+@tools_router.get("/tools/xlsx_jobs/{job_id}")
+def get_xlsx_job_status(job_id: str, _user: dict = Depends(get_current_user)) -> dict:
+    job = get_xlsx_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return job

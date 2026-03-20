@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "../lib/supabase";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,6 +20,13 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    try {
+      await fetch(`${API_BASE}/auth/me`, { method: "HEAD" });
+    } catch {
+      setLoading(false);
+      setError("Server is down. Please try again.");
+      return;
+    }
     const supabase = createClient();
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
@@ -30,6 +39,12 @@ export default function LoginPage() {
 
   async function handleGoogleSignIn() {
     setError(null);
+    try {
+      await fetch(`${API_BASE}/auth/me`, { method: "HEAD" });
+    } catch {
+      setError("Server is down. Please try again.");
+      return;
+    }
     const supabase = createClient();
     // Google OAuth: In Google Cloud Console → Credentials → OAuth client →
     // Authorized redirect URIs must include: https://<project-ref>.supabase.co/auth/v1/callback

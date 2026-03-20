@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { createClient } from "../lib/supabase";
-import { setApiAccessToken, setOnUnauthorized } from "../lib/api";
+import { setApiAccessToken, setOnServerDown, setOnUnauthorized, setOnUnauthorizedMessage } from "../lib/api";
 import type { User, Session } from "@supabase/supabase-js";
 
 type AuthUser = { id: string; email: string; is_admin: boolean };
@@ -34,6 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expiredMessage, setExpiredMessage] = useState<string | null>(null);
+  const serverDownRef = useRef(false);
   const router = useRouter();
 
   const refreshAuthUser = useCallback(async () => {
@@ -59,6 +61,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch {
       setAuthUser(null);
+      if (!serverDownRef.current) {
+        serverDownRef.current = true;
+        setExpiredMessage("Server is down. Please sign in again.");
+        window.setTimeout(() => setExpiredMessage(null), 5000);
+        signOutRef.current();
+      }
     }
   }, []);
 
@@ -102,7 +110,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   signOutRef.current = signOut;
   useEffect(() => {
     setOnUnauthorized(() => () => signOutRef.current());
-    return () => setOnUnauthorized(null);
+    setOnUnauthorizedMessage(() => () => {
+      setExpiredMessage("Session expired. Please sign in again.");
+      window.setTimeout(() => setExpiredMessage(null), 4000);
+    });
+    setOnServerDown(() => () => {
+      if (!serverDownRef.current) {
+        serverDownRef.current = true;
+        setExpiredMessage("Server is down. Please sign in again.");
+        window.setTimeout(() => setExpiredMessage(null), 5000);
+        signOutRef.current();
+      }
+    });
+    return () => {
+      setOnUnauthorized(null);
+      setOnServerDown(null);
+    };
   }, []);
 
   const value: AuthContextValue = {
@@ -116,6 +139,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={value}>
+      {expiredMessage && (
+        <div className="session-expired-banner" role="status" aria-live="polite">
+          {expiredMessage}
+        </div>
+      )}
       {children}
     </AuthContext.Provider>
   );

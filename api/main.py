@@ -34,6 +34,7 @@ from code_settings import GPT_MODEL_DEFAULT, CONDENSE_MODEL
 from pdf_export import get_gen_output_dir, run_export_pdf_tool
 from docx_export import run_export_docx_tool
 from xlsx_export import run_export_xlsx_tool
+from xlsx_jobs import enqueue_xlsx_job
 from pdf_routes import pdf_router
 from rag import (
     get_default_project_key_value,
@@ -228,10 +229,12 @@ def normalize_agent_id(agent_id: Optional[str]) -> str:
 
 def get_history_path(agent_id: str, user: dict, project_key: Optional[str]) -> Path:
     safe_agent = normalize_agent_id(agent_id)
-    safe_user = _safe_path_segment(str(user.get("id") or user.get("email")), "anonymous")
+    raw_email = str(user.get("email") or user.get("id") or "")
+    email_key = raw_email.replace("@", ".")
+    safe_user = _safe_path_segment(email_key, "anonymous")
     safe_project = _safe_path_segment(project_key, "no_project")
-    filename = f"{HISTORY_PREFIX}{safe_agent}.json"
-    return HISTORY_BASE_DIR / safe_user / safe_project / filename
+    # .local_data/history/<project>/<user-email>/<agent>.json
+    return HISTORY_BASE_DIR / safe_project / safe_user / f"{safe_agent}.json"
 
 
 def load_persona_text(agent_id: str) -> str:
@@ -760,8 +763,8 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                                     result = run_export_pdf_tool(extracted)
                                     yield sse_event("pdf_saved", json.dumps(result))
                                 elif forced_tool_name == "export_xlsx":
-                                    result = run_export_xlsx_tool(extracted)
-                                    yield sse_event("xlsx_saved", json.dumps(result))
+                                    job = enqueue_xlsx_job(extracted)
+                                    yield sse_event("xlsx_job", json.dumps({"job_id": job["id"]}))
                             except Exception as exc:
                                 log_debug_error(
                                     f"[tool_error] {forced_tool_name}",
@@ -844,9 +847,9 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                             event_name = "docx_saved"
                             event_payload = result
                         elif tool_name == "export_xlsx":
-                            result = run_export_xlsx_tool(parsed_args)
-                            event_name = "xlsx_saved"
-                            event_payload = result
+                            job = enqueue_xlsx_job(parsed_args)
+                            event_name = "xlsx_job"
+                            event_payload = {"job_id": job["id"]}
                         elif tool_name == "generate_image":
                             result = run_generate_image_tool(parsed_args)
                             event_name = "image_generated"

@@ -33,6 +33,7 @@ type ChatMessage = {
     downloadUrl?: string;
     path?: string;
     error?: string;
+    jobId?: string;
   };
 };
 
@@ -154,6 +155,7 @@ export default function HomePage() {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const historySaveTimers = useRef<Record<string, number>>({});
+  const xlsxJobPollers = useRef<Record<string, boolean>>({});
   const [autoScroll, setAutoScroll] = useState(true);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -245,6 +247,95 @@ export default function HomePage() {
     historySaveTimers.current[targetAgent] = window.setTimeout(() => {
       void saveHistory(targetAgent, nextMessages);
     }, 600);
+  };
+
+  const pollXlsxJob = async (jobId: string, targetAgent: string) => {
+    if (!jobId || xlsxJobPollers.current[jobId]) return;
+    xlsxJobPollers.current[jobId] = true;
+    const maxAttempts = 90;
+    const delayMs = 2000;
+    try {
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const response = await fetchApi(`/tools/xlsx_jobs/${jobId}`);
+        if (!response.ok) {
+          throw new Error(`XLSX job failed: ${response.status}`);
+        }
+        const job = (await response.json()) as {
+          status?: string;
+          filename?: string;
+          download_url?: string;
+          path?: string;
+          error?: string;
+        };
+        if (job.status === "done") {
+          const rawUrl = job.download_url;
+          const downloadUrl = rawUrl
+            ? rawUrl.startsWith("http")
+              ? rawUrl
+              : `${API_BASE}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`
+            : job.filename
+              ? `${API_BASE}/downloads/${job.filename}`
+              : "";
+          updateHistory(targetAgent, (prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last && last.role === "assistant" && last.xlsx) {
+              next[next.length - 1] = {
+                ...last,
+                xlsx: {
+                  status: "saved",
+                  filename: job.filename,
+                  downloadUrl,
+                  path: job.path,
+                  jobId,
+                },
+              };
+            }
+            return next;
+          });
+          return;
+        }
+        if (job.status === "error") {
+          updateHistory(targetAgent, (prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last && last.role === "assistant" && last.xlsx) {
+              next[next.length - 1] = {
+                ...last,
+                xlsx: {
+                  status: "error",
+                  error: job.error || "XLSX export failed.",
+                  jobId,
+                },
+              };
+            }
+            return next;
+          });
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+      }
+      updateHistory(targetAgent, (prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last && last.role === "assistant" && last.xlsx) {
+          next[next.length - 1] = {
+            ...last,
+            xlsx: {
+              status: "error",
+              error: "XLSX export timed out.",
+              jobId,
+            },
+          };
+        }
+        return next;
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setStatus(`Error: ${message}`);
+    } finally {
+      delete xlsxJobPollers.current[jobId];
+    }
   };
 
   useEffect(() => {
@@ -493,6 +584,29 @@ export default function HomePage() {
               } catch {
                 // Ignore malformed payloads.
               }
+            } else if (evt.event === "xlsx_job") {
+              try {
+                const payload = JSON.parse(evt.data) as { job_id?: string };
+                const jobId = payload.job_id || "";
+                if (!jobId) return;
+                updateHistory(targetAgent, (prev) => {
+                  const next = [...prev];
+                  const last = next[next.length - 1];
+                  if (last && last.role === "assistant") {
+                    next[next.length - 1] = {
+                      ...last,
+                      xlsx: {
+                        status: "saving",
+                        jobId,
+                      },
+                    };
+                  }
+                  return next;
+                });
+                void pollXlsxJob(jobId, targetAgent);
+              } catch {
+                // Ignore malformed payloads.
+              }
             } else if (evt.event === "xlsx_saved") {
               try {
                 const payload = JSON.parse(evt.data) as {
@@ -564,7 +678,7 @@ export default function HomePage() {
             },
           };
         }
-        if (last && last.role === "assistant" && last.xlsx?.status === "saving") {
+        if (last && last.role === "assistant" && last.xlsx?.status === "saving" && !last.xlsx.jobId) {
           next[next.length - 1] = {
             ...last,
             xlsx: {
@@ -999,7 +1113,7 @@ export default function HomePage() {
                         <div className="pdf-actions">
                           {msg.docx.downloadUrl && (
                             <>
-                              <a className="pdf-link" href={msg.docx.downloadUrl}>
+                              <a className="pdf-link" href={msg.docx.downloadUrl} download>
                                 Download
                               </a>
                               <a
@@ -1028,7 +1142,7 @@ export default function HomePage() {
                         <div className="pdf-actions">
                           {msg.xlsx.downloadUrl && (
                             <>
-                              <a className="pdf-link" href={msg.xlsx.downloadUrl}>
+                              <a className="pdf-link" href={msg.xlsx.downloadUrl} download>
                                 Download
                               </a>
                               <a
