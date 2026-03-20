@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
-from image_tool import generate_image
-from rag import get_supabase_client
+from services.image_tool import generate_image
+from services.rag import get_supabase_client
 
 
 def _now_iso() -> str:
@@ -744,7 +744,7 @@ def generate_tile_image(tile_id: str, current_user_id: Optional[str] = None) -> 
 
         # Upload to Supabase Storage so the image is available from any machine
         try:
-            from image_storage import upload_image_to_supabase
+            from services.image_storage import upload_image_to_supabase
             path_str = first.get("path")
             filename = first.get("filename") or "image.png"
             if path_str and Path(path_str).exists():

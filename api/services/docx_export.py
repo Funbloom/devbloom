@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 
 from docx import Document
 
-from pdf_export import get_doc_output_dir
+from services.pdf_export import get_doc_output_dir
 
 MAX_FILENAME_LEN = 120
 ALLOWED_FILENAME_RE = re.compile(r"[^a-zA-Z0-9\-_. ]+")

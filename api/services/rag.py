@@ -13,8 +13,8 @@ from docx import Document
 from openpyxl import load_workbook
 from supabase import Client, create_client
 
-from local_paths import get_local_project_path, require_local_project_path
-from code_settings import (
+from core.local_paths import get_local_project_path, require_local_project_path
+from core.code_settings import (
     EMBEDDING_MODEL,
     RAG_MAX_TOP_K,
     RAG_DEFAULT_TOP_K,

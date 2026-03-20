@@ -51,7 +51,7 @@ def _get_mcp_config_path() -> Optional[Path]:
         return (_project_root() / p).resolve() if (_project_root() / p).exists() else None
     for candidate in [
         _project_root() / ".cursor" / "mcp.json",
-        Path(__file__).resolve().parent / "mcp_servers.json",
+        _project_root() / "mcp_servers.json",
     ]:
         if candidate.exists():
             return candidate

@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from auth import get_current_user
-from usage import check_can_generate_images, increment_usage
-from image_tool import (
+from core.auth import get_current_user
+from services.usage import check_can_generate_images, increment_usage
+from services.image_tool import (
     convert_image,
     crop_image,
     generate_image,
@@ -16,7 +16,7 @@ from image_tool import (
     safe_resolve_path,
     validate_image_filename,
 )
-from storyboard import list_styles
+from services.storyboard import list_styles
 
 image_router = APIRouter()
 
@@ -289,7 +289,11 @@ def get_image(filename: str, project_key: str | None = None) -> FileResponse:
         if not exists:
             raise HTTPException(
                 status_code=404,
-                detail=f"Image not found. Looked in {images_dir}. Images are stored locally when generated; ensure the API runs on the same machine or that project paths match.",
+                detail=(
+                    "Image not found. Looked in "
+                    f"{images_dir}. Images are stored locally when generated; ensure the API runs on the same machine "
+                    "or that project paths match."
+                ),
             )
         media_type, _ = mimetypes.guess_type(path.name)
         return FileResponse(path, media_type=media_type or "application/octet-stream", filename=path.name)

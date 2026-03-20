@@ -234,7 +234,7 @@ def get_tools() -> list[dict]:
     ]
     mcp_tools = []
     try:
-        from mcp_client import get_mcp_tools_openai
+        from core.mcp_client import get_mcp_tools_openai
     except Exception as e:
         import logging
         logging.getLogger(__name__).debug("MCP client not available: %s", e)

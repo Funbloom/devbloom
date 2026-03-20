@@ -4,17 +4,17 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from image_tool import get_images_dir
-from docx_export import build_docx_filename, write_docx
-from pdf_export import (
+from services.image_tool import get_images_dir
+from services.docx_export import build_docx_filename, write_docx
+from services.pdf_export import (
     build_filename,
     ensure_output_path,
     get_doc_output_dir,
     validate_download_filename,
     write_pdf,
 )
-from rag import resolve_project_path
-from xlsx_export import get_xlsx_download_path
+from services.rag import resolve_project_path
+from services.xlsx_export import get_xlsx_download_path
 
 pdf_router = APIRouter()
 

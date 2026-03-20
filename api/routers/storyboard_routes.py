@@ -3,13 +3,13 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from auth import get_current_user
+from core.auth import get_current_user
 
-from image_tool import build_image_filename, build_image_url, save_bytes_to_file
-from image_storage import upload_image_to_supabase
-from rag import get_supabase_client
-from usage import check_can_generate_images, increment_usage
-from storyboard import (
+from services.image_tool import build_image_filename, build_image_url, save_bytes_to_file
+from services.image_storage import upload_image_to_supabase
+from services.rag import get_supabase_client
+from services.usage import check_can_generate_images, increment_usage
+from services.storyboard import (
     add_character,
     add_location,
     add_style,
@@ -410,4 +410,3 @@ def api_generate_tile(
     result = generate_tile_image(tile_id, current_user_id=user.get("id"))
     increment_usage(user.get("id") or "", 1)
     return result
-

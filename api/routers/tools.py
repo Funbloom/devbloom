@@ -5,11 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from auth import get_current_user
-from local_settings import load_image_generated, save_image_generated
-from image_tool import safe_resolve_path, validate_image_filename
-from xlsx_jobs import enqueue_xlsx_job, get_xlsx_job
-from code_settings import IMAGE_PROMPT_MODEL
+from core.auth import get_current_user
+from core.local_settings import load_image_generated, save_image_generated
+from services.image_tool import safe_resolve_path, validate_image_filename
+from services.xlsx_jobs import enqueue_xlsx_job, get_xlsx_job
+from core.code_settings import IMAGE_PROMPT_MODEL
 
 
 tools_router = APIRouter()
@@ -119,7 +119,7 @@ def image_to_cloud_route(body: ImageToCloudBody) -> dict:
 
         # Lazy import so Supabase is only required when this endpoint is used.
         try:
-            from image_storage import upload_image_to_supabase
+            from services.image_storage import upload_image_to_supabase
         except Exception as exc:  # pragma: no cover - import-time failure
             raise HTTPException(status_code=500, detail=f"Cloud storage not configured: {exc}") from exc
 

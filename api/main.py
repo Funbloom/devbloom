@@ -22,38 +22,38 @@ from fastapi.responses import StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from llm_tools import BUILTIN_TOOL_NAMES, get_tools
-from image_router import image_router
-from image_tool import (
+from core.llm_tools import BUILTIN_TOOL_NAMES, get_tools
+from routers.image_router import image_router
+from services.image_tool import (
     run_convert_image_tool,
     run_crop_image_tool,
     run_generate_image_tool,
     run_resize_image_tool,
 )
-from code_settings import GPT_MODEL_DEFAULT, CONDENSE_MODEL
-from pdf_export import get_gen_output_dir, run_export_pdf_tool
-from docx_export import run_export_docx_tool
-from xlsx_export import run_export_xlsx_tool
-from xlsx_jobs import enqueue_xlsx_job
-from pdf_routes import pdf_router
-from rag import (
+from core.code_settings import GPT_MODEL_DEFAULT, CONDENSE_MODEL
+from services.pdf_export import get_gen_output_dir, run_export_pdf_tool
+from services.docx_export import run_export_docx_tool
+from services.xlsx_export import run_export_xlsx_tool
+from services.xlsx_jobs import enqueue_xlsx_job
+from routers.pdf_routes import pdf_router
+from services.rag import (
     get_default_project_key_value,
     get_supabase_client,
     get_project_display_name,
     retrieve_chunks,
     resolve_scope_and_project_key,
 )
-from projects import projects_router
-from rag_routes import rag_router
-from storyboard_routes import storyboard_router
-from settings import settings_router
-from tools import tools_router
-from skills_loader import build_available_skills_xml, get_skill_content
-from auth import get_current_user, require_admin
-from usage import get_usage_for_users
+from routers.projects import projects_router
+from routers.rag_routes import rag_router
+from routers.storyboard_routes import storyboard_router
+from routers.settings import settings_router
+from routers.tools import tools_router
+from core.skills_loader import build_available_skills_xml, get_skill_content
+from core.auth import get_current_user, require_admin
+from services.usage import get_usage_for_users
 
 try:
-    from mcp_client import call_mcp_tool
+    from core.mcp_client import call_mcp_tool
 except ImportError:
     call_mcp_tool = None
 
@@ -109,10 +109,10 @@ class ChatRequest(BaseModel):
 
 
 AGENT_PERSONA_FILES = {
-    "creative_director": Path(__file__).parent / "personas" / "creative_director.json",
-    "art_director": Path(__file__).parent / "personas" / "art_director.json",
-    "technical_director": Path(__file__).parent / "personas" / "technical_director.json",
-    "producer": Path(__file__).parent / "personas" / "producer.json",
+    "creative_director": Path(__file__).parent / "data" / "personas" / "creative_director.json",
+    "art_director": Path(__file__).parent / "data" / "personas" / "art_director.json",
+    "technical_director": Path(__file__).parent / "data" / "personas" / "technical_director.json",
+    "producer": Path(__file__).parent / "data" / "personas" / "producer.json",
 }
 AGENT_HISTORIES: dict[str, List[ChatMessage]] = {}
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

@@ -17,9 +17,9 @@ except Exception:
     new_session = None
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from rag import require_project_path, resolve_project_path
-from local_settings import load_image_defaults
-from code_settings import (
+from services.rag import require_project_path, resolve_project_path
+from core.local_settings import load_image_defaults
+from core.code_settings import (
     ALLOWED_IMAGE_DIMENSIONS,
     IMAGE_MAX_IMAGES,
     IMAGE_MAX_PROMPT_LEN,

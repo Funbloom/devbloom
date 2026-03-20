@@ -10,7 +10,7 @@ from typing import Iterable
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 SOURCES_DIR = Path(__file__).resolve().parent / "sources"
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
 DEFAULT_TIMEOUT = 10

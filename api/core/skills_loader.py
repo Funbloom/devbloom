@@ -10,7 +10,7 @@ Ref: https://developers.openai.com/codex/skills/
 from pathlib import Path
 import re
 
-SKILLS_DIR = Path(__file__).resolve().parent / "skills"
+SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 SKILL_FILENAME = "SKILL.md"
 OPENAI_YAML = "agents/openai.yaml"
 

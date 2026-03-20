@@ -5,8 +5,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from rag import get_supabase_client
-from local_paths import delete_local_project_path, get_local_project_path, set_local_project_path
+from services.rag import get_supabase_client
+from core.local_paths import delete_local_project_path, get_local_project_path, set_local_project_path
 
 projects_router = APIRouter()
 

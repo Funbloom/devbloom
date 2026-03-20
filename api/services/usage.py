@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
 
-from rag import get_supabase_client
+from services.rag import get_supabase_client
 
 MAX_IMAGES_PER_USER_PER_DAY = int(os.getenv("MAX_IMAGES_PER_USER_PER_DAY", "20"))
 

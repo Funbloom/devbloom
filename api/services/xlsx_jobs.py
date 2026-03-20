@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from xlsx_export import run_export_xlsx_tool
+from services.xlsx_export import run_export_xlsx_tool
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 JOBS_DIR = PROJECT_ROOT / ".local_data" / "jobs" / "xlsx"

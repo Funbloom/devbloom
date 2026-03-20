@@ -3,7 +3,7 @@ from typing import Optional, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from local_settings import (
+from core.local_settings import (
     load_image_defaults,
     save_image_defaults,
     load_theme_settings,
@@ -52,4 +52,3 @@ def get_ui_theme() -> dict:
 def update_ui_theme(body: ThemeSettings) -> dict:
     # Validation is handled by pydantic Literal; just persist.
     return save_theme_settings(body.model_dump())
-
