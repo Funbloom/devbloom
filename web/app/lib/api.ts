@@ -42,10 +42,14 @@ export async function fetchApi(
   const url = path.startsWith("http") ? path : `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
   let res: Response;
   try {
+    const merged: Record<string, string> = { ...headers, ...(options.headers as Record<string, string>) };
+    if (options.body instanceof FormData) {
+      delete merged["Content-Type"];
+    }
     res = await fetch(url, {
       ...options,
       credentials: "include",
-      headers: { ...headers, ...(options.headers as Record<string, string>) },
+      headers: merged,
     });
   } catch (err) {
     onServerDown?.();

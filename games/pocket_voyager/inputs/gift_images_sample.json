@@ -4,15 +4,25 @@
   "gifts": [
     {
       "id": "gift_001",
-      "name": "Star Map Locket",
+      "displayName": "Star Map Locket",
       "description": "A small brass locket with a glowing star map inside.",
-      "rarity": "rare"
+      "placeIds": [],
+      "activityTags": [],
+      "priority": 10,
+      "weight": 2.0,
+      "imageFileName": "",
+      "presentationId": ""
     },
     {
       "id": "gift_002",
-      "name": "Nebula Snowglobe",
+      "displayName": "Nebula Snowglobe",
       "description": "A glass snowglobe filled with swirling purple nebula clouds.",
-      "rarity": "epic"
+      "placeIds": [],
+      "activityTags": [],
+      "priority": 10,
+      "weight": 2.0,
+      "imageFileName": "",
+      "presentationId": ""
     }
   ]
 }

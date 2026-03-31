@@ -1,6 +1,8 @@
+import json
 import re
 from datetime import datetime, timezone
-from typing import Optional
+from pathlib import Path
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -125,6 +127,48 @@ def update_project(project_key: str, body: ProjectUpdate) -> dict:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to update project: {exc}") from exc
+
+
+def _game_data_paths(project_key: str) -> tuple[Path, Path, Path]:
+    """Project root and standard JSON paths under Assets/StreamingAssets."""
+    cleaned = validate_project_key(project_key)
+    root_raw = get_local_project_path(cleaned)
+    if not root_raw:
+        raise HTTPException(
+            status_code=400,
+            detail="Local project path is not set for this project. Set it in Admin → Projects.",
+        )
+    root = Path(root_raw).resolve()
+    cities_json = root / "Assets" / "StreamingAssets" / "Travel" / "cities.json"
+    gift_catalog_json = root / "Assets" / "StreamingAssets" / "Gifts" / "gifts_catalog.json"
+    return root, cities_json, gift_catalog_json
+
+
+@projects_router.get("/projects/{project_key}/game-data-paths")
+def game_data_paths(project_key: str) -> dict:
+    """Resolved absolute paths for Travel/cities.json and Gifts/gifts_catalog.json."""
+    root, cities_json, gift_catalog_json = _game_data_paths(project_key)
+    return {
+        "project_root": str(root),
+        "cities_json": str(cities_json),
+        "gift_catalog_json": str(gift_catalog_json),
+        "gifts_base_dir": str(gift_catalog_json.parent),
+        "cities_json_exists": cities_json.is_file(),
+        "gift_catalog_json_exists": gift_catalog_json.is_file(),
+    }
+
+
+@projects_router.get("/projects/{project_key}/game-data-file/{kind}")
+def read_game_data_file(project_key: str, kind: Literal["gift_catalog", "cities"]) -> Any:
+    """Read and return parsed JSON from the standard game data file."""
+    _root, cities_json, gift_catalog_json = _game_data_paths(project_key)
+    path = gift_catalog_json if kind == "gift_catalog" else cities_json
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from exc
 
 
 @projects_router.delete("/projects/{project_key}")

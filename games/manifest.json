@@ -8,6 +8,11 @@
           "key": "gift_images",
           "name": "Gift Images",
           "description": "Generate gift images from an input JSON file."
+        },
+        {
+          "key": "cities",
+          "name": "Cities",
+          "description": "Load and inspect city data from a cities JSON file."
         }
       ]
     }
