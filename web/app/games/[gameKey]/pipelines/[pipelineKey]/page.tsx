@@ -5,7 +5,11 @@ import { fetchApi } from "../../../../lib/api";
 
 function resolveGiftImageFileName(g: Record<string, unknown>): string | null {
   const fn = g.imageFileName ?? g.image_filename;
-  if (typeof fn === "string" && fn.trim()) return fn.trim();
+  if (typeof fn === "string" && fn.trim()) {
+    const cleaned = fn.trim();
+    if (cleaned.toLowerCase().endsWith(".meta")) return null;
+    return cleaned;
+  }
   return null;
 }
 
@@ -23,17 +27,22 @@ function splitCsvToList(s: string): string[] | undefined {
   return parts.length > 0 ? parts : undefined;
 }
 
+function joinPlatformPath(base: string | null, filename: string): string | null {
+  if (!base) return null;
+  const trimmed = base.replace(/[\\/]+$/, "");
+  const sep = trimmed.includes("\\") ? "\\" : "/";
+  return `${trimmed}${sep}${filename}`;
+}
+
 type PipelineInfo = { key: string; name: string; description?: string };
 type GiftItem = {
   id: string;
   displayName: string;
   description: string;
-  placeIds: string[];
   activityTags: string[];
   priority: number;
   weight: number;
   imageFileName?: string | null;
-  presentationId?: string;
   image_exists: boolean;
   image_url?: string | null;
 };
@@ -56,16 +65,16 @@ type CitiesRunResponse = {
   home_city_id?: string;
   cities: CityItem[];
 };
+
+type GiftCityMap = Record<string, Array<{ id: string; name: string }>>;
 type LinkedGift = {
   id: string;
   displayName: string;
   description: string;
-  placeIds: string[];
   activityTags: string[];
   priority: number;
   weight: number;
   imageFileName?: string | null;
-  presentationId?: string;
 };
 
 type PageProps = {
@@ -95,6 +104,7 @@ export default function PipelinePage({ params }: PageProps) {
   const [gifts, setGifts] = useState<GiftItem[] | null>(null);
   const [imagesDir, setImagesDir] = useState<string | null>(null);
   const [imageBlobs, setImageBlobs] = useState<Record<string, string>>({});
+  const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
   const [fileGifts, setFileGifts] = useState<GiftItem[] | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [catalogFileContent, setCatalogFileContent] = useState<string | null>(null);
@@ -102,6 +112,8 @@ export default function PipelinePage({ params }: PageProps) {
   const [cities, setCities] = useState<CityItem[] | null>(null);
   const [fileCities, setFileCities] = useState<CityItem[] | null>(null);
   const [linkedGiftsById, setLinkedGiftsById] = useState<Record<string, LinkedGift>>({});
+  const [giftCityMap, setGiftCityMap] = useState<GiftCityMap>({});
+  const [selectedCityByGift, setSelectedCityByGift] = useState<Record<string, string>>({});
   const [linkedGiftBasePath, setLinkedGiftBasePath] = useState("");
   const [selectedLinkedGiftId, setSelectedLinkedGiftId] = useState<string | null>(null);
   const [selectedLinkedGiftImage, setSelectedLinkedGiftImage] = useState<string | null>(null);
@@ -109,15 +121,22 @@ export default function PipelinePage({ params }: PageProps) {
   const [createGiftId, setCreateGiftId] = useState("");
   const [createGiftDisplayName, setCreateGiftDisplayName] = useState("");
   const [createGiftDescription, setCreateGiftDescription] = useState("");
-  const [createGiftPlaceIds, setCreateGiftPlaceIds] = useState("");
-  const [createGiftCityId, setCreateGiftCityId] = useState("");
   const [createGiftActivityTags, setCreateGiftActivityTags] = useState("");
   const [createGiftPriority, setCreateGiftPriority] = useState("10");
   const [createGiftWeight, setCreateGiftWeight] = useState("2");
-  const [createGiftPresentationId, setCreateGiftPresentationId] = useState("");
-  const [availableCities, setAvailableCities] = useState<Array<{ id: string; name: string }>>([]);
   const [createGiftStatus, setCreateGiftStatus] = useState<string | null>(null);
+  const [generatingGiftId, setGeneratingGiftId] = useState<string | null>(null);
   const [createGiftImageMode, setCreateGiftImageMode] = useState<"file" | "generate">("file");
+  const [showEditGift, setShowEditGift] = useState(false);
+  const [editGiftId, setEditGiftId] = useState("");
+  const [editGiftDisplayName, setEditGiftDisplayName] = useState("");
+  const [editGiftDescription, setEditGiftDescription] = useState("");
+  const [editGiftActivityTags, setEditGiftActivityTags] = useState("");
+  const [editGiftPriority, setEditGiftPriority] = useState("10");
+  const [editGiftWeight, setEditGiftWeight] = useState("2");
+  const [editGiftImageFile, setEditGiftImageFile] = useState<File | null>(null);
+  const [editGiftImageMode, setEditGiftImageMode] = useState<"keep" | "file" | "generate">("keep");
+  const [editGiftStatus, setEditGiftStatus] = useState<string | null>(null);
   const [createGiftImageFile, setCreateGiftImageFile] = useState<File | null>(null);
   const [gameDataPaths, setGameDataPaths] = useState<GameDataPaths | null>(null);
   const [gameDataLoadError, setGameDataLoadError] = useState<string | null>(null);
@@ -133,10 +152,6 @@ export default function PipelinePage({ params }: PageProps) {
     return rawItems
       .filter((g): g is Record<string, unknown> => !!g && typeof g === "object")
       .map((gift) => {
-        let placeIds = parseStringArray(gift.placeIds);
-        if (!placeIds.length && typeof gift.cityId === "string" && gift.cityId.trim()) {
-          placeIds = [gift.cityId.trim()];
-        }
         const pri = gift.priority;
         const priority =
           typeof pri === "number" && !Number.isNaN(pri) ? pri : Number(pri) || 10;
@@ -146,11 +161,9 @@ export default function PipelinePage({ params }: PageProps) {
           id: String(gift.id ?? ""),
           displayName: String(gift.displayName ?? gift.name ?? ""),
           description: String(gift.description ?? ""),
-          placeIds,
           activityTags: parseStringArray(gift.activityTags),
           priority,
           weight,
-          presentationId: String(gift.presentationId ?? ""),
           imageFileName: resolveGiftImageFileName(gift),
           image_exists: false,
           image_url:
@@ -173,10 +186,6 @@ export default function PipelinePage({ params }: PageProps) {
       .forEach((gift) => {
         const id = String(gift.id ?? "").trim();
         if (!id) return;
-        let placeIds = parseStringArray(gift.placeIds);
-        if (!placeIds.length && typeof gift.cityId === "string" && gift.cityId.trim()) {
-          placeIds = [gift.cityId.trim()];
-        }
         const pri = gift.priority;
         const priority =
           typeof pri === "number" && !Number.isNaN(pri) ? pri : Number(pri) || 10;
@@ -186,11 +195,9 @@ export default function PipelinePage({ params }: PageProps) {
           id,
           displayName: String(gift.displayName ?? gift.name ?? "").trim(),
           description: String(gift.description ?? "").trim(),
-          placeIds,
           activityTags: parseStringArray(gift.activityTags),
           priority,
           weight,
-          presentationId: String(gift.presentationId ?? "").trim(),
           imageFileName: resolveGiftImageFileName(gift),
         };
       });
@@ -222,6 +229,21 @@ export default function PipelinePage({ params }: PageProps) {
               .map((u) => ({ text: String(u.text ?? ""), image: String(u.image ?? "") }))
           : [],
       }));
+  };
+
+  const buildGiftCityMap = (cityList: CityItem[]): GiftCityMap => {
+    const map: GiftCityMap = {};
+    cityList.forEach((city) => {
+      const cityId = city.name_id;
+      const cityName = city.display_name || city.name_id;
+      city.gift_ids.forEach((giftId) => {
+        if (!map[giftId]) map[giftId] = [];
+        if (!map[giftId].some((c) => c.id === cityId)) {
+          map[giftId].push({ id: cityId, name: cityName });
+        }
+      });
+    });
+    return map;
   };
 
   /** Resolve JSON paths from Admin project path: Assets/StreamingAssets/... */
@@ -310,8 +332,21 @@ export default function PipelinePage({ params }: PageProps) {
     if (!activeProjectKeyForGame || !gameDataPaths) return;
     if (gameDataLoadError) return;
     let cancelled = false;
+    const resetLoadedState = () => {
+      setCatalogFileContent(null);
+      setFileGifts(null);
+      setFileCities(null);
+      setGifts(null);
+      setCities(null);
+      setLinkedGiftsById({});
+      setSelectedLinkedGiftId(null);
+      setSelectedLinkedGiftImage(null);
+      setImageBlobs({});
+      setFileError(null);
+    };
     const loadFiles = async () => {
       try {
+        resetLoadedState();
         if (pipelineKey === "gift_images" && gameDataPaths.giftCatalogJsonExists) {
           const res = await fetchApi(
             `/projects/${encodeURIComponent(activeProjectKeyForGame)}/game-data-file/gift_catalog`,
@@ -320,8 +355,31 @@ export default function PipelinePage({ params }: PageProps) {
           const json = await res.json();
           const text = JSON.stringify(json, null, 2);
           setCatalogFileContent(text);
-          setFileGifts(parseCatalogText(text));
+          if (Array.isArray((json as GiftRunResponse).gifts)) {
+            const parsed = json as GiftRunResponse;
+            setGifts(parsed.gifts || []);
+            if (parsed.images_dir) setImagesDir(parsed.images_dir);
+          } else {
+            setGifts(parseCatalogText(text));
+          }
+          setFileGifts(null);
           setFileError(null);
+          if (gameDataPaths.citiesJsonExists) {
+            const resCities = await fetchApi(
+              `/projects/${encodeURIComponent(activeProjectKeyForGame)}/game-data-file/cities`,
+            );
+            if (resCities.ok && !cancelled) {
+              const citiesJson = await resCities.json();
+              const citiesText = JSON.stringify(citiesJson, null, 2);
+              const parsedCities = parseCitiesText(citiesText);
+              setCities(parsedCities);
+              setFileCities(null);
+              setGiftCityMap(buildGiftCityMap(parsedCities));
+            }
+          } else {
+            setCities(null);
+            setGiftCityMap({});
+          }
         } else if (pipelineKey === "cities" && gameDataPaths.citiesJsonExists) {
           const res = await fetchApi(
             `/projects/${encodeURIComponent(activeProjectKeyForGame)}/game-data-file/cities`,
@@ -333,12 +391,8 @@ export default function PipelinePage({ params }: PageProps) {
           const parsed = parseCitiesText(text);
           setFileCities(parsed);
           setFileError(null);
-          const opts = parsed.map((c) => ({
-            id: c.name_id,
-            name: c.display_name || c.name_id,
-          }));
-          setAvailableCities(opts);
-          if (opts.length > 0) setCreateGiftCityId((prev) => prev || opts[0].id);
+          setCities(parsed);
+          setGiftCityMap(buildGiftCityMap(parsed));
         }
         if (pipelineKey === "cities" && gameDataPaths.giftCatalogJsonExists) {
           const resG = await fetchApi(
@@ -360,19 +414,6 @@ export default function PipelinePage({ params }: PageProps) {
       cancelled = true;
     };
   }, [pipelineKey, activeProjectKeyForGame, gameDataPaths, gameDataLoadError]);
-
-  useEffect(() => {
-    if (pipelineKey !== "cities") return;
-    if (availableCities.length > 0) return;
-    const fallback = (fileCities ?? cities ?? []).map((c) => ({
-      id: c.name_id,
-      name: c.display_name || c.name_id,
-    }));
-    if (fallback.length > 0) {
-      setAvailableCities(fallback);
-      if (!createGiftCityId) setCreateGiftCityId(fallback[0].id);
-    }
-  }, [pipelineKey, fileCities, cities, availableCities.length, createGiftCityId]);
 
   useEffect(() => {
     if (pipelineKey !== "cities") return;
@@ -431,6 +472,7 @@ export default function PipelinePage({ params }: PageProps) {
     const prevUrls = Object.values(imageBlobs);
     prevUrls.forEach((url) => URL.revokeObjectURL(url));
     setImageBlobs({});
+    setImageErrors({});
 
     let cancelled = false;
     const loadImages = async () => {
@@ -438,7 +480,11 @@ export default function PipelinePage({ params }: PageProps) {
       const baseCatalogPath = catalogPath.trim();
       for (const gift of activeGifts) {
         const fn = gift.imageFileName?.trim();
-        if (!fn) continue;
+        if (!fn || fn.toLowerCase().endsWith(".meta")) continue;
+        if (gift.image_exists === false) {
+          setImageErrors((prev) => ({ ...prev, [fn]: "File not found" }));
+          continue;
+        }
         const fallbackImageUrl = baseCatalogPath
           ? `/games/${gameKey}/pipelines/${pipelineKey}/image?${new URLSearchParams({
               catalog_path: baseCatalogPath,
@@ -446,10 +492,19 @@ export default function PipelinePage({ params }: PageProps) {
             }).toString()}`
           : null;
         const sourceUrl = gift.image_url || fallbackImageUrl;
-        if (!sourceUrl) continue;
+        if (!sourceUrl) {
+          entries.push([fn, ""]);
+          setImageErrors((prev) => ({ ...prev, [fn]: "File not found" }));
+          continue;
+        }
         try {
           const res = await fetchApi(sourceUrl);
-          if (!res.ok) continue;
+          if (!res.ok) {
+            if (res.status === 404) {
+              setImageErrors((prev) => ({ ...prev, [fn]: "File not found" }));
+            }
+            continue;
+          }
           const blob = await res.blob();
           if (cancelled) return;
           const objectUrl = URL.createObjectURL(blob);
@@ -535,6 +590,49 @@ export default function PipelinePage({ params }: PageProps) {
     }
   };
 
+  const handleGenerateGiftImage = async (giftId: string) => {
+    const giftCatalogPathForCreate = gameDataPaths?.giftCatalogJson?.trim() ?? catalogPath.trim();
+    if (!giftCatalogPathForCreate) {
+      setStatus("Gift catalog path is not available.");
+      return;
+    }
+    setGeneratingGiftId(giftId);
+    setStatus("Generating gift image...");
+    try {
+      const res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ catalog_path: giftCatalogPathForCreate, gift_id: giftId }),
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(errBody.detail || `Generate failed: ${res.status}`);
+      }
+      const data = (await res.json()) as GiftRunResponse;
+      setGifts(data.gifts || []);
+      setImagesDir(data.images_dir);
+      setStatus("Gift image generated.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Generate failed.";
+      setStatus(`Error: ${message}`);
+    } finally {
+      setGeneratingGiftId(null);
+    }
+  };
+
+  const openEditGift = (gift: GiftItem) => {
+    setEditGiftId(gift.id || "");
+    setEditGiftDisplayName(gift.displayName || "");
+    setEditGiftDescription(gift.description || "");
+    setEditGiftActivityTags((gift.activityTags || []).join(", "));
+    setEditGiftPriority(String(gift.priority ?? 10));
+    setEditGiftWeight(String(gift.weight ?? 2));
+    setEditGiftImageFile(null);
+    setEditGiftImageMode("keep");
+    setEditGiftStatus(null);
+    setShowEditGift(true);
+  };
+
   const allGiftItems = fileGifts ?? gifts ?? [];
   const filteredGiftItems =
     pipelineKey === "gift_images" && giftSearch.trim()
@@ -556,6 +654,249 @@ export default function PipelinePage({ params }: PageProps) {
             .includes(giftSearch.trim().toLowerCase())
         )
       : allCityItems;
+
+  const handleCreateGift = async (forceGenerate: boolean) => {
+    const giftCatalogPathForCreate = gameDataPaths?.giftCatalogJson?.trim() ?? "";
+    if (!giftCatalogPathForCreate) {
+      setCreateGiftStatus(
+        "Gift catalog path is not available. Set the project path in Admin and ensure gifts_catalog.json exists.",
+      );
+      return;
+    }
+    if (!createGiftId.trim()) {
+      setCreateGiftStatus("Gift id is required.");
+      return;
+    }
+    const pr = Number.parseInt(createGiftPriority, 10);
+    const w = Number.parseFloat(createGiftWeight);
+    if (!Number.isFinite(pr)) {
+      setCreateGiftStatus("Priority must be a valid number.");
+      return;
+    }
+    if (!Number.isFinite(w)) {
+      setCreateGiftStatus("Weight must be a valid number.");
+      return;
+    }
+    if (createGiftImageMode === "file" && !createGiftImageFile) {
+      setCreateGiftStatus("Select an image file, or switch to Generate.");
+      return;
+    }
+    const tagsList = splitCsvToList(createGiftActivityTags);
+    const payloadBase = {
+      catalog_path: giftCatalogPathForCreate,
+      gift_id: createGiftId.trim(),
+      description: createGiftDescription.trim(),
+      ...(createGiftDisplayName.trim() ? { display_name: createGiftDisplayName.trim() } : {}),
+      ...(tagsList ? { activity_tags: tagsList } : {}),
+      priority: pr,
+      weight: w,
+    };
+    setCreateGiftStatus(forceGenerate ? "Creating + generating..." : "Creating...");
+    try {
+      let res: Response;
+      if (createGiftImageMode === "file" && createGiftImageFile) {
+        const form = new FormData();
+        form.append("catalog_path", giftCatalogPathForCreate);
+        form.append("gift_id", createGiftId.trim());
+        form.append("description", createGiftDescription.trim());
+        form.append("display_name", createGiftDisplayName.trim());
+        form.append("activity_tags_csv", createGiftActivityTags.trim());
+        form.append("priority_str", String(pr));
+        form.append("weight_str", String(w));
+        form.append("image", createGiftImageFile);
+        res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/upload`, {
+          method: "POST",
+          body: form,
+        });
+      } else {
+        res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payloadBase),
+        });
+      }
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(errBody.detail || `Create failed: ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        gifts?: GiftItem[];
+        images_dir?: string;
+        created?: Record<string, unknown>;
+      };
+      setGifts(data.gifts || []);
+      setFileGifts(null);
+      setImagesDir(data.images_dir || null);
+      const created = data.created;
+      if (created && typeof created.id === "string") {
+        const id = created.id as string;
+        const c = created as Record<string, unknown>;
+        const tags = Array.isArray(c.activityTags)
+          ? c.activityTags.map((t) => String(t).trim()).filter(Boolean)
+          : [];
+        const pri = c.priority;
+        const priority = typeof pri === "number" && !Number.isNaN(pri) ? pri : Number(pri) || 10;
+        const wt = c.weight;
+        const weight = typeof wt === "number" && !Number.isNaN(wt) ? wt : Number(wt) || 2;
+        setLinkedGiftsById((prev) => ({
+          ...prev,
+          [id]: {
+            id,
+            displayName: String(c.displayName ?? ""),
+            description: String(c.description ?? ""),
+            activityTags: tags,
+            priority,
+            weight,
+            imageFileName: resolveGiftImageFileName(c),
+          },
+        }));
+      }
+
+      if (forceGenerate && createGiftImageMode === "generate") {
+        const genRes = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            catalog_path: giftCatalogPathForCreate,
+            gift_id: createGiftId.trim(),
+          }),
+        });
+        if (!genRes.ok) {
+          const errBody = (await genRes.json().catch(() => ({}))) as { detail?: string };
+          throw new Error(errBody.detail || `Generate failed: ${genRes.status}`);
+        }
+        const genData = (await genRes.json()) as GiftRunResponse;
+        setGifts(genData.gifts || []);
+        setImagesDir(genData.images_dir);
+      }
+
+      setCreateGiftStatus("Gift created.");
+      setShowCreateGift(false);
+      setCreateGiftId("");
+      setCreateGiftDisplayName("");
+      setCreateGiftDescription("");
+      setCreateGiftActivityTags("");
+      setCreateGiftPriority("10");
+      setCreateGiftWeight("2");
+      setCreateGiftImageFile(null);
+      setCreateGiftImageMode("file");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Create failed.";
+      setCreateGiftStatus(message);
+    }
+  };
+
+  const handleEditGift = async () => {
+    const giftCatalogPathForEdit = gameDataPaths?.giftCatalogJson?.trim() ?? "";
+    if (!giftCatalogPathForEdit) {
+      setEditGiftStatus(
+        "Gift catalog path is not available. Set the project path in Admin and ensure gifts_catalog.json exists.",
+      );
+      return;
+    }
+    if (!editGiftId.trim()) {
+      setEditGiftStatus("Gift id is required.");
+      return;
+    }
+    const pr = Number.parseInt(editGiftPriority, 10);
+    const w = Number.parseFloat(editGiftWeight);
+    if (!Number.isFinite(pr)) {
+      setEditGiftStatus("Priority must be a valid number.");
+      return;
+    }
+    if (!Number.isFinite(w)) {
+      setEditGiftStatus("Weight must be a valid number.");
+      return;
+    }
+    if (editGiftImageMode === "file" && !editGiftImageFile) {
+      setEditGiftStatus("Select an image file, or choose Keep/Generate.");
+      return;
+    }
+
+    const tagsList = splitCsvToList(editGiftActivityTags);
+
+    setEditGiftStatus("Saving...");
+    try {
+      let res: Response;
+      if (editGiftImageMode === "file" && editGiftImageFile) {
+        const form = new FormData();
+        form.append("catalog_path", giftCatalogPathForEdit);
+        form.append("gift_id", editGiftId.trim());
+        form.append("description", editGiftDescription.trim());
+        form.append("display_name", editGiftDisplayName.trim());
+        form.append("activity_tags_csv", editGiftActivityTags.trim());
+        form.append("priority_str", String(pr));
+        form.append("weight_str", String(w));
+        form.append("image", editGiftImageFile);
+        res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/${editGiftId.trim()}/upload`, {
+          method: "POST",
+          body: form,
+        });
+      } else {
+        const payload: Record<string, unknown> = {
+          catalog_path: giftCatalogPathForEdit,
+          description: editGiftDescription.trim(),
+          display_name: editGiftDisplayName.trim(),
+          priority: pr,
+          weight: w,
+          image_mode: editGiftImageMode,
+        };
+        if (editGiftActivityTags.trim() !== "") payload.activity_tags = tagsList ?? [];
+        res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/${editGiftId.trim()}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      }
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(errBody.detail || `Update failed: ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        gifts?: GiftItem[];
+        images_dir?: string;
+        updated?: Record<string, unknown>;
+      };
+      setGifts(data.gifts || []);
+      setFileGifts(null);
+      setImagesDir(data.images_dir || null);
+      setEditGiftStatus("Gift updated.");
+      setShowEditGift(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Update failed.";
+      setEditGiftStatus(message);
+    }
+  };
+
+  const handleAddGiftToCity = async (giftId: string, cityId: string) => {
+    if (!gameDataPaths?.citiesJson?.trim()) {
+      setStatus("Cities JSON path is not available.");
+      return;
+    }
+    setStatus("Updating city...");
+    try {
+      const res = await fetchApi(`/games/${gameKey}/pipelines/cities/gifts/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cities_path: gameDataPaths.citiesJson,
+          city_id: cityId,
+          gift_id: giftId,
+        }),
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(errBody.detail || `Update failed: ${res.status}`);
+      }
+      const data = (await res.json()) as CitiesRunResponse;
+      setCities(data.cities || []);
+      setGiftCityMap(buildGiftCityMap(data.cities || []));
+      setStatus("City updated.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Update failed.";
+      setStatus(`Error: ${message}`);
+    }
+  };
 
   return (
     <div style={{ width: "100%", maxWidth: "100vw", margin: "2rem 0", padding: "0 1rem" }}>
@@ -609,9 +950,6 @@ export default function PipelinePage({ params }: PageProps) {
               </p>
             )}
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-              <button type="button" onClick={runPipeline} disabled={!!gameDataLoadError}>
-                Run pipeline
-              </button>
               {pipelineKey === "gift_images" && (
                 <button
                   type="button"
@@ -711,7 +1049,6 @@ export default function PipelinePage({ params }: PageProps) {
                                       type="button"
                                       onClick={() => {
                                         setCreateGiftId(giftId);
-                                        setCreateGiftCityId(city.name_id);
                                         setCreateGiftDescription("");
                                         setCreateGiftStatus(null);
                                         setCreateGiftImageFile(null);
@@ -800,11 +1137,6 @@ export default function PipelinePage({ params }: PageProps) {
                         <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
                           id: {linkedGiftsById[selectedLinkedGiftId].id}
                         </div>
-                        {linkedGiftsById[selectedLinkedGiftId].placeIds.length > 0 && (
-                          <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
-                            places: {linkedGiftsById[selectedLinkedGiftId].placeIds.join(", ")}
-                          </div>
-                        )}
                         {linkedGiftsById[selectedLinkedGiftId].activityTags.length > 0 && (
                           <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
                             tags: {linkedGiftsById[selectedLinkedGiftId].activityTags.join(", ")}
@@ -814,12 +1146,6 @@ export default function PipelinePage({ params }: PageProps) {
                           priority: {linkedGiftsById[selectedLinkedGiftId].priority} · weight:{" "}
                           {linkedGiftsById[selectedLinkedGiftId].weight}
                         </div>
-                        {linkedGiftsById[selectedLinkedGiftId].presentationId !== undefined &&
-                          linkedGiftsById[selectedLinkedGiftId].presentationId !== "" && (
-                            <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
-                              presentation: {linkedGiftsById[selectedLinkedGiftId].presentationId}
-                            </div>
-                          )}
                         {linkedGiftsById[selectedLinkedGiftId].description && (
                           <div style={{ fontSize: 13 }}>{linkedGiftsById[selectedLinkedGiftId].description}</div>
                         )}
@@ -845,9 +1171,9 @@ export default function PipelinePage({ params }: PageProps) {
                 const baseGiftsPath = linkedGiftBasePath.trim().replace(/\/+$/, "");
                 const resolvedImagePath = imgName
                   ? imagesDir
-                    ? `${imagesDir}/${imgName}`
+                    ? joinPlatformPath(imagesDir, imgName)
                     : baseGiftsPath
-                    ? `${baseGiftsPath}/Images/${imgName}`
+                    ? joinPlatformPath(`${baseGiftsPath}/Images`, imgName)
                     : null
                   : null;
                 return (
@@ -855,45 +1181,52 @@ export default function PipelinePage({ params }: PageProps) {
                     key={gift.id || gift.displayName}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "140px 1fr",
+                      gridTemplateColumns: "140px minmax(0, 1fr) 220px",
                       gap: "1rem",
                       padding: "1rem",
                       background: "rgba(15, 23, 42, 0.45)",
                       borderRadius: 8,
+                      alignItems: "start",
                     }}
                   >
-                    <div
-                      style={{
-                        width: 140,
-                        height: 140,
-                        background: "rgba(15, 23, 42, 0.4)",
-                        borderRadius: 6,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "var(--muted, #94a3b8)",
-                        fontSize: 12,
-                        textAlign: "center",
-                        padding: "0.5rem",
-                      }}
-                    >
-                      {imageUrl ? (
-                        <img
-                          src={imageUrl}
-                          alt={gift.displayName}
-                          style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                        />
-                      ) : (
-                        "No image found"
+                    <div style={{ display: "grid", gap: "0.35rem", justifyItems: "center" }}>
+                      <div
+                        style={{
+                          width: 140,
+                          height: 140,
+                          background: "rgba(15, 23, 42, 0.4)",
+                          borderRadius: 6,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "var(--muted, #94a3b8)",
+                          fontSize: 12,
+                          textAlign: "center",
+                          padding: "0.5rem",
+                        }}
+                      >
+                        {imageUrl ? (
+                          <img
+                            src={imageUrl}
+                            alt={gift.displayName}
+                            style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                            onError={() => {
+                              if (!imgName) return;
+                              setImageErrors((prev) => ({ ...prev, [imgName]: "Invalid image file" }));
+                            }}
+                          />
+                        ) : (
+                          "No image found"
+                        )}
+                      </div>
+                      {imgName && (imageErrors[imgName] || gift.image_exists === false) && (
+                        <div style={{ fontSize: 12, color: "#fca5a5", textAlign: "center" }}>
+                          {imageErrors[imgName] || "File not found"}
+                        </div>
                       )}
                     </div>
                     <div>
                       <strong>{gift.displayName || gift.id || "Untitled gift"}</strong>
-                      {gift.placeIds.length > 0 && (
-                        <div style={{ color: "var(--muted, #94a3b8)", fontSize: 13 }}>
-                          Places: {gift.placeIds.join(", ")}
-                        </div>
-                      )}
                       {gift.activityTags.length > 0 && (
                         <div style={{ color: "var(--muted, #94a3b8)", fontSize: 13 }}>
                           Tags: {gift.activityTags.join(", ")}
@@ -903,11 +1236,6 @@ export default function PipelinePage({ params }: PageProps) {
                         Priority {gift.priority} · Weight {gift.weight}
                       </div>
                       {gift.description && <p style={{ marginTop: "0.5rem" }}>{gift.description}</p>}
-                      {imgName && (
-                        <div style={{ marginTop: "0.5rem", fontSize: 12, color: "var(--muted, #94a3b8)" }}>
-                          File: {imgName}
-                        </div>
-                      )}
                       {resolvedImagePath && (
                         <div
                           style={{
@@ -919,6 +1247,51 @@ export default function PipelinePage({ params }: PageProps) {
                         >
                           Image path: {resolvedImagePath}
                         </div>
+                      )}
+                    </div>
+                    <div style={{ display: "grid", gap: "0.5rem" }}>
+                      {gift.id && giftCityMap[gift.id]?.length > 0 && (
+                        <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                          Cities: {giftCityMap[gift.id].map((c) => c.name).join(", ")}
+                        </div>
+                      )}
+                      {pipelineKey === "gift_images" && gift.id && cities && cities.length > 0 && (
+                        <div style={{ display: "grid", gap: "0.35rem" }}>
+                          <select
+                            value={selectedCityByGift[gift.id] ?? ""}
+                            onChange={(e) =>
+                              setSelectedCityByGift((prev) => ({ ...prev, [gift.id]: e.target.value }))
+                            }
+                          >
+                            <option value="">Add to city...</option>
+                            {cities.map((city) => (
+                              <option key={city.name_id} value={city.name_id}>
+                                {city.display_name || city.name_id}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={!selectedCityByGift[gift.id]}
+                            onClick={() => {
+                              const cityId = selectedCityByGift[gift.id];
+                              if (!cityId) return;
+                              handleAddGiftToCity(gift.id, cityId);
+                            }}
+                          >
+                            Add
+                          </button>
+                        </div>
+                      )}
+                      {pipelineKey === "gift_images" && gift.id && (
+                        <button
+                          type="button"
+                          onClick={() => openEditGift(gift)}
+                          disabled={!!fileGifts}
+                          title={fileGifts ? "Editing requires the server-backed catalog." : undefined}
+                        >
+                          Edit
+                        </button>
                       )}
                     </div>
                   </div>
@@ -985,9 +1358,7 @@ export default function PipelinePage({ params }: PageProps) {
           >
             <h3 style={{ margin: 0 }}>Create Gift</h3>
             <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
-              Fields match the catalog JSON: <code style={{ fontSize: 11 }}>placeIds</code>,{" "}
-              <code style={{ fontSize: 11 }}>activityTags</code>, etc. If{" "}
-              <strong>Place IDs</strong> is empty, the selected city is used as the only place.
+              Fields match the catalog JSON: <code style={{ fontSize: 11 }}>activityTags</code>, etc.
             </p>
             <label style={{ display: "grid", gap: "0.25rem" }}>
               <span>Gift id</span>
@@ -1009,25 +1380,6 @@ export default function PipelinePage({ params }: PageProps) {
                 rows={3}
                 placeholder="A painting of Mona Lisa from Leonardo Da Vinci"
               />
-            </label>
-            <label style={{ display: "grid", gap: "0.25rem" }}>
-              <span>Place IDs (comma-separated)</span>
-              <input
-                value={createGiftPlaceIds}
-                onChange={(e) => setCreateGiftPlaceIds(e.target.value)}
-                placeholder="paris, london_fr"
-              />
-            </label>
-            <label style={{ display: "grid", gap: "0.25rem" }}>
-              <span>City (used when Place IDs is empty)</span>
-              <select value={createGiftCityId} onChange={(e) => setCreateGiftCityId(e.target.value)}>
-                {availableCities.length === 0 && <option value="">No cities loaded</option>}
-                {availableCities.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
             </label>
             <label style={{ display: "grid", gap: "0.25rem" }}>
               <span>Activity tags (comma-separated)</span>
@@ -1064,14 +1416,6 @@ export default function PipelinePage({ params }: PageProps) {
                 />
               </label>
             </div>
-            <label style={{ display: "grid", gap: "0.25rem" }}>
-              <span>Presentation ID</span>
-              <input
-                value={createGiftPresentationId}
-                onChange={(e) => setCreateGiftPresentationId(e.target.value)}
-                placeholder="Optional; use empty for none"
-              />
-            </label>
             <div style={{ display: "grid", gap: "0.5rem" }}>
               <span style={{ fontSize: 13, color: "var(--muted, #94a3b8)" }}>Image</span>
               <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
@@ -1104,16 +1448,6 @@ export default function PipelinePage({ params }: PageProps) {
                 />
                 Generate
               </label>
-              {createGiftImageMode === "generate" && (
-                <button
-                  type="button"
-                  disabled
-                  style={{ opacity: 0.65, alignSelf: "flex-start", padding: "0.35rem 0.75rem" }}
-                  title="Coming soon"
-                >
-                  Generate image (coming soon)
-                </button>
-              )}
             </div>
             {createGiftStatus && <div style={{ color: "var(--muted, #94a3b8)" }}>{createGiftStatus}</div>}
             <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
@@ -1127,156 +1461,156 @@ export default function PipelinePage({ params }: PageProps) {
                   setCreateGiftId("");
                   setCreateGiftDisplayName("");
                   setCreateGiftDescription("");
-                  setCreateGiftPlaceIds("");
                   setCreateGiftActivityTags("");
                   setCreateGiftPriority("10");
                   setCreateGiftWeight("2");
-                  setCreateGiftPresentationId("");
-                  setCreateGiftCityId(availableCities[0]?.id ?? "");
                 }}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  const giftCatalogPathForCreate = gameDataPaths?.giftCatalogJson?.trim() ?? "";
-                  if (!giftCatalogPathForCreate) {
-                    setCreateGiftStatus(
-                      "Gift catalog path is not available. Set the project path in Admin and ensure gifts_catalog.json exists.",
-                    );
-                    return;
-                  }
-                  if (!createGiftId.trim()) {
-                    setCreateGiftStatus("Gift id is required.");
-                    return;
-                  }
-                  const placeIdsList = splitCsvToList(createGiftPlaceIds);
-                  const cityTrim = createGiftCityId.trim();
-                  if (!placeIdsList?.length && !cityTrim) {
-                    setCreateGiftStatus("Enter at least one place ID (comma-separated) or select a city.");
-                    return;
-                  }
-                  const pr = Number.parseInt(createGiftPriority, 10);
-                  const w = Number.parseFloat(createGiftWeight);
-                  if (!Number.isFinite(pr)) {
-                    setCreateGiftStatus("Priority must be a valid number.");
-                    return;
-                  }
-                  if (!Number.isFinite(w)) {
-                    setCreateGiftStatus("Weight must be a valid number.");
-                    return;
-                  }
-                  if (createGiftImageMode === "file" && !createGiftImageFile) {
-                    setCreateGiftStatus("Select an image file, or switch to Generate.");
-                    return;
-                  }
-                  const tagsList = splitCsvToList(createGiftActivityTags);
-                  const payloadBase = {
-                    catalog_path: giftCatalogPathForCreate,
-                    city_id: cityTrim,
-                    gift_id: createGiftId.trim(),
-                    description: createGiftDescription.trim(),
-                    ...(createGiftDisplayName.trim()
-                      ? { display_name: createGiftDisplayName.trim() }
-                      : {}),
-                    ...(placeIdsList ? { place_ids: placeIdsList } : {}),
-                    ...(tagsList ? { activity_tags: tagsList } : {}),
-                    priority: pr,
-                    weight: w,
-                    presentation_id: createGiftPresentationId.trim(),
-                  };
-                  setCreateGiftStatus("Creating...");
-                  try {
-                    let res: Response;
-                    if (createGiftImageMode === "file" && createGiftImageFile) {
-                      const form = new FormData();
-                      form.append("catalog_path", giftCatalogPathForCreate);
-                      form.append("city_id", cityTrim);
-                      form.append("gift_id", createGiftId.trim());
-                      form.append("description", createGiftDescription.trim());
-                      form.append("display_name", createGiftDisplayName.trim());
-                      form.append("place_ids_csv", createGiftPlaceIds.trim());
-                      form.append("activity_tags_csv", createGiftActivityTags.trim());
-                      form.append("priority_str", String(pr));
-                      form.append("weight_str", String(w));
-                      form.append("presentation_id", createGiftPresentationId.trim());
-                      form.append("image", createGiftImageFile);
-                      res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/upload`, {
-                        method: "POST",
-                        body: form,
-                      });
-                    } else {
-                      res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(payloadBase),
-                      });
-                    }
-                    if (!res.ok) {
-                      const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
-                      throw new Error(errBody.detail || `Create failed: ${res.status}`);
-                    }
-                    const data = (await res.json()) as {
-                      gifts?: GiftItem[];
-                      images_dir?: string;
-                      created?: Record<string, unknown>;
-                    };
-                    setGifts(data.gifts || []);
-                    setFileGifts(null);
-                    setImagesDir(data.images_dir || null);
-                    const created = data.created;
-                    if (created && typeof created.id === "string") {
-                      const id = created.id as string;
-                      const c = created as Record<string, unknown>;
-                      const placeIds = Array.isArray(c.placeIds)
-                        ? c.placeIds.map((p) => String(p).trim()).filter(Boolean)
-                        : typeof c.cityId === "string" && c.cityId.trim()
-                        ? [c.cityId.trim()]
-                        : [];
-                      const tags = Array.isArray(c.activityTags)
-                        ? c.activityTags.map((t) => String(t).trim()).filter(Boolean)
-                        : [];
-                      const pri = c.priority;
-                      const priority =
-                        typeof pri === "number" && !Number.isNaN(pri) ? pri : Number(pri) || 10;
-                      const w = c.weight;
-                      const weight = typeof w === "number" && !Number.isNaN(w) ? w : Number(w) || 2;
-                      setLinkedGiftsById((prev) => ({
-                        ...prev,
-                        [id]: {
-                          id,
-                          displayName: String(c.displayName ?? ""),
-                          description: String(c.description ?? ""),
-                          placeIds,
-                          activityTags: tags,
-                          priority,
-                          weight,
-                          presentationId: String(c.presentationId ?? ""),
-                          imageFileName: resolveGiftImageFileName(c),
-                        },
-                      }));
-                    }
-                    setCreateGiftStatus("Gift created.");
-                    setShowCreateGift(false);
-                    setCreateGiftId("");
-                    setCreateGiftDisplayName("");
-                    setCreateGiftDescription("");
-                    setCreateGiftPlaceIds("");
-                    setCreateGiftActivityTags("");
-                    setCreateGiftPriority("10");
-                    setCreateGiftWeight("2");
-                    setCreateGiftPresentationId("");
-                    setCreateGiftCityId(availableCities[0]?.id ?? "");
-                    setCreateGiftImageFile(null);
-                    setCreateGiftImageMode("file");
-                  } catch (err) {
-                    const message = err instanceof Error ? err.message : "Create failed.";
-                    setCreateGiftStatus(message);
-                  }
-                }}
+                onClick={() => void handleCreateGift(createGiftImageMode === "generate")}
               >
                 Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {pipelineKey === "gift_images" && showEditGift && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(2, 6, 23, 0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+        >
+          <div
+            style={{
+              width: "min(720px, 96vw)",
+              maxHeight: "92vh",
+              overflowY: "auto",
+              background: "rgba(15, 23, 42, 0.98)",
+              border: "1px solid rgba(148, 163, 184, 0.25)",
+              borderRadius: 10,
+              padding: "1rem",
+              display: "grid",
+              gap: "0.75rem",
+            }}
+          >
+            <h3 style={{ margin: 0 }}>Edit Gift</h3>
+            <label style={{ display: "grid", gap: "0.25rem" }}>
+              <span>Gift id</span>
+              <input value={editGiftId} disabled />
+            </label>
+            <label style={{ display: "grid", gap: "0.25rem" }}>
+              <span>Display name</span>
+              <input
+                value={editGiftDisplayName}
+                onChange={(e) => setEditGiftDisplayName(e.target.value)}
+              />
+            </label>
+            <label style={{ display: "grid", gap: "0.25rem" }}>
+              <span>Description</span>
+              <textarea
+                value={editGiftDescription}
+                onChange={(e) => setEditGiftDescription(e.target.value)}
+                rows={3}
+              />
+            </label>
+            <label style={{ display: "grid", gap: "0.25rem" }}>
+              <span>Activity tags (comma-separated)</span>
+              <input
+                value={editGiftActivityTags}
+                onChange={(e) => setEditGiftActivityTags(e.target.value)}
+                placeholder="Painting, Art"
+              />
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+              <label style={{ display: "grid", gap: "0.25rem" }}>
+                <span>Priority</span>
+                <input
+                  type="number"
+                  value={editGiftPriority}
+                  onChange={(e) => setEditGiftPriority(e.target.value)}
+                />
+              </label>
+              <label style={{ display: "grid", gap: "0.25rem" }}>
+                <span>Weight</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  value={editGiftWeight}
+                  onChange={(e) => setEditGiftWeight(e.target.value)}
+                />
+              </label>
+            </div>
+            <div style={{ display: "grid", gap: "0.5rem" }}>
+              <span style={{ fontSize: 13, color: "var(--muted, #94a3b8)" }}>Image</span>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="editGiftImageMode"
+                  checked={editGiftImageMode === "keep"}
+                  onChange={() => {
+                    setEditGiftImageMode("keep");
+                    setEditGiftImageFile(null);
+                  }}
+                />
+                Keep
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="editGiftImageMode"
+                  checked={editGiftImageMode === "file"}
+                  onChange={() => {
+                    setEditGiftImageMode("file");
+                  }}
+                />
+                Replace with file
+              </label>
+              {editGiftImageMode === "file" && (
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={(e) => setEditGiftImageFile(e.target.files?.[0] ?? null)}
+                />
+              )}
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="editGiftImageMode"
+                  checked={editGiftImageMode === "generate"}
+                  onChange={() => {
+                    setEditGiftImageMode("generate");
+                    setEditGiftImageFile(null);
+                  }}
+                />
+                Generate
+              </label>
+            </div>
+            {editGiftStatus && <div style={{ color: "var(--muted, #94a3b8)" }}>{editGiftStatus}</div>}
+            <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditGift(false);
+                  setEditGiftStatus(null);
+                  setEditGiftImageFile(null);
+                  setEditGiftImageMode("keep");
+                }}
+              >
+                Cancel
+              </button>
+              <button type="button" onClick={() => void handleEditGift()}>
+                Save
               </button>
             </div>
           </div>

@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
+from services.image_tool import generate_openai_image_to_dir, sanitize_filename
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 GAMES_DIR = PROJECT_ROOT / "games"
 MANIFEST_PATH = GAMES_DIR / "manifest.json"
@@ -152,14 +153,6 @@ def _normalize_gift_catalog_entry(gift: dict, images_dir: Path) -> dict[str, Any
     image_path = (images_dir / image_name).resolve() if image_name else None
     image_exists = bool(image_path and image_path.exists())
 
-    place_ids = gift.get("placeIds")
-    if not isinstance(place_ids, list):
-        place_ids = []
-    out_place = [str(p).strip() for p in place_ids if str(p).strip()]
-    legacy_city = str(gift.get("cityId") or "").strip()
-    if not out_place and legacy_city:
-        out_place = [legacy_city]
-
     tags = gift.get("activityTags")
     if not isinstance(tags, list):
         tags = []
@@ -184,18 +177,14 @@ def _normalize_gift_catalog_entry(gift: dict, images_dir: Path) -> dict[str, Any
             weight = 2.0
 
     display = (gift.get("displayName") or gift.get("name") or "").strip()
-    pres = str(gift.get("presentationId") or "").strip()
-
     return {
         "id": (gift.get("id") or "").strip(),
         "displayName": display,
         "description": (gift.get("description") or "").strip(),
-        "placeIds": out_place,
         "activityTags": out_tags,
         "priority": priority,
         "weight": weight,
         "imageFileName": image_name,
-        "presentationId": pres,
         "image_exists": image_exists,
     }
 
@@ -255,6 +244,64 @@ def load_gift_catalog(catalog_path: str) -> dict[str, Any]:
     }
 
 
+def generate_gift_image(catalog_path: str, gift_id: str) -> dict[str, Any]:
+    raw_path = (catalog_path or "").strip()
+    if not raw_path:
+        raise ValueError("Catalog path is required.")
+    path = Path(raw_path)
+    if not path.exists():
+        raise FileNotFoundError("Catalog file not found.")
+    if path.suffix.lower() != ".json":
+        raise ValueError("Catalog file must be a .json file.")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Failed to parse JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("Catalog JSON must be an object.")
+
+    items = data.get("items") or data.get("gifts")
+    if not isinstance(items, list):
+        raise ValueError("Catalog JSON must include an 'items' array.")
+
+    target = (gift_id or "").strip()
+    if not target:
+        raise ValueError("gift_id is required.")
+
+    gift = next((g for g in items if isinstance(g, dict) and (g.get("id") or "").strip() == target), None)
+    if not gift:
+        raise FileNotFoundError("Gift not found.")
+
+    images_dir = resolve_gift_images_dir(str(path))
+    filename = _build_default_image_name(gift)
+    if not filename:
+        filename = sanitize_filename(f"{target}.png")
+
+    name = (gift.get("displayName") or gift.get("name") or target).strip()
+    desc = (gift.get("description") or "").strip()
+    prompt = name if not desc else f"{name}. {desc}"
+
+    result = generate_openai_image_to_dir(
+        prompt=prompt,
+        output_dir=images_dir,
+        filename=filename,
+        width=1024,
+        height=1024,
+        quality="low",
+        model_name="gpt-image-1.5",
+    )
+    gift["imageFileName"] = result["filename"]
+
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "catalog_path": str(path),
+        "images_dir": str(images_dir),
+        "gift_id": target,
+        "filename": result["filename"],
+        "path": result["path"],
+    }
+
+
 def load_cities_catalog(catalog_path: str) -> dict[str, Any]:
     raw_path = (catalog_path or "").strip()
     if not raw_path:
@@ -310,29 +357,66 @@ def load_cities_catalog(catalog_path: str) -> dict[str, Any]:
     }
 
 
-def _resolve_place_ids_for_append(place_ids: list[str] | None, city_id: str) -> list[str]:
-    if place_ids is not None:
-        resolved = [str(p).strip() for p in place_ids if str(p).strip()]
-        if resolved:
-            return resolved
-    c = (city_id or "").strip()
-    if c:
-        return [c]
-    raise ValueError("At least one place id is required. Enter place IDs or select a city.")
+def add_gift_to_city(cities_path: str, city_id: str, gift_id: str) -> dict[str, Any]:
+    raw_path = (cities_path or "").strip()
+    if not raw_path:
+        raise ValueError("Cities path is required.")
+    path = Path(raw_path)
+    if not path.exists():
+        raise FileNotFoundError("Cities file not found.")
+    if path.suffix.lower() != ".json":
+        raise ValueError("Cities path must be a .json file.")
+
+    city_key = (city_id or "").strip()
+    gift_key = (gift_id or "").strip()
+    if not city_key or not gift_key:
+        raise ValueError("city_id and gift_id are required.")
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Failed to parse JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("Cities JSON must be an object.")
+
+    cities = data.get("cities")
+    if not isinstance(cities, list):
+        raise ValueError("Cities JSON must include a 'cities' array.")
+
+    target = next(
+        (
+            c
+            for c in cities
+            if isinstance(c, dict)
+            and str(c.get("nameId") or c.get("name_id") or "").strip() == city_key
+        ),
+        None,
+    )
+    if not target:
+        raise FileNotFoundError("City not found.")
+
+    gift_ids = target.get("giftIds")
+    if isinstance(gift_ids, list):
+        ids = [str(x).strip() for x in gift_ids if str(x).strip()]
+    else:
+        ids = []
+    if gift_key not in ids:
+        ids.append(gift_key)
+    target["giftIds"] = ids
+
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return load_cities_catalog(str(path))
 
 
 def append_gift_to_catalog(
     catalog_path: str,
     gift_id: str,
     description: str,
-    city_id: str,
     *,
     display_name: str | None = None,
-    place_ids: list[str] | None = None,
     activity_tags: list[str] | None = None,
     priority: int | None = None,
     weight: float | None = None,
-    presentation_id: str | None = None,
 ) -> dict[str, Any]:
     raw_path = (catalog_path or "").strip()
     if not raw_path:
@@ -366,7 +450,6 @@ def append_gift_to_catalog(
         if isinstance(existing, dict) and str(existing.get("id") or "").strip() == normalized_id:
             raise ValueError("Gift id already exists.")
 
-    resolved_place = _resolve_place_ids_for_append(place_ids, city_id)
     tags: list[str] = []
     if activity_tags is not None:
         tags = [str(t).strip() for t in activity_tags if str(t).strip()]
@@ -378,18 +461,14 @@ def append_gift_to_catalog(
 
     pri = 10 if priority is None else int(priority)
     w = 2.0 if weight is None else float(weight)
-    pres = str(presentation_id or "").strip()
-
     new_gift: dict[str, Any] = {
         "id": normalized_id,
         "displayName": resolved_display,
         "description": (description or "").strip(),
-        "placeIds": resolved_place,
         "activityTags": tags,
         "priority": pri,
         "weight": w,
         "imageFileName": "",
-        "presentationId": pres,
     }
     items.append(new_gift)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -400,16 +479,13 @@ def append_gift_image_file(
     catalog_path: str,
     gift_id: str,
     description: str,
-    city_id: str,
     image_bytes: bytes,
     original_filename: str,
     *,
     display_name: str | None = None,
-    place_ids: list[str] | None = None,
     activity_tags: list[str] | None = None,
     priority: int | None = None,
     weight: float | None = None,
-    presentation_id: str | None = None,
 ) -> dict[str, Any]:
     """Create gift and copy image into Gift/Images next to catalog; set imageFileName in JSON."""
     raw_suffix = Path(original_filename or "").suffix.lower()
@@ -419,13 +495,10 @@ def append_gift_image_file(
         catalog_path,
         gift_id,
         description,
-        city_id,
         display_name=display_name,
-        place_ids=place_ids,
         activity_tags=activity_tags,
         priority=priority,
         weight=weight,
-        presentation_id=presentation_id,
     )
     normalized_id = (gift_id or "").strip()
     safe_base = _sanitize_filename(normalized_id) or "gift"
@@ -458,3 +531,101 @@ def append_gift_image_file(
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     created["imageFileName"] = filename
     return created
+
+
+def update_gift_in_catalog(
+    catalog_path: str,
+    gift_id: str,
+    *,
+    description: str | None = None,
+    display_name: str | None = None,
+    activity_tags: list[str] | None = None,
+    priority: int | None = None,
+    weight: float | None = None,
+    image_filename: str | None = None,
+) -> dict[str, Any]:
+    raw_path = (catalog_path or "").strip()
+    if not raw_path:
+        raise ValueError("Catalog path is required.")
+    path = Path(raw_path)
+    if not path.exists():
+        raise FileNotFoundError("Catalog file not found.")
+    if path.suffix.lower() != ".json":
+        raise ValueError("Catalog path must be a .json file.")
+
+    normalized_id = (gift_id or "").strip()
+    if not normalized_id:
+        raise ValueError("Gift id is required.")
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Failed to parse JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("Catalog JSON must be an object.")
+
+    items_key = (
+        "items"
+        if isinstance(data.get("items"), list)
+        else "gifts"
+        if isinstance(data.get("gifts"), list)
+        else "items"
+    )
+    items = data.get(items_key)
+    if not isinstance(items, list):
+        items = []
+        data[items_key] = items
+
+    gift = next(
+        (g for g in items if isinstance(g, dict) and str(g.get("id") or "").strip() == normalized_id),
+        None,
+    )
+    if not gift:
+        raise FileNotFoundError("Gift not found.")
+
+    if description is not None:
+        gift["description"] = (description or "").strip()
+    if display_name is not None:
+        gift["displayName"] = (display_name or "").strip()
+    if activity_tags is not None:
+        gift["activityTags"] = [str(t).strip() for t in activity_tags if str(t).strip()]
+    if priority is not None:
+        gift["priority"] = int(priority)
+    if weight is not None:
+        gift["weight"] = float(weight)
+    if image_filename is not None:
+        gift["imageFileName"] = str(image_filename)
+
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return gift
+
+
+def replace_gift_image_file(
+    catalog_path: str,
+    gift_id: str,
+    image_bytes: bytes,
+    original_filename: str,
+) -> dict[str, Any]:
+    """Replace image for an existing gift and update imageFileName in JSON."""
+    raw_suffix = Path(original_filename or "").suffix.lower()
+    if raw_suffix not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        raw_suffix = ".png"
+    normalized_id = (gift_id or "").strip()
+    if not normalized_id:
+        raise ValueError("Gift id is required.")
+
+    safe_base = _sanitize_filename(normalized_id) or "gift"
+    filename = f"{safe_base}{raw_suffix}"
+    images_dir = resolve_gift_images_dir(catalog_path)
+    images_dir.mkdir(parents=True, exist_ok=True)
+    dest = (images_dir / filename).resolve()
+    if images_dir not in dest.parents and dest != images_dir:
+        raise ValueError("Invalid image destination.")
+    dest.write_bytes(image_bytes)
+
+    updated = update_gift_in_catalog(
+        catalog_path,
+        normalized_id,
+        image_filename=filename,
+    )
+    return updated

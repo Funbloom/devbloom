@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from services.rag import get_supabase_client
+from services.games_registry import load_gift_catalog, load_cities_catalog
 from core.local_paths import delete_local_project_path, get_local_project_path, set_local_project_path
 
 projects_router = APIRouter()
@@ -166,7 +167,9 @@ def read_game_data_file(project_key: str, kind: Literal["gift_catalog", "cities"
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        if kind == "gift_catalog":
+            return load_gift_catalog(str(path))
+        return load_cities_catalog(str(path))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from exc
 

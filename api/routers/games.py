@@ -3,7 +3,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
 from services.games_registry import (
@@ -15,6 +15,10 @@ from services.games_registry import (
     append_gift_image_file,
     append_gift_to_catalog,
     load_cities_catalog,
+    generate_gift_image,
+    update_gift_in_catalog,
+    replace_gift_image_file,
+    add_gift_to_city,
     resolve_gift_images_dir,
     get_game,
 )
@@ -29,15 +33,33 @@ class PipelineRunRequest(BaseModel):
 
 class CreateGiftRequest(BaseModel):
     catalog_path: str
-    city_id: str = ""
     gift_id: str
     description: str | None = None
     display_name: str | None = None
-    place_ids: list[str] | None = None
     activity_tags: list[str] | None = None
     priority: int | None = None
     weight: float | None = None
-    presentation_id: str | None = None
+
+
+class GiftGenerateRequest(BaseModel):
+    catalog_path: str = Field(min_length=1)
+    gift_id: str = Field(min_length=1)
+
+
+class EditGiftRequest(BaseModel):
+    catalog_path: str = Field(min_length=1)
+    description: str | None = None
+    display_name: str | None = None
+    activity_tags: list[str] | None = None
+    priority: int | None = None
+    weight: float | None = None
+    image_mode: str | None = None  # keep|generate
+
+
+class CityGiftAssignRequest(BaseModel):
+    cities_path: str = Field(min_length=1)
+    city_id: str = Field(min_length=1)
+    gift_id: str = Field(min_length=1)
 
 
 @games_router.get("/games")
@@ -166,13 +188,10 @@ def create_gift_route(
             catalog_path=body.catalog_path,
             gift_id=body.gift_id,
             description=body.description or "",
-            city_id=body.city_id,
             display_name=body.display_name,
-            place_ids=body.place_ids,
             activity_tags=body.activity_tags,
             priority=body.priority,
             weight=body.weight,
-            presentation_id=body.presentation_id,
         )
         catalog = load_gift_catalog(body.catalog_path)
     except FileNotFoundError as exc:
@@ -188,6 +207,164 @@ def create_gift_route(
     }
 
 
+@games_router.patch("/games/{game_key}/pipelines/gift_images/gifts/{gift_id}")
+def edit_gift_route(
+    game_key: str,
+    gift_id: str,
+    body: EditGiftRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    if game_key != "pocket_voyager":
+        raise HTTPException(status_code=404, detail="Game not found.")
+    image_mode = (body.image_mode or "keep").strip().lower()
+    if image_mode not in {"keep", "generate"}:
+        raise HTTPException(status_code=400, detail="Invalid image_mode.")
+    try:
+        updated = update_gift_in_catalog(
+            catalog_path=body.catalog_path,
+            gift_id=gift_id,
+            description=body.description,
+            display_name=body.display_name,
+            activity_tags=body.activity_tags,
+            priority=body.priority,
+            weight=body.weight,
+        )
+        if image_mode == "generate":
+            generate_gift_image(body.catalog_path, gift_id)
+        catalog = load_gift_catalog(body.catalog_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    gifts_with_urls = []
+    for gift in catalog["gifts"]:
+        filename = gift.get("image_filename")
+        url = None
+        if filename:
+            query = urlencode({"catalog_path": catalog["catalog_path"], "filename": filename})
+            url = f"/games/pocket_voyager/pipelines/gift_images/image?{query}"
+        gifts_with_urls.append({**gift, "image_url": url})
+    return {
+        "ok": True,
+        "updated": updated,
+        "catalog_path": catalog["catalog_path"],
+        "images_dir": catalog["images_dir"],
+        "gifts": gifts_with_urls,
+    }
+
+
+@games_router.post("/games/{game_key}/pipelines/gift_images/gifts/{gift_id}/upload")
+async def edit_gift_with_image_route(
+    game_key: str,
+    gift_id: str,
+    catalog_path: str = Form(...),
+    description: str = Form(""),
+    display_name: str = Form(""),
+    activity_tags_csv: str = Form(""),
+    priority_str: str = Form(""),
+    weight_str: str = Form(""),
+    image: UploadFile = File(...),
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    if game_key != "pocket_voyager":
+        raise HTTPException(status_code=404, detail="Game not found.")
+    try:
+        raw = await image.read()
+        if not raw:
+            raise ValueError("Image file is empty.")
+        priority_val: int | None = None
+        if priority_str.strip():
+            priority_val = int(float(priority_str.strip()))
+        weight_val: float | None = None
+        if weight_str.strip():
+            weight_val = float(weight_str.strip())
+
+        update_gift_in_catalog(
+            catalog_path=catalog_path,
+            gift_id=gift_id,
+            description=description or "",
+            display_name=display_name.strip() or None,
+            activity_tags=_split_csv_field(activity_tags_csv),
+            priority=priority_val,
+            weight=weight_val,
+        )
+        updated = replace_gift_image_file(
+            catalog_path=catalog_path,
+            gift_id=gift_id,
+            image_bytes=raw,
+            original_filename=image.filename or "image.png",
+        )
+        catalog = load_gift_catalog(catalog_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    gifts_with_urls = []
+    for gift in catalog["gifts"]:
+        filename = gift.get("image_filename")
+        url = None
+        if filename:
+            query = urlencode({"catalog_path": catalog["catalog_path"], "filename": filename})
+            url = f"/games/pocket_voyager/pipelines/gift_images/image?{query}"
+        gifts_with_urls.append({**gift, "image_url": url})
+    return {
+        "ok": True,
+        "updated": updated,
+        "catalog_path": catalog["catalog_path"],
+        "images_dir": catalog["images_dir"],
+        "gifts": gifts_with_urls,
+    }
+
+
+@games_router.post("/games/{game_key}/pipelines/cities/gifts/assign")
+def assign_gift_to_city_route(
+    game_key: str,
+    body: CityGiftAssignRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    if game_key != "pocket_voyager":
+        raise HTTPException(status_code=404, detail="Game not found.")
+    try:
+        result = add_gift_to_city(body.cities_path, body.city_id, body.gift_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
+@games_router.post("/games/{game_key}/pipelines/gift_images/gifts/generate")
+def generate_gift_image_route(
+    game_key: str,
+    body: GiftGenerateRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    if game_key != "pocket_voyager":
+        raise HTTPException(status_code=404, detail="Game not found.")
+    try:
+        result = generate_gift_image(body.catalog_path, body.gift_id)
+        catalog = load_gift_catalog(body.catalog_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    gifts_with_urls = []
+    for gift in catalog["gifts"]:
+        filename = gift.get("image_filename")
+        url = None
+        if filename:
+            query = urlencode({"catalog_path": catalog["catalog_path"], "filename": filename})
+            url = f"/games/pocket_voyager/pipelines/gift_images/image?{query}"
+        gifts_with_urls.append({**gift, "image_url": url})
+    return {
+        "ok": True,
+        "generated": result,
+        "catalog_path": catalog["catalog_path"],
+        "images_dir": catalog["images_dir"],
+        "gifts": gifts_with_urls,
+    }
+
+
 def _split_csv_field(value: str) -> list[str] | None:
     parts = [p.strip() for p in (value or "").split(",") if p.strip()]
     return parts or None
@@ -197,15 +374,12 @@ def _split_csv_field(value: str) -> list[str] | None:
 async def create_gift_with_image_route(
     game_key: str,
     catalog_path: str = Form(...),
-    city_id: str = Form(""),
     gift_id: str = Form(...),
     description: str = Form(""),
     display_name: str = Form(""),
-    place_ids_csv: str = Form(""),
     activity_tags_csv: str = Form(""),
     priority_str: str = Form(""),
     weight_str: str = Form(""),
-    presentation_id: str = Form(""),
     image: UploadFile = File(...),
     _user: dict = Depends(get_current_user),
 ) -> dict:
@@ -225,15 +399,12 @@ async def create_gift_with_image_route(
             catalog_path=catalog_path,
             gift_id=gift_id,
             description=description or "",
-            city_id=city_id,
             image_bytes=raw,
             original_filename=image.filename or "image.png",
             display_name=display_name.strip() or None,
-            place_ids=_split_csv_field(place_ids_csv),
             activity_tags=_split_csv_field(activity_tags_csv),
             priority=priority_val,
             weight=weight_val,
-            presentation_id=presentation_id.strip(),
         )
         catalog = load_gift_catalog(catalog_path)
     except FileNotFoundError as exc:
