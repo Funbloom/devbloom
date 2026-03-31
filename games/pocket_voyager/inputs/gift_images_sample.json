@@ -1,0 +1,18 @@
+{
+  "project": "PocketVoyager",
+  "pipeline": "gift_images",
+  "gifts": [
+    {
+      "id": "gift_001",
+      "name": "Star Map Locket",
+      "description": "A small brass locket with a glowing star map inside.",
+      "rarity": "rare"
+    },
+    {
+      "id": "gift_002",
+      "name": "Nebula Snowglobe",
+      "description": "A glass snowglobe filled with swirling purple nebula clouds.",
+      "rarity": "epic"
+    }
+  ]
+}

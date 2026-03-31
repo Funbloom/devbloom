@@ -1,0 +1,15 @@
+{
+  "games": [
+    {
+      "key": "pocket_voyager",
+      "name": "PocketVoyager",
+      "pipelines": [
+        {
+          "key": "gift_images",
+          "name": "Gift Images",
+          "description": "Generate gift images from an input JSON file."
+        }
+      ]
+    }
+  ]
+}

@@ -25,12 +25,17 @@ function initials(email: string): string {
   return (part.slice(0, 2) || "?").toUpperCase();
 }
 
+type GameInfo = { key: string; name: string };
+type PipelineInfo = { key: string; name: string; description?: string };
+
 export function AppHeader() {
   const pathname = usePathname();
   const currentLabel = getCurrentPageLabel(pathname ?? "");
   const { authUser, user, signOut, loading } = useAuth();
   const [activeProjectKey, setActiveProjectKey] = useState("");
   const [activeProjectName, setActiveProjectName] = useState("");
+  const [games, setGames] = useState<GameInfo[]>([]);
+  const [pipelinesByGame, setPipelinesByGame] = useState<Record<string, PipelineInfo[]>>({});
 
   useEffect(() => {
     const refreshProject = async () => {
@@ -72,6 +77,36 @@ export function AppHeader() {
     };
   }, []);
 
+  useEffect(() => {
+    if (loading) return;
+    if (!authUser && !user) {
+      setGames([]);
+      setPipelinesByGame({});
+      return;
+    }
+    const loadGames = async () => {
+      try {
+        const response = await fetchApi("/games");
+        if (!response.ok) return;
+        const data = (await response.json()) as GameInfo[];
+        setGames(data);
+        for (const game of data) {
+          try {
+            const pipelinesRes = await fetchApi(`/games/${game.key}/pipelines`);
+            if (!pipelinesRes.ok) continue;
+            const pipelines = (await pipelinesRes.json()) as PipelineInfo[];
+            setPipelinesByGame((prev) => ({ ...prev, [game.key]: pipelines }));
+          } catch {
+            // Ignore pipeline load errors.
+          }
+        }
+      } catch {
+        // Ignore game load errors.
+      }
+    };
+    void loadGames();
+  }, [loading, authUser, user]);
+
   const headerTitle = activeProjectName
     ? `DevBloom Studio (${activeProjectName})`
     : "DevBloom Studio (select a project...)";
@@ -95,6 +130,59 @@ export function AppHeader() {
             </Link>
           );
         })}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          {games.length === 0 ? (
+            <Link href="/games" className="app-header-link">
+              Games
+            </Link>
+          ) : (
+            games.map((game) => {
+              const pipelines = pipelinesByGame[game.key] || [];
+              return (
+                <details key={game.key} style={{ position: "relative" }}>
+                  <summary className="app-header-link" style={{ cursor: "pointer", listStyle: "none" }}>
+                    {game.name}
+                  </summary>
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: "110%",
+                      background: "var(--panel-bg, #0f172a)",
+                      border: "1px solid rgba(148, 163, 184, 0.2)",
+                      borderRadius: 8,
+                      padding: "0.5rem",
+                      minWidth: 180,
+                      zIndex: 10,
+                    }}
+                  >
+                    {pipelines.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>No pipelines</div>
+                    ) : (
+                      pipelines.map((pipeline) => (
+                        <Link
+                          key={pipeline.key}
+                          href={`/games/${game.key}/pipelines/${pipeline.key}`}
+                          className="app-header-link"
+                          style={{ display: "block", padding: "0.25rem 0" }}
+                        >
+                          {pipeline.name}
+                        </Link>
+                      ))
+                    )}
+                    <Link
+                      href="/games"
+                      className="app-header-link"
+                      style={{ display: "block", padding: "0.25rem 0", opacity: 0.8 }}
+                    >
+                      View all
+                    </Link>
+                  </div>
+                </details>
+              );
+            })
+          )}
+        </div>
         <div className="app-header-user" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem" }}>
           {!loading && (
             authUser || user ? (

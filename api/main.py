@@ -45,6 +45,7 @@ from services.rag import (
     resolve_scope_and_project_key,
 )
 from routers.projects import projects_router
+from routers.games import games_router
 from routers.rag_routes import rag_router
 from routers.storyboard_routes import storyboard_router
 from routers.settings import settings_router
@@ -527,6 +528,7 @@ def condense_chat_history(agent_id: str, body: CondensePayload, user: dict = Dep
 
 app.include_router(rag_router, dependencies=[Depends(get_current_user)])
 app.include_router(projects_router, dependencies=[Depends(get_current_user)])
+app.include_router(games_router, dependencies=[Depends(get_current_user)])
 # storyboard_router: GET /storyboard/styles is public; other routes require auth (see storyboard_routes)
 app.include_router(storyboard_router)
 app.include_router(pdf_router, dependencies=[Depends(get_current_user)])
