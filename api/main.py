@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import traceback
@@ -63,7 +64,7 @@ async def lifespan(_app: Any):
     try:
         get_tools()
     except Exception:
-        pass
+        logger.exception("Failed to prime MCP tools cache during startup.")
     yield
 
 
@@ -120,6 +121,7 @@ LOCAL_DATA_DIR = PROJECT_ROOT / ".local_data"
 DEBUG_PROMPTS_PATH = LOCAL_DATA_DIR / "debug_prompts.txt"
 HISTORY_PREFIX = "feed_"
 MAX_HISTORY_ITEMS = 200
+logger = logging.getLogger(__name__)
 
 
 def _safe_path_segment(raw: Optional[str], fallback: str) -> str:
@@ -275,7 +277,15 @@ def log_debug_error(title: str, details: str) -> None:
         with DEBUG_PROMPTS_PATH.open("a", encoding="utf-8") as handle:
             handle.write("\n".join([separator, f"Timestamp: {timestamp}", title, details]) + "\n")
     except Exception:
-        pass
+        logger.exception("Failed to write debug error log.", extra={"debug_title": title})
+
+
+def log_unexpected_path(title: str, **details: Any) -> None:
+    detail_text = ", ".join(f"{key}={value!r}" for key, value in details.items())
+    if detail_text:
+        logger.error("%s | %s", title, detail_text)
+    else:
+        logger.error("%s", title)
 
 
 @app.get("/health")
@@ -364,6 +374,11 @@ def _fetch_users_via_auth_api() -> list:
         data = resp.json()
         batch = data.get("users") or data.get("audience") or []
         if not isinstance(batch, list):
+            log_unexpected_path(
+                "Supabase auth API returned an unexpected users payload.",
+                page=page,
+                payload_type=type(batch).__name__,
+            )
             break
         all_users.extend(batch)
         if len(batch) < per_page:
@@ -381,7 +396,7 @@ def list_users(admin: dict = Depends(require_admin)) -> list:
         try:
             users = _fetch_users_via_auth_api()
         except Exception:
-            pass
+            logger.exception("Failed to load users from Supabase Auth REST API; falling back to SDK.")
         if not users:
             supabase = get_supabase_client()
             per_page = 1000
@@ -393,6 +408,10 @@ def list_users(admin: dict = Depends(require_admin)) -> list:
                     if page == 1:
                         response = supabase.auth.admin.list_users(per_page=per_page)
                     else:
+                        log_unexpected_path(
+                            "Supabase SDK list_users rejected pagination after the first page.",
+                            page=page,
+                        )
                         break
                 batch = _extract_users_from_response(response)
                 users.extend(batch)
@@ -651,7 +670,10 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                             f"{gen_dir.resolve()}"
                         )
                     except Exception:
-                        pass
+                        logger.exception(
+                            "Failed to resolve XLSX output directory for tool instruction.",
+                            extra={"project_key": tool_project_key},
+                        )
 
             use_history = body.message is not None and body.message.strip() != ""
             if use_history:
@@ -766,6 +788,10 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                                     job = enqueue_xlsx_job(extracted)
                                     yield sse_event("xlsx_job", json.dumps({"job_id": job["id"]}))
                             except Exception as exc:
+                                logger.exception(
+                                    "Forced fallback tool execution failed.",
+                                    extra={"forced_tool_name": forced_tool_name},
+                                )
                                 log_debug_error(
                                     f"[tool_error] {forced_tool_name}",
                                     "\n".join(
@@ -777,6 +803,12 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                                     ),
                                 )
                                 yield sse_event("error", str(exc))
+                        else:
+                            log_unexpected_path(
+                                "Forced tool call was expected but the model returned no tool call or parseable fallback args.",
+                                forced_tool_name=forced_tool_name,
+                                assistant_text=assistant_text,
+                            )
                         break
                     break
 
@@ -803,6 +835,11 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                     tool_id = first_call.get("id") or "unknown_tool"
                     tool_name = first_call.get("function", {}).get("name", "unknown_tool")
                     error_payload = {"error": f"Tool '{tool_name}' is not allowed."}
+                    log_unexpected_path(
+                        "Model attempted to call a tool that is not allowed.",
+                        tool_name=tool_name,
+                        available_tool_calls=[call.get("function", {}).get("name") for call in tool_calls],
+                    )
                     yield sse_event("error", error_payload["error"])
                     pending_messages.append(
                         {
@@ -848,8 +885,9 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                             event_payload = result
                         elif tool_name == "export_xlsx":
                             job = enqueue_xlsx_job(parsed_args)
+                            result = {"job_id": job["id"]}
                             event_name = "xlsx_job"
-                            event_payload = {"job_id": job["id"]}
+                            event_payload = result
                         elif tool_name == "generate_image":
                             result = run_generate_image_tool(parsed_args)
                             event_name = "image_generated"
@@ -906,6 +944,10 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                                 event_payload = {"tool": tool_name, "ok": True}
                                 tool_content = result if isinstance(result, str) else json.dumps(result)
                             else:
+                                log_unexpected_path(
+                                    "Model requested an MCP tool but MCP support is not configured.",
+                                    tool_name=tool_name,
+                                )
                                 event_name = "mcp_result"
                                 event_payload = {"tool": tool_name, "ok": False, "error": "MCP not configured."}
                                 tool_content = json.dumps({"error": "MCP not configured or mcp package not installed."})
@@ -936,10 +978,16 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                             )
                             continue
                         else:
+                            log_unexpected_path(
+                                "Tool dispatcher reached unsupported builtin tool branch.",
+                                tool_name=tool_name,
+                                builtin_tools=sorted(BUILTIN_TOOL_NAMES),
+                            )
                             raise ValueError("Unsupported tool.")
                         yield sse_event(event_name, json.dumps(event_payload))
                         tool_content = json.dumps(result)
                     except Exception as exc:
+                        logger.exception("Tool execution failed.", extra={"tool_name": tool_name or "unknown"})
                         log_debug_error(
                             f"[tool_error] {tool_name or 'unknown'}",
                             "\n".join(
@@ -987,8 +1035,8 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
                 yield sse_event("sources", json.dumps(sources_payload))
             yield sse_event("done", "")
         except Exception as exc:
+            logger.exception("Unhandled exception in /chat/stream generator.")
             yield sse_event("error", str(exc))
             yield sse_event("done", "")
 
     return StreamingResponse(generator(), media_type="text/event-stream")
-

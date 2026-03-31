@@ -1,6 +1,7 @@
 """Async XLSX export jobs (local JSON store)."""
 
 import json
+import logging
 import threading
 import time
 import uuid
@@ -15,6 +16,7 @@ JOBS_DIR = PROJECT_ROOT / ".local_data" / "jobs" / "xlsx"
 JOB_TTL_SECONDS = 60 * 60 * 24  # 24h
 
 _lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -38,6 +40,7 @@ def _read_job(path: Path) -> Optional[dict]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
+        logger.exception("Failed to read XLSX job record.", extra={"path": str(path)})
         return None
 
 
@@ -50,9 +53,10 @@ def cleanup_jobs() -> None:
                 if file.stat().st_mtime < cutoff:
                     file.unlink(missing_ok=True)
             except Exception:
+                logger.exception("Failed to clean up expired XLSX job record.", extra={"path": str(file)})
                 continue
     except Exception:
-        pass
+        logger.exception("Failed to clean up XLSX jobs directory.", extra={"jobs_dir": str(JOBS_DIR)})
 
 
 def create_xlsx_job(args: dict) -> dict:
@@ -102,6 +106,7 @@ def _run_job(job_id: str, args: dict) -> None:
             },
         )
     except Exception as exc:
+        logger.exception("XLSX export job failed.", extra={"job_id": job_id})
         _update_job(job_id, {"status": "error", "error": str(exc)})
 
 

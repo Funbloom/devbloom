@@ -1,4 +1,5 @@
 import mimetypes
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -19,6 +20,7 @@ from services.image_tool import (
 from services.storyboard import list_styles
 
 image_router = APIRouter()
+logger = logging.getLogger(__name__)
 
 CHARACTER_PROMPT_SUFFIX = (
     " Full-body game character, standing in a neutral A-pose, on a plain bright green background without shadows."
@@ -135,7 +137,9 @@ def generate_character_image_route(
                     style_name = s.get("name")
                     break
         except Exception:
-            pass
+            logger.exception("Failed to load storyboard styles for character image generation.", extra={"style_id": sid})
+        if not style_prompt:
+            logger.error("Requested storyboard style was not found during character image generation.", extra={"style_id": sid})
     try:
         prompt = _build_character_prompt(role, physical, age, outfit, style_prompt)
     except ValueError as exc:
@@ -300,8 +304,8 @@ def get_image(filename: str, project_key: str | None = None) -> FileResponse:
     except HTTPException:
         raise
     except ValueError as exc:
-        print(f"[GET /images] ValueError: {exc}")
+        logger.warning("Invalid image request.", extra={"filename": filename, "project_key": project_key, "error": str(exc)})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        print(f"[GET /images] unexpected error: {exc}")
+        logger.exception("Unexpected error while serving generated image.", extra={"filename": filename, "project_key": project_key})
         raise HTTPException(status_code=500, detail="Failed to read image.") from exc

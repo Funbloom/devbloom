@@ -1,4 +1,5 @@
 """User usage tracking: image generation count per day. Enforces daily limit (admins exempt)."""
+import logging
 import os
 from datetime import date, datetime, timezone
 
@@ -7,6 +8,7 @@ from fastapi import HTTPException
 from services.rag import get_supabase_client
 
 MAX_IMAGES_PER_USER_PER_DAY = int(os.getenv("MAX_IMAGES_PER_USER_PER_DAY", "20"))
+logger = logging.getLogger(__name__)
 
 
 def _today_utc() -> date:
@@ -32,6 +34,7 @@ def get_usage_today(user_id: str) -> int:
             return 0
         return int(r.data[0].get("images_generated", 0) or 0)
     except Exception:
+        logger.exception("Failed to load today's image usage.", extra={"user_id": user_id})
         return 0
 
 
@@ -51,6 +54,7 @@ def get_usage_total(user_id: str) -> int:
             return 0
         return sum(int(row.get("images_generated", 0) or 0) for row in r.data)
     except Exception:
+        logger.exception("Failed to load total image usage.", extra={"user_id": user_id})
         return 0
 
 
@@ -80,6 +84,7 @@ def get_usage_for_users(user_ids: list[str]) -> dict[str, dict]:
                 result[uid]["images_today"] = count
         return result
     except Exception:
+        logger.exception("Failed to load image usage for users.", extra={"user_ids": user_ids})
         return result
 
 
@@ -111,7 +116,7 @@ def increment_usage(user_id: str, count: int = 1) -> None:
                 "images_generated": count,
             }).execute()
     except Exception:
-        pass
+        logger.exception("Failed to increment image usage.", extra={"user_id": user_id, "count": count})
 
 
 def check_can_generate_images(user_id: str, is_admin: bool, count: int = 1) -> None:
