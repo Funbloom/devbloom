@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import requests
+from openai import OpenAI
 try:
     from rembg import new_session, remove as rembg_remove  # type: ignore
 except Exception:
@@ -23,6 +24,7 @@ from core.code_settings import (
     ALLOWED_IMAGE_DIMENSIONS,
     IMAGE_MAX_IMAGES,
     IMAGE_MAX_PROMPT_LEN,
+    IMAGE_MODEL_REGISTRY,
 )
 
 MAX_FILENAME_LEN = 120
@@ -331,39 +333,19 @@ def _generate_image_gemini(
     return {"images": images}
 
 
-def generate_image(
+def _generate_image_leonardo(
     prompt: str,
+    width: int,
+    height: int,
+    quantity: int,
+    project_key: Optional[str],
     negative_prompt: str | None = None,
-    width: int = 1024,
-    height: int = 1024,
-    num_images: int = 1,
     seed: int | None = None,
-    model: str = "gemini-2.5-flash-image",
-    project_key: Optional[str] = None,
-    reference_image_filenames: Optional[Iterable[str]] = None,
+    provider_model: str = "gemini-2.5-flash-image",
 ) -> dict:
-    if not prompt or len(prompt.strip()) == 0:
-        raise ValueError("Prompt is required.")
-    prompt = _shorten_prompt(prompt, MAX_PROMPT_LEN)
-
-    # Prefer Gemini Nano Banana (Gemini 3.1 Flash Image) when configured.
-    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if gemini_key:
-        quantity = max(1, min(num_images, MAX_IMAGES))
-        safe_width = max(144, int(width))
-        safe_height = max(144, int(height))
-        return _generate_image_gemini(
-            prompt=prompt,
-            width=safe_width,
-            height=safe_height,
-            quantity=quantity,
-            project_key=project_key,
-            reference_image_filenames=reference_image_filenames,
-        )
-
     width = _clamp_dimension(width)
     height = _clamp_dimension(height)
-    quantity = max(1, min(num_images, MAX_IMAGES))
+    quantity = max(1, min(quantity, MAX_IMAGES))
 
     api_key = os.getenv("LEONARDO_API_KEY")
     if not api_key:
@@ -383,32 +365,27 @@ def generate_image(
     base_url = os.getenv("LEONARDO_API_BASE", "https://cloud.leonardo.ai/api/rest/v2").rstrip("/")
     base_url_v1 = os.getenv("LEONARDO_API_BASE_V1", "https://cloud.leonardo.ai/api/rest/v1").rstrip("/")
     headers = {
-        "accept": "application/json", 
-        "content-type": "application/json", 
-        "authorization": f"Bearer {api_key}"
-        }
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": f"Bearer {api_key}",
+    }
 
-    model = "gemini-2.5-flash-image"
-    base_payload = {
-        "model": model,
+    payload = {
+        "model": provider_model,
         "parameters": {
             "width": width,
             "height": height,
             "prompt": prompt,
             "quantity": quantity,
             "prompt_enhance": "OFF",
-            "style_ids": [
-                "111dc692-d470-4eec-b791-3475abac4c46"
-            ]
+            "style_ids": ["111dc692-d470-4eec-b791-3475abac4c46"],
         },
         "public": False,
     }
     if negative_prompt:
-        base_payload["parameters"]["negative_prompt"] = negative_prompt
+        payload["parameters"]["negative_prompt"] = negative_prompt
     if seed is not None:
-        base_payload["parameters"]["seed"] = seed
-
-    payload = base_payload
+        payload["parameters"]["seed"] = seed
 
     response = requests.post(f"{base_url}/generations", json=payload, headers=headers, timeout=120)
     response_text = response.text
@@ -428,10 +405,9 @@ def generate_image(
     if isinstance(data, list):
         print(f"[leonardo] generate error list: {data} payload={payload}")
         raise ValueError(f"Leonardo request failed: {_extract_error_details(data)}")
+
     urls = _extract_image_urls(data)
-    if urls:
-        generation_id = None
-    else:
+    if not urls:
         generation_id = None
         if isinstance(data, dict) and isinstance(data.get("generate"), dict):
             generation_id = data["generate"].get("generationId")
@@ -442,7 +418,6 @@ def generate_image(
                 print(f"[leonardo] response body: {data}")
                 raise ValueError(f"Leonardo response missing generation id. Keys: {top_keys}")
 
-    if generation_id:
         poll_url = f"{base_url_v1}/generations/{generation_id}"
         urls = []
         start = time.time()
@@ -473,6 +448,145 @@ def generate_image(
         )
 
     return {"images": images}
+
+
+def _generate_image_openai(
+    prompt: str,
+    width: int,
+    height: int,
+    quantity: int,
+    project_key: Optional[str],
+    negative_prompt: str | None = None,
+    model_name: str = "gpt-image-1.5",
+    quality: str | None = None,
+    style: str | None = None,
+    transparent_background: bool | None = None,
+) -> dict:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OpenAI API key is missing. Set OPENAI_API_KEY.")
+
+    safe_width = max(256, int(width))
+    safe_height = max(256, int(height))
+    if safe_width == safe_height:
+        size = "1024x1024"
+    elif safe_width > safe_height:
+        size = "1536x1024"
+    else:
+        size = "1024x1536"
+    if negative_prompt:
+        prompt = f"{prompt}\nNegative prompt: {negative_prompt}"
+
+    client = OpenAI(api_key=api_key)
+    params: dict = {
+        "model": model_name,
+        "prompt": prompt,
+        "size": size,
+        "n": max(1, min(quantity, MAX_IMAGES)),
+        "user": project_key or None,
+    }
+    if quality:
+        params["quality"] = quality
+    if style:
+        params["style"] = style
+    if transparent_background is True:
+        params["background"] = "transparent"
+    elif transparent_background is False:
+        params["background"] = "opaque"
+
+    response = client.images.generate(**params)
+
+    images: list[dict] = []
+    for idx, item in enumerate(response.data or []):
+        b64 = getattr(item, "b64_json", None)
+        if not b64 and isinstance(item, dict):
+            b64 = item.get("b64_json")
+        if not b64:
+            continue
+        data_bytes = base64.b64decode(b64)
+        filename = build_image_filename(f"gpt_image_{idx+1}", "png")
+        output_path = save_bytes_to_file(data_bytes, filename, project_key)
+        images.append(
+            {
+                "filename": filename,
+                "url": build_image_url(filename, project_key),
+                "path": str(output_path),
+            }
+        )
+
+    if not images:
+        raise ValueError("OpenAI image generation returned no images.")
+
+    return {"images": images}
+
+
+def generate_image(
+    prompt: str,
+    negative_prompt: str | None = None,
+    width: int = 1024,
+    height: int = 1024,
+    num_images: int = 1,
+    seed: int | None = None,
+    model: str = "gemini-2.5-flash-image",
+    quality: str | None = None,
+    style: str | None = None,
+    transparent_background: bool | None = None,
+    project_key: Optional[str] = None,
+    reference_image_filenames: Optional[Iterable[str]] = None,
+) -> dict:
+    if not prompt or len(prompt.strip()) == 0:
+        raise ValueError("Prompt is required.")
+    prompt = _shorten_prompt(prompt, MAX_PROMPT_LEN)
+
+    if model not in IMAGE_MODEL_REGISTRY:
+        raise ValueError(f"Unsupported image model: {model}")
+
+    provider = IMAGE_MODEL_REGISTRY[model]["provider"]
+    provider_model = IMAGE_MODEL_REGISTRY[model].get("provider_model", model)
+    quantity = max(1, min(num_images, MAX_IMAGES))
+
+    if provider == "gemini":
+        gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not gemini_key:
+            raise ValueError("Gemini API key is missing. Set GEMINI_API_KEY.")
+        safe_width = max(144, int(width))
+        safe_height = max(144, int(height))
+        return _generate_image_gemini(
+            prompt=prompt,
+            width=safe_width,
+            height=safe_height,
+            quantity=quantity,
+            project_key=project_key,
+            reference_image_filenames=reference_image_filenames,
+        )
+
+    if provider == "leonardo":
+        return _generate_image_leonardo(
+            prompt=prompt,
+            width=width,
+            height=height,
+            quantity=quantity,
+            project_key=project_key,
+            negative_prompt=negative_prompt,
+            seed=seed,
+            provider_model=provider_model,
+        )
+
+    if provider == "openai":
+        return _generate_image_openai(
+            prompt=prompt,
+            width=width,
+            height=height,
+            quantity=quantity,
+            project_key=project_key,
+            negative_prompt=negative_prompt,
+            model_name=provider_model,
+            quality=quality,
+            style=style,
+            transparent_background=transparent_background,
+        )
+
+    raise ValueError(f"Unsupported image provider: {provider}")
 
 
 def resize_image(

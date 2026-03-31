@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from services.image_tool import generate_image
+from core.code_settings import resolve_image_model
 from services.rag import get_supabase_client
 
 
@@ -618,7 +619,11 @@ def reorder_tiles(
         raise HTTPException(status_code=500, detail=f"Failed to reorder tiles: {exc}") from exc
 
 
-def generate_tile_image(tile_id: str, current_user_id: Optional[str] = None) -> Dict[str, Any]:
+def generate_tile_image(
+    tile_id: str,
+    current_user_id: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Dict[str, Any]:
     tid = (tile_id or "").strip()
     if not tid:
         raise HTTPException(status_code=400, detail="tile_id is required.")
@@ -729,10 +734,12 @@ def generate_tile_image(tile_id: str, current_user_id: Optional[str] = None) -> 
             if fname and fname not in reference_files:
                 reference_files.append(fname)
 
+        model_key = resolve_image_model("storyboard", model)
         gen_result = generate_image(
             prompt=full_prompt,
             project_key=project_key or None,
             reference_image_filenames=reference_files or None,
+            model=model_key,
         )
         images = gen_result.get("images") or []
         if not images:

@@ -28,7 +28,16 @@ export function normalizeImageUrl(url: string): string {
 
 export async function generateImageFromPrompt(
   prompt: string,
-  options?: { negativePrompt?: string; width?: number; height?: number; numImages?: number }
+  options?: {
+    negativePrompt?: string;
+    width?: number;
+    height?: number;
+    numImages?: number;
+    model?: string;
+    quality?: string;
+    style?: string;
+    transparentBackground?: boolean;
+  }
 ): Promise<BackendImageResult[]> {
   const body: Record<string, unknown> = { prompt };
   if (options?.negativePrompt?.trim()) {
@@ -37,6 +46,12 @@ export async function generateImageFromPrompt(
   if (typeof options?.width === "number") body.width = options.width;
   if (typeof options?.height === "number") body.height = options.height;
   if (typeof options?.numImages === "number") body.num_images = options.numImages;
+  if (options?.model) body.model = options.model;
+  if (options?.quality) body.quality = options.quality;
+  if (options?.style) body.style = options.style;
+  if (typeof options?.transparentBackground === "boolean") {
+    body.transparent_background = options.transparentBackground;
+  }
   const response = await fetchApi("/tools/generate_image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

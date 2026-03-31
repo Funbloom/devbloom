@@ -18,6 +18,7 @@ from services.image_tool import (
     validate_image_filename,
 )
 from services.storyboard import list_styles
+from core.code_settings import resolve_image_model
 
 image_router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -45,6 +46,9 @@ class GenerateImageRequest(BaseModel):
     num_images: int = 1
     seed: int | None = None
     model: str | None = None
+    quality: str | None = None
+    style: str | None = None
+    transparent_background: bool | None = None
     project_key: str | None = None
 
 
@@ -148,6 +152,7 @@ def generate_character_image_route(
         result = generate_image(
             prompt=prompt,
             negative_prompt=(body.negative_prompt or "").strip() or None,
+            model=resolve_image_model("character", None),
         )
         n = len(result.get("images") or [])
         if n > 0:
@@ -174,6 +179,10 @@ def generate_image_route(
         count=body.num_images,
     )
     try:
+        try:
+            model_key = resolve_image_model("imagegen", body.model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         result = generate_image(
             prompt=body.prompt,
             negative_prompt=body.negative_prompt,
@@ -181,7 +190,10 @@ def generate_image_route(
             height=body.height,
             num_images=body.num_images,
             seed=body.seed,
-            model=body.model or "gemini-image-2",
+            model=model_key,
+            quality=body.quality,
+            style=body.style,
+            transparent_background=body.transparent_background,
             project_key=body.project_key,
         )
         n = len(result.get("images") or [])

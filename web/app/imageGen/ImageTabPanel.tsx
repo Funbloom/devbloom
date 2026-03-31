@@ -10,6 +10,15 @@ type Props = {
   styles: Style[];
   selectedStyleId: string;
   onSelectedStyleIdChange: (value: string) => void;
+  model: string;
+  modelOptions: { value: string; label: string }[];
+  onModelChange: (value: string) => void;
+  openAiQuality: string;
+  onOpenAiQualityChange: (value: string) => void;
+  openAiStyle: string;
+  onOpenAiStyleChange: (value: string) => void;
+  openAiTransparent: boolean;
+  onOpenAiTransparentChange: (value: boolean) => void;
   sizePreset: "square" | "portrait" | "landscape";
   onSizePresetChange: (value: "square" | "portrait" | "landscape") => void;
   qualityPreset: "high" | "medium" | "low";
@@ -29,6 +38,15 @@ export function ImageTabPanel({
   styles,
   selectedStyleId,
   onSelectedStyleIdChange,
+  model,
+  modelOptions,
+  onModelChange,
+  openAiQuality,
+  onOpenAiQualityChange,
+  openAiStyle,
+  onOpenAiStyleChange,
+  openAiTransparent,
+  onOpenAiTransparentChange,
   sizePreset,
   onSizePresetChange,
   qualityPreset,
@@ -92,6 +110,60 @@ export function ImageTabPanel({
           </option>
         ))}
       </select>
+
+      <label className="imagegen-label" htmlFor="imagegen-model">
+        Model
+      </label>
+      <select
+        id="imagegen-model"
+        className="imagegen-select"
+        value={model}
+        onChange={(e) => onModelChange(e.target.value)}
+      >
+        {modelOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+
+      <label className="imagegen-label" htmlFor="imagegen-openai-quality">
+        Output Quality (GPT Image)
+      </label>
+      <select
+        id="imagegen-openai-quality"
+        className="imagegen-select"
+        value={openAiQuality}
+        onChange={(e) => onOpenAiQualityChange(e.target.value)}
+      >
+        <option value="">Default</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
+
+      <label className="imagegen-label" htmlFor="imagegen-openai-style">
+        Style (GPT Image)
+      </label>
+      <select
+        id="imagegen-openai-style"
+        className="imagegen-select"
+        value={openAiStyle}
+        onChange={(e) => onOpenAiStyleChange(e.target.value)}
+      >
+        <option value="">Default</option>
+        <option value="natural">Natural</option>
+        <option value="vivid">Vivid</option>
+      </select>
+
+      <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <input
+          type="checkbox"
+          checked={openAiTransparent}
+          onChange={(e) => onOpenAiTransparentChange(e.target.checked)}
+        />
+        <span>Transparent background (GPT Image)</span>
+      </label>
 
       <label className="imagegen-label" htmlFor="imagegen-size">
         Size

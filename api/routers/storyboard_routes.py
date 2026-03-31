@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
+from core.code_settings import resolve_image_model
 
 from services.image_tool import build_image_filename, build_image_url, save_bytes_to_file
 from services.image_storage import upload_image_to_supabase
@@ -76,6 +77,10 @@ class TileUpdate(BaseModel):
 
 class TilesReorder(BaseModel):
     tile_ids: List[str] = Field(min_items=1)
+
+
+class TileGenerateRequest(BaseModel):
+    model: Optional[str] = None
 
 
 class LocationCreate(BaseModel):
@@ -403,10 +408,15 @@ async def api_upload_location_image(
 @storyboard_router.post("/storyboard/tiles/{tile_id}/generate")
 def api_generate_tile(
     tile_id: str,
+    body: TileGenerateRequest | None = None,
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Generate an image for a tile and update the tile's image field."""
     check_can_generate_images(user.get("id") or "", user.get("is_admin") or False, count=1)
-    result = generate_tile_image(tile_id, current_user_id=user.get("id"))
+    try:
+        model_key = resolve_image_model("storyboard", body.model if body else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = generate_tile_image(tile_id, current_user_id=user.get("id"), model=model_key)
     increment_usage(user.get("id") or "", 1)
     return result

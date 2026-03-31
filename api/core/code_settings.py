@@ -26,3 +26,30 @@ ALLOWED_IMAGE_DIMENSIONS = {
     1248,
     1344,
 }
+
+# Image model registry + defaults (code-level)
+IMAGE_MODEL_REGISTRY: dict[str, dict[str, str]] = {
+    "gemini-2.5-flash-image": {"provider": "gemini"},
+    "leonardo-gemini-2.5-flash-image": {
+        "provider": "leonardo",
+        "provider_model": "gemini-2.5-flash-image",
+    },
+    "gpt-image-1.5": {"provider": "openai", "provider_model": "gpt-image-1.5"},
+}
+
+IMAGE_MODEL_DEFAULTS: dict[str, str] = {
+    "imagegen": "gemini-2.5-flash-image",
+    "character": "gemini-2.5-flash-image",
+    "storyboard": "gemini-2.5-flash-image",
+}
+
+
+def resolve_image_model(feature: str, requested: str | None) -> str:
+    if requested:
+        if requested not in IMAGE_MODEL_REGISTRY:
+            raise ValueError(f"Unsupported image model: {requested}")
+        return requested
+    fallback = IMAGE_MODEL_DEFAULTS.get(feature)
+    if not fallback:
+        fallback = IMAGE_MODEL_DEFAULTS.get("imagegen", "gemini-2.5-flash-image")
+    return fallback

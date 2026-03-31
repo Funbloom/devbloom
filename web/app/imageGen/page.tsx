@@ -16,6 +16,7 @@ import {
   uploadImageToCloud,
 } from "./client";
 import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
+import { DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
 import { useAuth } from "../contexts/AuthContext";
 import { fetchApi } from "../lib/api";
 import { CharactersTabPanel } from "./CharactersTabPanel";
@@ -179,6 +180,10 @@ export default function ImageGenPage() {
   const [bgBgThreshold, setBgBgThreshold] = useState(BG_DEFAULTS.bgThreshold);
   const [sizePreset, setSizePreset] = useState<"square" | "portrait" | "landscape">("square");
   const [qualityPreset, setQualityPreset] = useState<"high" | "medium" | "low">("medium");
+  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
+  const [openAiQuality, setOpenAiQuality] = useState("");
+  const [openAiStyle, setOpenAiStyle] = useState("");
+  const [openAiTransparent, setOpenAiTransparent] = useState(false);
   const [imageDefaults, setImageDefaults] = useState({
     num_images: 2,
     quality: "medium" as "high" | "medium" | "low",
@@ -327,6 +332,10 @@ export default function ImageGenPage() {
         width,
         height,
         numImages: imageDefaults.num_images,
+        model: imageModel,
+        quality: openAiQuality || undefined,
+        style: openAiStyle || undefined,
+        transparentBackground: openAiTransparent,
       });
       const now = new Date().toISOString();
       const newItems: GeneratedImage[] = backendImages.map((img, index) => {
@@ -600,6 +609,15 @@ export default function ImageGenPage() {
                     styles={styles}
                     selectedStyleId={selectedStyleId}
                     onSelectedStyleIdChange={setSelectedStyleId}
+                    model={imageModel}
+                    modelOptions={IMAGE_MODEL_OPTIONS}
+                    onModelChange={setImageModel}
+                    openAiQuality={openAiQuality}
+                    onOpenAiQualityChange={setOpenAiQuality}
+                    openAiStyle={openAiStyle}
+                    onOpenAiStyleChange={setOpenAiStyle}
+                    openAiTransparent={openAiTransparent}
+                    onOpenAiTransparentChange={setOpenAiTransparent}
                     sizePreset={sizePreset}
                     onSizePresetChange={setSizePreset}
                     qualityPreset={qualityPreset}

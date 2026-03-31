@@ -6,6 +6,7 @@ import type { Character, Location, Storyboard, StoryboardDetailResponse, Style, 
 import { StoryboardSidebar } from "./StoryboardSidebar";
 import { TilesPanel } from "./TilesPanel";
 import { fetchApi, API_BASE } from "../lib/api";
+import { DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
 const STORAGE_KEY_PROJECT = "activeProjectKey";
 const STORAGE_KEY_STORYBOARD = "storyboardSelectedId";
 
@@ -46,6 +47,7 @@ export default function StoryboardPage() {
   const [editingTilePrompt, setEditingTilePrompt] = useState("");
   const [generatingTileId, setGeneratingTileId] = useState<string | null>(null);
   const [tilesPerRow, setTilesPerRow] = useState(3);
+  const [tileModel, setTileModel] = useState(DEFAULT_IMAGE_MODEL);
 
   const activeStoryboard = storyboards.find((s) => s.id === selectedId) ?? null;
 
@@ -489,6 +491,8 @@ export default function StoryboardPage() {
     try {
       const response = await fetchApi(`/storyboard/tiles/${tile.id}/generate`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: tileModel }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -629,6 +633,9 @@ export default function StoryboardPage() {
             locations={locations}
             isSaving={isSaving}
             generatingTileId={generatingTileId}
+            model={tileModel}
+            modelOptions={IMAGE_MODEL_OPTIONS}
+            onModelChange={setTileModel}
             tilesPerRow={tilesPerRow}
             onTilesPerRowChange={setTilesPerRow}
             status={status}

@@ -32,6 +32,9 @@ type Props = {
   locations: Location[];
   isSaving: boolean;
   generatingTileId: string | null;
+  model: string;
+  modelOptions: { value: string; label: string }[];
+  onModelChange: (value: string) => void;
   tilesPerRow: number;
   onTilesPerRowChange: (n: number) => void;
   status: string | null;
@@ -61,6 +64,9 @@ export function TilesPanel(props: Props) {
     locations,
     isSaving,
     generatingTileId,
+    model,
+    modelOptions,
+    onModelChange,
     tilesPerRow,
     onTilesPerRowChange,
     status,
@@ -116,6 +122,22 @@ export function TilesPanel(props: Props) {
                   />
                   Presentation Mode
                 </label>
+              </div>
+              <div className="edit-actions" style={{ alignItems: "center", gap: 8 }}>
+                <label style={{ fontSize: 14 }} htmlFor="storyboard-model">
+                  Model:
+                </label>
+                <select
+                  id="storyboard-model"
+                  value={model}
+                  onChange={(e) => onModelChange(e.target.value)}
+                >
+                  {modelOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="edit-actions" style={{ alignItems: "center", gap: 8 }}>
                 <label style={{ fontSize: 14 }} htmlFor="tiles-per-row">
