@@ -499,8 +499,6 @@ def _generate_image_openai(
     }
     if quality:
         params["quality"] = quality
-    if style:
-        params["style"] = style
     if transparent_background is True:
         params["background"] = "transparent"
     elif transparent_background is False:
@@ -567,8 +565,6 @@ def generate_openai_image_to_dir(
     }
     if quality:
         params["quality"] = quality
-    if style:
-        params["style"] = style
     if transparent_background is True:
         params["background"] = "transparent"
     elif transparent_background is False:

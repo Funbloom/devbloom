@@ -35,6 +35,7 @@ function joinPlatformPath(base: string | null, filename: string): string | null 
 }
 
 type PipelineInfo = { key: string; name: string; description?: string };
+type StyleInfo = { id: string; name: string; prompt?: string };
 type GiftItem = {
   id: string;
   displayName: string;
@@ -93,8 +94,13 @@ type GameDataPaths = {
   giftCatalogJsonExists: boolean;
 };
 
-export default function PipelinePage({ params }: PageProps) {
-  const { gameKey, pipelineKey } = use(params);
+export function PipelinePageContent({
+  gameKey,
+  pipelineKey,
+}: {
+  gameKey: string;
+  pipelineKey: string;
+}) {
   const [pipeline, setPipeline] = useState<PipelineInfo | null>(null);
   const [inputs, setInputs] = useState<string[]>([]);
   const [selected, setSelected] = useState("");
@@ -114,6 +120,17 @@ export default function PipelinePage({ params }: PageProps) {
   const [linkedGiftsById, setLinkedGiftsById] = useState<Record<string, LinkedGift>>({});
   const [giftCityMap, setGiftCityMap] = useState<GiftCityMap>({});
   const [selectedCityByGift, setSelectedCityByGift] = useState<Record<string, string>>({});
+  const [batchCityCount, setBatchCityCount] = useState("5");
+  const [batchCityPrompt, setBatchCityPrompt] = useState("");
+  const [batchCityStatus, setBatchCityStatus] = useState<string | null>(null);
+  const [isBatchCreating, setIsBatchCreating] = useState(false);
+  const [selectedCityIds, setSelectedCityIds] = useState<Record<string, boolean>>({});
+  const [updateLocPrompt, setUpdateLocPrompt] = useState("");
+  const [updateLocStatus, setUpdateLocStatus] = useState<string | null>(null);
+  const [isUpdatingLoc, setIsUpdatingLoc] = useState(false);
+  const [updateLocCount, setUpdateLocCount] = useState("3");
+  const [updateLocReplace, setUpdateLocReplace] = useState(false);
+  const [citiesToolTab, setCitiesToolTab] = useState<"create" | "updates">("create");
   const [linkedGiftBasePath, setLinkedGiftBasePath] = useState("");
   const [selectedLinkedGiftId, setSelectedLinkedGiftId] = useState<string | null>(null);
   const [selectedLinkedGiftImage, setSelectedLinkedGiftImage] = useState<string | null>(null);
@@ -142,6 +159,18 @@ export default function PipelinePage({ params }: PageProps) {
   const [gameDataLoadError, setGameDataLoadError] = useState<string | null>(null);
   const [giftCatalogMissingForCities, setGiftCatalogMissingForCities] = useState(false);
   const [activeProjectKeyForGame, setActiveProjectKeyForGame] = useState<string | null>(null);
+  const [giftToolTab, setGiftToolTab] = useState<"create" | "update">("create");
+  const [selectedGiftIds, setSelectedGiftIds] = useState<Record<string, boolean>>({});
+  const [giftStyles, setGiftStyles] = useState<StyleInfo[]>([]);
+  const [giftStyleId, setGiftStyleId] = useState("");
+  const [giftStyleExtra, setGiftStyleExtra] = useState("");
+  const [giftStyleQuality, setGiftStyleQuality] = useState("low");
+  const [giftStyleMode, setGiftStyleMode] = useState("natural");
+  const [giftUpdateStatus, setGiftUpdateStatus] = useState<string | null>(null);
+  const [isGiftUpdating, setIsGiftUpdating] = useState(false);
+  const [giftImageReload, setGiftImageReload] = useState(0);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewImageTitle, setPreviewImageTitle] = useState<string | null>(null);
 
   const parseCatalogText = (text: string): GiftItem[] => {
     const parsed = JSON.parse(text) as { items?: unknown; gifts?: unknown };
@@ -451,6 +480,27 @@ export default function PipelinePage({ params }: PageProps) {
   }, [pipelineKey, selectedLinkedGiftId, linkedGiftsById, linkedGiftBasePath, gameKey]);
 
   useEffect(() => {
+    if (pipelineKey !== "gift_images") return;
+    let cancelled = false;
+    const loadStyles = async () => {
+      try {
+        const res = await fetchApi("/storyboard/styles");
+        if (!res.ok) return;
+        const data = (await res.json()) as StyleInfo[];
+        if (!cancelled) {
+          setGiftStyles(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        if (!cancelled) setGiftStyles([]);
+      }
+    };
+    void loadStyles();
+    return () => {
+      cancelled = true;
+    };
+  }, [pipelineKey]);
+
+  useEffect(() => {
     const load = async () => {
       try {
         const res = await fetchApi(`/games/${gameKey}/pipelines`);
@@ -497,8 +547,10 @@ export default function PipelinePage({ params }: PageProps) {
           setImageErrors((prev) => ({ ...prev, [fn]: "File not found" }));
           continue;
         }
+        const cacheBust = `v=${giftImageReload}`;
+        const sourceUrlWithBust = `${sourceUrl}${sourceUrl.includes("?") ? "&" : "?"}${cacheBust}`;
         try {
-          const res = await fetchApi(sourceUrl);
+          const res = await fetchApi(sourceUrlWithBust, { cache: "no-store" });
           if (!res.ok) {
             if (res.status === 404) {
               setImageErrors((prev) => ({ ...prev, [fn]: "File not found" }));
@@ -521,7 +573,7 @@ export default function PipelinePage({ params }: PageProps) {
     return () => {
       cancelled = true;
     };
-  }, [gifts, fileGifts, pipelineKey, catalogPath, gameKey]);
+  }, [gifts, fileGifts, pipelineKey, catalogPath, gameKey, giftImageReload]);
 
   useEffect(() => {
     if (pipelineKey === "gift_images") return;
@@ -638,6 +690,12 @@ export default function PipelinePage({ params }: PageProps) {
     pipelineKey === "gift_images" && giftSearch.trim()
       ? allGiftItems.filter((gift) => {
           const q = giftSearch.trim().toLowerCase();
+          if (q.startsWith("city:")) {
+            const cityQuery = q.slice("city:".length).trim();
+            if (!cityQuery) return true;
+            const citiesForGift = gift.id ? giftCityMap[gift.id] || [] : [];
+            return citiesForGift.some((c) => c.name.toLowerCase().includes(cityQuery));
+          }
           return (
             (gift.displayName || "").toLowerCase().includes(q) ||
             (gift.id || "").toLowerCase().includes(q) ||
@@ -682,7 +740,7 @@ export default function PipelinePage({ params }: PageProps) {
       return;
     }
     const tagsList = splitCsvToList(createGiftActivityTags);
-    const payloadBase = {
+    const payloadBase: Record<string, unknown> = {
       catalog_path: giftCatalogPathForCreate,
       gift_id: createGiftId.trim(),
       description: createGiftDescription.trim(),
@@ -691,6 +749,8 @@ export default function PipelinePage({ params }: PageProps) {
       priority: pr,
       weight: w,
     };
+    const wantsGenerate = createGiftImageMode === "generate";
+    if (wantsGenerate) payloadBase.image_mode = "generate";
     setCreateGiftStatus(forceGenerate ? "Creating + generating..." : "Creating...");
     try {
       let res: Response;
@@ -752,7 +812,7 @@ export default function PipelinePage({ params }: PageProps) {
         }));
       }
 
-      if (forceGenerate && createGiftImageMode === "generate") {
+      if (forceGenerate && createGiftImageMode === "generate" && !("image_mode" in payloadBase)) {
         const genRes = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -898,6 +958,245 @@ export default function PipelinePage({ params }: PageProps) {
     }
   };
 
+  const buildCitiesPrompt = () => {
+    const count = Number.parseInt(batchCityCount, 10);
+    const existingCities = (cities ?? []).map((c) => `${c.name_id} (${c.display_name || c.name_id})`);
+    const existingGifts = (gifts ?? []).map((g) => g.id).filter(Boolean);
+    return `You are creating new city entries for a game.\n\n` +
+      `Existing cities (do not repeat):\n${existingCities.join(", ") || "None"}\n\n` +
+      `Existing gift ids (avoid duplicates):\n${existingGifts.join(", ") || "None"}\n\n` +
+      `Create ${Number.isFinite(count) ? count : 5} new cities around the world that are NOT in the list. ` +
+      `For each city, create exactly 5 gifts. Provide concise display names and descriptions. ` +
+      `Return JSON only with the schema:\n` +
+      `{ "cities": [ { "cityId": string, "displayName": string, "gifts": [ { "giftId": string, "displayName": string, "description": string, "activityTags": [string] } ] } ] }`;
+  };
+
+  const handleBatchCreatePrompt = () => {
+    setBatchCityPrompt(buildCitiesPrompt());
+    setBatchCityStatus(null);
+  };
+
+  const handleExecuteBatchCreate = async () => {
+    if (!gameDataPaths?.citiesJson || !gameDataPaths?.giftCatalogJson) {
+      setBatchCityStatus("Cities or gifts catalog path not available.");
+      return;
+    }
+    const count = Number.parseInt(batchCityCount, 10);
+    if (!Number.isFinite(count) || count <= 0) {
+      setBatchCityStatus("Enter a valid number of cities.");
+      return;
+    }
+    if (!batchCityPrompt.trim()) {
+      setBatchCityStatus("Prompt is required.");
+      return;
+    }
+    setIsBatchCreating(true);
+    setBatchCityStatus("Running batch creation...");
+    try {
+      const res = await fetchApi(`/games/${gameKey}/pipelines/cities/batch_create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cities_path: gameDataPaths.citiesJson,
+          gifts_path: gameDataPaths.giftCatalogJson,
+          count,
+          prompt: batchCityPrompt.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(errBody.detail || `Batch failed: ${res.status}`);
+      }
+      const data = (await res.json()) as { cities?: CityItem[]; gifts?: GiftItem[]; errors?: string[] };
+      if (data.gifts) {
+        setGifts(data.gifts);
+      }
+      if (gameDataPaths?.citiesJson) {
+        const reload = await fetchApi(
+          `/projects/${encodeURIComponent(activeProjectKeyForGame || "")}/game-data-file/cities`,
+        );
+        if (reload.ok) {
+          const json = await reload.json();
+          const text = JSON.stringify(json, null, 2);
+          const parsedCities = parseCitiesText(text);
+          setCities(parsedCities);
+          setFileCities(null);
+          setGiftCityMap(buildGiftCityMap(parsedCities));
+        } else if (data.cities) {
+          setCities(data.cities);
+          setGiftCityMap(buildGiftCityMap(data.cities));
+        }
+      } else if (data.cities) {
+        setCities(data.cities);
+        setGiftCityMap(buildGiftCityMap(data.cities));
+      }
+      if (data.errors && data.errors.length > 0) {
+        setBatchCityStatus(`Completed with warnings: ${data.errors.slice(0, 3).join(" | ")}`);
+      } else {
+        setBatchCityStatus("Batch creation completed.");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Batch failed.";
+      setBatchCityStatus(`Error: ${message}`);
+    } finally {
+      setIsBatchCreating(false);
+    }
+  };
+
+  const buildLocationUpdatePrompt = (selected: CityItem[], count: number) => {
+    const cityLines = selected.map(
+      (c) => `- ${c.name_id} (${c.display_name || c.name_id})`
+    );
+    return (
+      "Generate locationUpdates (it is a text message you send your friend while traveling)for the following cities. \n\n" +
+      "Each locationUpdate should feel like a casual text sent to a friend while traveling. \n" +
+      "Describe a small moment (what you're doing) and include a fun or iconic detail about the place you can learn about. \n" +
+      "Keep it warm, personal, and playful. \n" +
+      `Each city must include exactly ${count} updates. \n` +
+      "Max 150 characters. \n" +
+     
+      cityLines.join("\n") +
+      "\n\nReturn JSON only with schema: " +
+      `{ "cities": [ { "cityId": string, "locationUpdates": [ { "text": string, "image": string } ] } ] }`
+    );
+  };
+
+  const handleBuildLocationPrompt = () => {
+    const selected = (cities ?? []).filter((c) => selectedCityIds[c.name_id]);
+    if (selected.length === 0) {
+      setUpdateLocStatus("Select at least one city.");
+      return;
+    }
+    const parsedCount = Number.parseInt(updateLocCount, 10);
+    const normalized = Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 3;
+    setUpdateLocPrompt(buildLocationUpdatePrompt(selected, normalized));
+    setUpdateLocStatus(null);
+  };
+
+  const handleExecuteLocationUpdates = async () => {
+    if (!gameDataPaths?.citiesJson) {
+      setUpdateLocStatus("Cities JSON path not available.");
+      return;
+    }
+    const selected = (cities ?? []).filter((c) => selectedCityIds[c.name_id]);
+    if (selected.length === 0) {
+      setUpdateLocStatus("Select at least one city.");
+      return;
+    }
+    const count = Number.parseInt(updateLocCount, 10);
+    if (!Number.isFinite(count) || count <= 0) {
+      setUpdateLocStatus("Enter a valid number of updates.");
+      return;
+    }
+    if (!updateLocPrompt.trim()) {
+      setUpdateLocStatus("Prompt is required.");
+      return;
+    }
+    setIsUpdatingLoc(true);
+    setUpdateLocStatus("Updating locationUpdates...");
+    try {
+      const res = await fetchApi(`/games/${gameKey}/pipelines/cities/update_location_updates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cities_path: gameDataPaths.citiesJson,
+          city_ids: selected.map((c) => c.name_id),
+          prompt: updateLocPrompt.trim(),
+          count,
+          replace_existing: updateLocReplace,
+        }),
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(errBody.detail || `Update failed: ${res.status}`);
+      }
+      if (gameDataPaths?.citiesJson) {
+        const reload = await fetchApi(
+          `/projects/${encodeURIComponent(activeProjectKeyForGame || "")}/game-data-file/cities`,
+        );
+        if (reload.ok) {
+          const json = await reload.json();
+          const text = JSON.stringify(json, null, 2);
+          const parsedCities = parseCitiesText(text);
+          setCities(parsedCities);
+          setFileCities(null);
+          setGiftCityMap(buildGiftCityMap(parsedCities));
+        }
+      }
+      setUpdateLocStatus("locationUpdates updated.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Update failed.";
+      setUpdateLocStatus(`Error: ${message}`);
+    } finally {
+      setIsUpdatingLoc(false);
+    }
+  };
+
+  const handleUpdateGiftImages = async () => {
+    if (!catalogPath.trim()) {
+      setGiftUpdateStatus("Missing gift catalog path.");
+      return;
+    }
+    const selectedIds = Object.entries(selectedGiftIds)
+      .filter(([, checked]) => checked)
+      .map(([id]) => id);
+    if (selectedIds.length === 0) {
+      setGiftUpdateStatus("Select at least one gift.");
+      return;
+    }
+    const selectedStyle = giftStyles.find((s) => s.id === giftStyleId);
+    setIsGiftUpdating(true);
+    setGiftUpdateStatus(null);
+    try {
+      const res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/update_images`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          catalog_path: catalogPath,
+          gift_ids: selectedIds,
+          style_prompt: selectedStyle?.prompt || "",
+          extra_prompt: giftStyleExtra,
+          quality: giftStyleQuality,
+          style_mode: giftStyleMode,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        detail?: string | { msg?: string }[] | Record<string, unknown>;
+        errors?: string[];
+        gifts?: GiftItem[];
+        images_dir?: string;
+      };
+      if (!res.ok) {
+        const detail = body.detail;
+        const message = Array.isArray(detail)
+          ? detail.map((d) => d.msg || JSON.stringify(d)).join("; ")
+          : typeof detail === "string"
+          ? detail
+          : detail
+          ? JSON.stringify(detail)
+          : "Update failed.";
+        throw new Error(message);
+      }
+      if (Array.isArray(body.gifts)) {
+        setGifts(body.gifts);
+      }
+      if (body.images_dir) setImagesDir(body.images_dir);
+      setGiftImageReload((prev) => prev + 1);
+      const errList = Array.isArray(body.errors) ? body.errors : [];
+      if (errList.length > 0) {
+        setGiftUpdateStatus(`Updated with ${errList.length} errors: ${errList.join(" | ")}`);
+      } else {
+        setGiftUpdateStatus("Images updated.");
+      }
+      setSelectedGiftIds({});
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Update failed.";
+      setGiftUpdateStatus(`Error: ${message}`);
+    } finally {
+      setIsGiftUpdating(false);
+    }
+  };
+
   return (
     <div style={{ width: "100%", maxWidth: "100vw", margin: "2rem 0", padding: "0 1rem" }}>
       <h1 style={{ marginBottom: "0.5rem" }}>
@@ -949,20 +1248,192 @@ export default function PipelinePage({ params }: PageProps) {
                 it exists.
               </p>
             )}
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-              {pipelineKey === "gift_images" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCreateGiftImageFile(null);
-                    setCreateGiftImageMode("file");
-                    setShowCreateGift(true);
-                  }}
-                >
-                  Create gift
-                </button>
-              )}
-            </div>
+            {pipelineKey === "gift_images" && (
+              <div style={{ marginTop: "0.75rem", display: "grid", gap: "0.75rem" }}>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button
+                    type="button"
+                    className={giftToolTab === "create" ? "sidebar-tab active" : "sidebar-tab"}
+                    onClick={() => setGiftToolTab("create")}
+                  >
+                    Create gift
+                  </button>
+                  <button
+                    type="button"
+                    className={giftToolTab === "update" ? "sidebar-tab active" : "sidebar-tab"}
+                    onClick={() => setGiftToolTab("update")}
+                  >
+                    Update images
+                  </button>
+                </div>
+                {giftToolTab === "create" && (
+                  <div style={{ display: "grid", gap: "0.75rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreateGiftImageFile(null);
+                        setCreateGiftImageMode("file");
+                        setShowCreateGift(true);
+                      }}
+                    >
+                      Create gift
+                    </button>
+                  </div>
+                )}
+                {giftToolTab === "update" && (
+                  <div style={{ display: "grid", gap: "0.75rem" }}>
+                    <div style={{ fontWeight: 600 }}>Update images (selected)</div>
+                    <label style={{ display: "grid", gap: "0.25rem" }}>
+                      <span>Style</span>
+                      <select value={giftStyleId} onChange={(e) => setGiftStyleId(e.target.value)}>
+                        <option value="">None</option>
+                        {giftStyles.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: "0.25rem" }}>
+                      <span>Quality</span>
+                      <select value={giftStyleQuality} onChange={(e) => setGiftStyleQuality(e.target.value)}>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: "0.25rem" }}>
+                      <span>Style mode</span>
+                      <select value={giftStyleMode} onChange={(e) => setGiftStyleMode(e.target.value)}>
+                        <option value="natural">Natural</option>
+                        <option value="vivid">Vivid</option>
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: "0.25rem" }}>
+                      <span>Extra style notes</span>
+                      <textarea
+                        rows={4}
+                        value={giftStyleExtra}
+                        onChange={(e) => setGiftStyleExtra(e.target.value)}
+                        placeholder="e.g. watercolor, cozy lighting, pastel palette"
+                      />
+                    </label>
+                    <button type="button" onClick={handleUpdateGiftImages} disabled={isGiftUpdating}>
+                      {isGiftUpdating ? "Updating..." : "Update images"}
+                    </button>
+                    {giftUpdateStatus && (
+                      <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>{giftUpdateStatus}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            {pipelineKey === "cities" && (
+              <div style={{ marginTop: "0.75rem", display: "grid", gap: "0.75rem" }}>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button
+                    type="button"
+                    className={citiesToolTab === "create" ? "sidebar-tab active" : "sidebar-tab"}
+                    onClick={() => setCitiesToolTab("create")}
+                  >
+                    Create cities
+                  </button>
+                  <button
+                    type="button"
+                    className={citiesToolTab === "updates" ? "sidebar-tab active" : "sidebar-tab"}
+                    onClick={() => setCitiesToolTab("updates")}
+                  >
+                    Update locationUpdates
+                  </button>
+                </div>
+
+                {citiesToolTab === "create" && (
+                  <div style={{ display: "grid", gap: "0.75rem" }}>
+                    <div style={{ fontWeight: 600 }}>Create cities (batch)</div>
+                    <label style={{ display: "grid", gap: "0.25rem" }}>
+                      <span>How many cities?</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={200}
+                        value={batchCityCount}
+                        onChange={(e) => setBatchCityCount(e.target.value)}
+                      />
+                    </label>
+                    <button type="button" onClick={handleBatchCreatePrompt}>
+                      Create cities (build prompt)
+                    </button>
+                    <label style={{ display: "grid", gap: "0.25rem" }}>
+                      <span>Prompt</span>
+                      <textarea
+                        rows={8}
+                        value={batchCityPrompt}
+                        onChange={(e) => setBatchCityPrompt(e.target.value)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleExecuteBatchCreate}
+                      disabled={isBatchCreating}
+                    >
+                      {isBatchCreating ? "Executing..." : "Execute"}
+                    </button>
+                    {batchCityStatus && (
+                      <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                        {batchCityStatus}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {citiesToolTab === "updates" && (
+                  <div style={{ display: "grid", gap: "0.75rem" }}>
+                    <div style={{ fontWeight: 600 }}>Update locationUpdates (selected)</div>
+                    <label style={{ display: "grid", gap: "0.25rem" }}>
+                      <span>Updates per city</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={updateLocCount}
+                        onChange={(e) => setUpdateLocCount(e.target.value)}
+                      />
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={updateLocReplace}
+                        onChange={(e) => setUpdateLocReplace(e.target.checked)}
+                      />
+                      Replace existing updates
+                    </label>
+                    <button type="button" onClick={handleBuildLocationPrompt}>
+                      Build prompt for selected cities
+                    </button>
+                    <label style={{ display: "grid", gap: "0.25rem" }}>
+                      <span>Prompt</span>
+                      <textarea
+                        rows={6}
+                        value={updateLocPrompt}
+                        onChange={(e) => setUpdateLocPrompt(e.target.value)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleExecuteLocationUpdates}
+                      disabled={isUpdatingLoc}
+                    >
+                      {isUpdatingLoc ? "Executing..." : "Add Location Updates"}
+                    </button>
+                    {updateLocStatus && (
+                      <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                        {updateLocStatus}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {status && <span style={{ color: "var(--muted, #94a3b8)" }}>{status}</span>}
             {imagesDir && pipelineKey === "gift_images" && (
               <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>
@@ -1008,9 +1479,52 @@ export default function PipelinePage({ params }: PageProps) {
               placeholder={
                 pipelineKey === "cities"
                   ? "Search by city name..."
-                  : "Search by display name, id, or description..."
+                  : "Search by display name, id, description, or city:<cityname>..."
               }
             />
+            {pipelineKey === "cities" && (
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next: Record<string, boolean> = {};
+                    (cities ?? []).forEach((c) => {
+                      if (c.name_id) next[c.name_id] = true;
+                    });
+                    setSelectedCityIds(next);
+                  }}
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCityIds({});
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+            {pipelineKey === "gift_images" && (
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next: Record<string, boolean> = {};
+                    (gifts ?? []).forEach((g) => {
+                      if (g.id) next[g.id] = true;
+                    });
+                    setSelectedGiftIds(next);
+                  }}
+                >
+                  Select all
+                </button>
+                <button type="button" onClick={() => setSelectedGiftIds({})}>
+                  Clear
+                </button>
+              </div>
+            )}
             <div style={{ color: "var(--muted, #94a3b8)", fontSize: 12 }}>
               {pipelineKey === "cities"
                 ? `Showing ${filteredCityItems.length} of ${allCityItems.length} cities`
@@ -1032,6 +1546,18 @@ export default function PipelinePage({ params }: PageProps) {
                           borderRadius: 8,
                         }}
                       >
+                        <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={!!selectedCityIds[city.name_id]}
+                            onChange={(e) =>
+                              setSelectedCityIds((prev) => ({
+                                ...prev,
+                                [city.name_id]: e.target.checked,
+                              }))
+                            }
+                          />
+                        </label>
                         <strong>{city.display_name || city.name_id || "Unnamed city"}</strong>
                         <div style={{ color: "var(--muted, #94a3b8)", fontSize: 12 }}>
                           id: {city.name_id || "—"}
@@ -1100,7 +1626,7 @@ export default function PipelinePage({ params }: PageProps) {
                         <div style={{ color: "var(--muted, #94a3b8)", fontSize: 12 }}>
                           updates: {city.location_updates.length}
                         </div>
-                        {city.location_updates.slice(0, 3).map((u, idx) => (
+                        {city.location_updates.map((u, idx) => (
                           <div key={`${city.name_id}-${idx}`} style={{ fontSize: 13 }}>
                             - {u.text}
                           </div>
@@ -1190,6 +1716,21 @@ export default function PipelinePage({ params }: PageProps) {
                     }}
                   >
                     <div style={{ display: "grid", gap: "0.35rem", justifyItems: "center" }}>
+                      {pipelineKey === "gift_images" && gift.id && (
+                        <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={!!selectedGiftIds[gift.id]}
+                            onChange={(e) =>
+                              setSelectedGiftIds((prev) => ({
+                                ...prev,
+                                [gift.id]: e.target.checked,
+                              }))
+                            }
+                          />
+                          Select
+                        </label>
+                      )}
                       <div
                         style={{
                           width: 140,
@@ -1209,7 +1750,12 @@ export default function PipelinePage({ params }: PageProps) {
                           <img
                             src={imageUrl}
                             alt={gift.displayName}
-                            style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                            style={{ width: "100%", height: "100%", objectFit: "contain", cursor: "zoom-in" }}
+                            onClick={() => {
+                              if (!imageUrl) return;
+                              setPreviewImageUrl(imageUrl);
+                              setPreviewImageTitle(gift.displayName || gift.id || "Gift image");
+                            }}
                             onError={() => {
                               if (!imgName) return;
                               setImageErrors((prev) => ({ ...prev, [imgName]: "Invalid image file" }));
@@ -1478,6 +2024,49 @@ export default function PipelinePage({ params }: PageProps) {
           </div>
         </div>
       )}
+      {previewImageUrl && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setPreviewImageUrl(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(2, 6, 23, 0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 60,
+            padding: "1.5rem",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: "min(1100px, 96vw)",
+              maxHeight: "90vh",
+              background: "rgba(15, 23, 42, 0.95)",
+              border: "1px solid rgba(148, 163, 184, 0.25)",
+              borderRadius: 12,
+              padding: "1rem",
+              display: "grid",
+              gap: "0.75rem",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
+              <strong style={{ fontSize: 14 }}>{previewImageTitle || "Image preview"}</strong>
+              <button type="button" onClick={() => setPreviewImageUrl(null)}>
+                Close
+              </button>
+            </div>
+            <img
+              src={previewImageUrl}
+              alt={previewImageTitle || "Image preview"}
+              style={{ width: "100%", maxHeight: "75vh", objectFit: "contain", borderRadius: 8 }}
+            />
+          </div>
+        </div>
+      )}
       {pipelineKey === "gift_images" && showEditGift && (
         <div
           style={{
@@ -1618,4 +2207,9 @@ export default function PipelinePage({ params }: PageProps) {
       )}
     </div>
   );
+}
+
+export default function PipelinePage({ params }: PageProps) {
+  const { gameKey, pipelineKey } = use(params);
+  return <PipelinePageContent gameKey={gameKey} pipelineKey={pipelineKey} />;
 }

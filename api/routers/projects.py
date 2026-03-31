@@ -8,7 +8,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from services.rag import get_supabase_client
-from services.games_registry import load_gift_catalog, load_cities_catalog
+from games.pocket_voyager.services.gifts_service import load_gift_catalog
+from games.pocket_voyager.services.cities_service import load_cities_catalog
 from core.local_paths import delete_local_project_path, get_local_project_path, set_local_project_path
 
 projects_router = APIRouter()

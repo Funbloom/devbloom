@@ -7,20 +7,27 @@ from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
 from services.games_registry import (
+    get_game,
     list_games,
-    list_pipelines,
     list_pipeline_inputs,
+    list_pipelines,
     load_pipeline_input,
-    load_gift_catalog,
+)
+from games.pocket_voyager.services.gifts_service import (
     append_gift_image_file,
     append_gift_to_catalog,
-    load_cities_catalog,
+    batch_update_gift_images,
     generate_gift_image,
-    update_gift_in_catalog,
+    load_gift_catalog,
     replace_gift_image_file,
-    add_gift_to_city,
     resolve_gift_images_dir,
-    get_game,
+    update_gift_in_catalog,
+)
+from games.pocket_voyager.services.cities_service import (
+    add_gift_to_city,
+    batch_create_cities,
+    load_cities_catalog,
+    update_cities_location_updates,
 )
 
 games_router = APIRouter()
@@ -39,6 +46,7 @@ class CreateGiftRequest(BaseModel):
     activity_tags: list[str] | None = None
     priority: int | None = None
     weight: float | None = None
+    image_mode: str | None = None  # generate
 
 
 class GiftGenerateRequest(BaseModel):
@@ -60,6 +68,30 @@ class CityGiftAssignRequest(BaseModel):
     cities_path: str = Field(min_length=1)
     city_id: str = Field(min_length=1)
     gift_id: str = Field(min_length=1)
+
+
+class CityBatchCreateRequest(BaseModel):
+    cities_path: str = Field(min_length=1)
+    gifts_path: str = Field(min_length=1)
+    count: int = Field(default=1, ge=1, le=200)
+    prompt: str = Field(min_length=1)
+
+
+class CityUpdateLocationRequest(BaseModel):
+    cities_path: str = Field(min_length=1)
+    city_ids: list[str] = Field(min_items=1)
+    prompt: str = Field(min_length=1)
+    count: int = Field(default=3, ge=1, le=20)
+    replace_existing: bool = False
+
+
+class GiftUpdateImagesRequest(BaseModel):
+    catalog_path: str = Field(min_length=1)
+    gift_ids: list[str] = Field(min_items=1)
+    style_prompt: str | None = None
+    extra_prompt: str | None = None
+    quality: str | None = None  # low|medium|high
+    style_mode: str | None = None  # natural|vivid
 
 
 @games_router.get("/games")
@@ -183,6 +215,9 @@ def create_gift_route(
 ) -> dict:
     if game_key != "pocket_voyager":
         raise HTTPException(status_code=404, detail="Game not found.")
+    image_mode = (body.image_mode or "").strip().lower()
+    if image_mode and image_mode != "generate":
+        raise HTTPException(status_code=400, detail="Invalid image_mode.")
     try:
         created = append_gift_to_catalog(
             catalog_path=body.catalog_path,
@@ -193,17 +228,27 @@ def create_gift_route(
             priority=body.priority,
             weight=body.weight,
         )
+        if image_mode == "generate":
+            generate_gift_image(body.catalog_path, body.gift_id)
         catalog = load_gift_catalog(body.catalog_path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    gifts_with_urls = []
+    for gift in catalog["gifts"]:
+        filename = gift.get("image_filename")
+        url = None
+        if filename:
+            query = urlencode({"catalog_path": catalog["catalog_path"], "filename": filename})
+            url = f"/games/pocket_voyager/pipelines/gift_images/image?{query}"
+        gifts_with_urls.append({**gift, "image_url": url})
     return {
         "ok": True,
         "created": created,
         "catalog_path": catalog["catalog_path"],
         "images_dir": catalog["images_dir"],
-        "gifts": catalog["gifts"],
+        "gifts": gifts_with_urls,
     }
 
 
@@ -331,6 +376,101 @@ def assign_gift_to_city_route(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, **result}
+
+
+@games_router.post("/games/{game_key}/pipelines/cities/batch_create")
+def batch_create_cities_route(
+    game_key: str,
+    body: CityBatchCreateRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    if game_key != "pocket_voyager":
+        raise HTTPException(status_code=404, detail="Game not found.")
+    try:
+        result = batch_create_cities(
+            cities_path=body.cities_path,
+            gifts_path=body.gifts_path,
+            prompt=body.prompt,
+            count=body.count,
+        )
+        cities = load_cities_catalog(body.cities_path)
+        gifts = load_gift_catalog(body.gifts_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        **result,
+        "cities": cities["cities"],
+        "gifts": gifts["gifts"],
+    }
+
+
+@games_router.post("/games/{game_key}/pipelines/cities/update_location_updates")
+def update_location_updates_route(
+    game_key: str,
+    body: CityUpdateLocationRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    if game_key != "pocket_voyager":
+        raise HTTPException(status_code=404, detail="Game not found.")
+    try:
+        result = update_cities_location_updates(
+            cities_path=body.cities_path,
+            city_ids=body.city_ids,
+            prompt=body.prompt,
+            count=body.count,
+            replace_existing=body.replace_existing,
+        )
+        cities = load_cities_catalog(body.cities_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        **result,
+        "cities": cities["cities"],
+    }
+
+
+@games_router.post("/games/{game_key}/pipelines/gift_images/update_images")
+def update_gift_images_route(
+    game_key: str,
+    body: GiftUpdateImagesRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    if game_key != "pocket_voyager":
+        raise HTTPException(status_code=404, detail="Game not found.")
+    try:
+        result = batch_update_gift_images(
+            catalog_path=body.catalog_path,
+            gift_ids=body.gift_ids,
+            style_prompt=body.style_prompt,
+            extra_prompt=body.extra_prompt,
+            quality=body.quality,
+            style_mode=body.style_mode,
+        )
+        catalog = load_gift_catalog(body.catalog_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    gifts_with_urls = []
+    for gift in catalog["gifts"]:
+        filename = gift.get("image_filename")
+        url = None
+        if filename:
+            query = urlencode({"catalog_path": catalog["catalog_path"], "filename": filename})
+            url = f"/games/pocket_voyager/pipelines/gift_images/image?{query}"
+        gifts_with_urls.append({**gift, "image_url": url})
+    return {
+        "ok": True,
+        **result,
+        "gifts": gifts_with_urls,
+        "images_dir": catalog["images_dir"],
+    }
 
 
 @games_router.post("/games/{game_key}/pipelines/gift_images/gifts/generate")

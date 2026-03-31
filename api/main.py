@@ -17,6 +17,11 @@ from dotenv import load_dotenv
 _env_file = ".env" if sys.platform == "win32" else "env"
 load_dotenv(Path(__file__).resolve().parent / _env_file)
 
+# Ensure repo root is on sys.path for game plugins.
+_repo_root = Path(__file__).resolve().parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.append(str(_repo_root))
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
