@@ -56,6 +56,39 @@ function splitCsvToList(s: string): string[] | undefined {
   return parts.length > 0 ? parts : undefined;
 }
 
+function humanizeGiftId(giftId: string): string {
+  const s = giftId.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!s) return giftId;
+  return s.replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+/** Description + activity tags for a catalog gift derived from id + linking city (batch create missing gifts). */
+function deriveGiftMetadataForCity(giftId: string, cityDisplayName: string): {
+  displayName: string;
+  description: string;
+  activityTags: string[];
+} {
+  const displayName = humanizeGiftId(giftId);
+  const cityLabel = cityDisplayName.trim() || "this destination";
+  const description =
+    `${displayName} is a souvenir-style collectible tied to ${cityLabel}. ` +
+    `While exploring ${cityLabel}, try a short themed walk, stop at a viewpoint or park, browse a local craft or book shop, taste a regional snack, and take photos in areas that fit the gift's theme—all light activities visitors can do on location.`;
+  const fromId = giftId
+    .toLowerCase()
+    .split(/[_\s.-]+/)
+    .filter((w) => w.length > 1)
+    .slice(0, 6);
+  const cityTok = cityLabel
+    .toLowerCase()
+    .split(/[\s,]+/)
+    .find((w) => w.length > 2);
+  const activityTags = [...new Set([...(cityTok ? [cityTok] : []), ...fromId, "explore", "city-walk"])].slice(
+    0,
+    8
+  );
+  return { displayName, description, activityTags };
+}
+
 function joinPlatformPath(base: string | null, filename: string): string | null {
   if (!base) return null;
   const trimmed = base.replace(/[\\/]+$/, "");
@@ -166,7 +199,9 @@ export function PipelinePageContent({
   const [isUpdatingLoc, setIsUpdatingLoc] = useState(false);
   const [updateLocCount, setUpdateLocCount] = useState("3");
   const [updateLocReplace, setUpdateLocReplace] = useState(false);
-  const [citiesToolTab, setCitiesToolTab] = useState<"create" | "updates">("create");
+  const [citiesToolTab, setCitiesToolTab] = useState<"create" | "updates" | "pipelines">("create");
+  const [missingGiftsPipelineStatus, setMissingGiftsPipelineStatus] = useState<string | null>(null);
+  const [isCreatingMissingGifts, setIsCreatingMissingGifts] = useState(false);
   const [linkedGiftBasePath, setLinkedGiftBasePath] = useState("");
   const [selectedLinkedGiftId, setSelectedLinkedGiftId] = useState<string | null>(null);
   const [selectedLinkedGiftImage, setSelectedLinkedGiftImage] = useState<string | null>(null);
@@ -820,6 +855,56 @@ export function PipelinePageContent({
         )
       : allCityItems;
 
+  const createGiftInCatalogCore = async (opts: {
+    giftId: string;
+    displayName: string;
+    description: string;
+    activityTags: string[] | undefined;
+    priority: number;
+    weight: number;
+    imageMode: "file" | "generate";
+    imageFile: File | null;
+    forceGenerate: boolean;
+  }) => {
+    if (!gameDataPaths?.projectRoot) throw new Error("Local project path is not available.");
+    const data = await readGiftCatalogRaw();
+    const { key, items } = getGiftItems(data);
+    const gid = opts.giftId.trim();
+    if (items.find((g) => String(g.id || "").trim() === gid)) throw new Error("Gift id already exists.");
+    if (opts.imageMode === "file" && !opts.imageFile) {
+      throw new Error("Select an image file, or switch to Generate.");
+    }
+    const newGift: Record<string, unknown> = {
+      id: gid,
+      displayName: opts.displayName.trim() || gid,
+      description: opts.description.trim(),
+      activityTags: opts.activityTags ?? [],
+      priority: opts.priority,
+      weight: opts.weight,
+      imageFileName: "",
+    };
+    let filename = "";
+    const root = gameDataPaths.projectRoot;
+    if (opts.imageMode === "file" && opts.imageFile) {
+      const buffer = await opts.imageFile.arrayBuffer();
+      const base64 = arrayBufferToBase64(buffer);
+      const ext = `.${opts.imageFile.name.split(".").pop() || "png"}`;
+      filename = `${gid}${ext}`;
+      await localAgent.writeBinary(root, `Assets/StreamingAssets/Gifts/Images/${filename}`, base64);
+    } else if (opts.imageMode === "generate" && opts.forceGenerate) {
+      const display = String(newGift.displayName);
+      const desc = String(newGift.description || "");
+      const promptBase = `${display}${desc ? `. ${desc}` : ""}`;
+      const base64 = await generateImageBytes(promptBase, "low", activeProjectKeyForGame);
+      filename = `${gid}.png`;
+      await localAgent.writeBinary(root, `Assets/StreamingAssets/Gifts/Images/${filename}`, base64);
+    }
+    if (filename) newGift.imageFileName = filename;
+    items.push(newGift);
+    setGiftItems(data, key, items);
+    await writeGiftCatalogRaw(data);
+  };
+
   const handleCreateGift = async (forceGenerate: boolean) => {
     if (!gameDataPaths?.projectRoot) {
       setCreateGiftStatus("Local project path is not available.");
@@ -846,46 +931,17 @@ export function PipelinePageContent({
     const tagsList = splitCsvToList(createGiftActivityTags);
     setCreateGiftStatus(forceGenerate ? "Creating + generating..." : "Creating...");
     try {
-      const data = await readGiftCatalogRaw();
-      const { key, items } = getGiftItems(data);
-      const existing = items.find((g) => String(g.id || "").trim() === createGiftId.trim());
-      if (existing) throw new Error("Gift id already exists.");
-      const displayName = createGiftDisplayName.trim() || createGiftId.trim();
-      const description = createGiftDescription.trim();
-      const newGift: Record<string, unknown> = {
-        id: createGiftId.trim(),
-        displayName,
-        description,
+      await createGiftInCatalogCore({
+        giftId: createGiftId.trim(),
+        displayName: createGiftDisplayName.trim() || createGiftId.trim(),
+        description: createGiftDescription.trim(),
         activityTags: tagsList || [],
         priority: pr,
         weight: w,
-        imageFileName: "",
-      };
-      let filename = "";
-      if (createGiftImageMode === "file" && createGiftImageFile) {
-        const buffer = await createGiftImageFile.arrayBuffer();
-        const base64 = arrayBufferToBase64(buffer);
-        const ext = `.${createGiftImageFile.name.split(".").pop() || "png"}`;
-        filename = `${createGiftId.trim()}${ext}`;
-        await localAgent.writeBinary(
-          gameDataPaths.projectRoot,
-          `Assets/StreamingAssets/Gifts/Images/${filename}`,
-          base64
-        );
-      } else if (createGiftImageMode === "generate" && forceGenerate) {
-        const promptBase = `${displayName}${description ? `. ${description}` : ""}`;
-        const base64 = await generateImageBytes(promptBase, "low", activeProjectKeyForGame);
-        filename = `${createGiftId.trim()}.png`;
-        await localAgent.writeBinary(
-          gameDataPaths.projectRoot,
-          `Assets/StreamingAssets/Gifts/Images/${filename}`,
-          base64
-        );
-      }
-      if (filename) newGift.imageFileName = filename;
-      items.push(newGift);
-      setGiftItems(data, key, items);
-      await writeGiftCatalogRaw(data);
+        imageMode: createGiftImageMode,
+        imageFile: createGiftImageFile,
+        forceGenerate,
+      });
       setCatalogReload((prev) => prev + 1);
       setGiftImageReload((prev) => prev + 1);
 
@@ -902,6 +958,67 @@ export function PipelinePageContent({
     } catch (err) {
       const message = err instanceof Error ? err.message : "Create failed.";
       setCreateGiftStatus(message);
+    }
+  };
+
+  const handleCreateAllMissingGifts = async () => {
+    if (!gameDataPaths?.projectRoot) {
+      setMissingGiftsPipelineStatus("Local project path is not available.");
+      return;
+    }
+    const selected = allCityItems.filter((c) => selectedCityIds[c.name_id]);
+    if (selected.length === 0) {
+      setMissingGiftsPipelineStatus("Select at least one city using the checkboxes in the list.");
+      return;
+    }
+    const missingById = new Map<string, { cityDisplay: string }>();
+    for (const city of selected) {
+      const cityDisplay = city.display_name || city.name_id || "City";
+      for (const giftId of city.gift_ids) {
+        const id = String(giftId || "").trim();
+        if (!id || linkedGiftsById[id]) continue;
+        if (!missingById.has(id)) missingById.set(id, { cityDisplay });
+      }
+    }
+    if (missingById.size === 0) {
+      setMissingGiftsPipelineStatus("No missing gifts: every gift id on the selected cities is already in the catalog.");
+      return;
+    }
+    setIsCreatingMissingGifts(true);
+    setMissingGiftsPipelineStatus(`Creating ${missingById.size} missing gift(s) (same as red link: catalog + generated image)...`);
+    let ok = 0;
+    const errors: string[] = [];
+    const pr = 10;
+    const w = 2;
+    for (const [giftId, ctx] of missingById) {
+      try {
+        const meta = deriveGiftMetadataForCity(giftId, ctx.cityDisplay);
+        await createGiftInCatalogCore({
+          giftId,
+          displayName: meta.displayName,
+          description: meta.description,
+          activityTags: meta.activityTags,
+          priority: pr,
+          weight: w,
+          imageMode: "generate",
+          imageFile: null,
+          forceGenerate: true,
+        });
+        ok += 1;
+        setCatalogReload((prev) => prev + 1);
+        setGiftImageReload((prev) => prev + 1);
+        setMissingGiftsPipelineStatus(`Created ${ok}/${missingById.size}: ${giftId}…`);
+      } catch (e) {
+        errors.push(`${giftId}: ${e instanceof Error ? e.message : "failed"}`);
+      }
+    }
+    setIsCreatingMissingGifts(false);
+    if (errors.length === 0) {
+      setMissingGiftsPipelineStatus(`Done. Created ${ok} gift(s) with generated images.`);
+    } else {
+      setMissingGiftsPipelineStatus(
+        `Finished with issues. Created ${ok}, failed ${errors.length}: ${errors.slice(0, 3).join("; ")}${errors.length > 3 ? "…" : ""}`
+      );
     }
   };
 
@@ -1413,6 +1530,13 @@ export function PipelinePageContent({
                   >
                     Update locationUpdates
                   </button>
+                  <button
+                    type="button"
+                    className={citiesToolTab === "pipelines" ? "sidebar-tab active" : "sidebar-tab"}
+                    onClick={() => setCitiesToolTab("pipelines")}
+                  >
+                    Pipelines
+                  </button>
                 </div>
 
                 {citiesToolTab === "create" && (
@@ -1496,6 +1620,29 @@ export function PipelinePageContent({
                     {updateLocStatus && (
                       <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
                         {updateLocStatus}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {citiesToolTab === "pipelines" && (
+                  <div style={{ display: "grid", gap: "0.75rem" }}>
+                    <div style={{ fontWeight: 600 }}>Pipelines</div>
+                    <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                      Uses cities checked in the list. Missing gifts are created with the same flow as the red gift id
+                      link (catalog entry + generated image). Display name, description, and activity tags are derived
+                      from the gift id and city.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateAllMissingGifts()}
+                      disabled={isCreatingMissingGifts}
+                    >
+                      {isCreatingMissingGifts ? "Working..." : "Create All missing gifts"}
+                    </button>
+                    {missingGiftsPipelineStatus && (
+                      <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                        {missingGiftsPipelineStatus}
                       </div>
                     )}
                   </div>
