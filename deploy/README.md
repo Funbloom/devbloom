@@ -102,3 +102,19 @@ APP_ROOT=/opt/gamedev-king ./deploy/ec2-deploy.sh
 
 Replace `/path/to/your-key.pem` with your actual key path, and `ec2-user` only if your instance uses a different default user.
 
+## 502 Bad Gateway on `/api/...`
+
+The browser talks to **nginx**; nginx proxies `/api/` to **FastAPI on `127.0.0.1:8000`** (see `nginx-gamedevking-dev.conf.example`). A **502** means nginx could not get a valid HTTP response from that upstream.
+
+**On the EC2 instance, run:**
+
+```bash
+bash deploy/diagnose-api.sh
+```
+
+Or manually:
+
+1. **`sudo systemctl status gamedev-api`** — must be **active (running)**. If **failed**, see logs: `sudo journalctl -u gamedev-api -n 80 --no-pager` (common: missing `api/.env`, Python import error, missing `games/` next to `api/`, bad venv).
+2. **`curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/docs`** — should print **200** (or at least connect). **Connection refused** → API not listening; fix the service first.
+3. **HTTPS only 502** — after **certbot**, open `/etc/nginx/conf.d/gamedevking.conf` (or your vhost). The **`server { listen 443 ssl; ... }`** block must include **`location /api/`** with **`proxy_pass http://127.0.0.1:8000/;`** the same way as port 80. If `/api/` is missing on 443, requests to `https://…/api/auth/me` can return 502. Then: `sudo nginx -t && sudo systemctl reload nginx`.
+

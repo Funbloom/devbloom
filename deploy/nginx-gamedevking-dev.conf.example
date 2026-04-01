@@ -5,6 +5,13 @@
 # If nginx isn't running: sudo systemctl start nginx (or sudo systemctl enable --now nginx)
 # For config changes later: sudo systemctl reload nginx
 # HTTPS: sudo certbot --nginx -d dev.funbloomstudio.com
+#
+# 502 on https://dev.funbloomstudio.com/api/... but the site loads:
+#   Certbot often adds a separate server { listen 443 ssl; ... } block. That block MUST
+#   include the same "location /api/ { ... proxy_pass http://127.0.0.1:8000/; ... }" as
+#   below. If 443 only proxies "/" to port 3000, /api/* hits Next (wrong) or fails → 502.
+#   Fix: sudo nano /etc/nginx/conf.d/gamedevking.conf — duplicate /api/ into the ssl server,
+#   then sudo nginx -t && sudo systemctl reload nginx
 
 # Same domain, path-based: web at dev.funbloomstudio.com/, API at dev.funbloomstudio.com/api/
 server {
