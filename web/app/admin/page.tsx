@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { fetchApi, API_BASE } from "../lib/api";
-import { localAgent, getLocalProjectPath, setLocalProjectPath } from "../lib/localAgentClient";
+import { localAgent, getLocalProjectPath, setLocalProjectPath, isLocalAgentContext } from "../lib/localAgentClient";
 import { useAuth } from "../contexts/AuthContext";
 
 type SourceItem = {
@@ -377,12 +377,14 @@ export default function AdminPage() {
     try {
       const localPath = newProject.project_path.trim();
       if (localPath) {
-        const ok = await localAgent.health();
-        if (!ok) {
-          setProjectStatus("Error: Local agent is not running.");
-          return;
+        if (isLocalAgentContext()) {
+          const ok = await localAgent.health();
+          if (!ok) {
+            setProjectStatus("Error: Local agent is not running.");
+            return;
+          }
+          await localAgent.approveProjectRoot(localPath);
         }
-        await localAgent.approveProjectRoot(localPath);
         setLocalProjectPath(projectKeyInput, localPath);
       }
       const response = await fetchApi("/projects", {
@@ -426,12 +428,14 @@ export default function AdminPage() {
     try {
       const localPath = editProject.project_path.trim();
       if (localPath) {
-        const ok = await localAgent.health();
-        if (!ok) {
-          setProjectStatus("Error: Local agent is not running.");
-          return;
+        if (isLocalAgentContext()) {
+          const ok = await localAgent.health();
+          if (!ok) {
+            setProjectStatus("Error: Local agent is not running.");
+            return;
+          }
+          await localAgent.approveProjectRoot(localPath);
         }
-        await localAgent.approveProjectRoot(localPath);
         setLocalProjectPath(editProjectKey, localPath);
       }
       const response = await fetchApi(`/projects/${editProjectKey}`, {
