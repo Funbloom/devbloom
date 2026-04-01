@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { fetchApi } from "../lib/api";
+import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
 
 const PAGES: { path: string; label: string }[] = [
   { path: "/", label: "Agents" },
@@ -36,6 +37,12 @@ export function AppHeader() {
   const [activeProjectName, setActiveProjectName] = useState("");
   const [games, setGames] = useState<GameInfo[]>([]);
   const [pipelinesByGame, setPipelinesByGame] = useState<Record<string, PipelineInfo[]>>({});
+  const [localAgentOk, setLocalAgentOk] = useState(false);
+  const [localAgentUi, setLocalAgentUi] = useState(false);
+
+  useEffect(() => {
+    setLocalAgentUi(isLocalAgentContext());
+  }, []);
 
   useEffect(() => {
     const refreshProject = async () => {
@@ -107,6 +114,21 @@ export function AppHeader() {
     void loadGames();
   }, [loading, authUser, user]);
 
+  useEffect(() => {
+    if (!localAgentUi) return;
+    let cancelled = false;
+    const check = async () => {
+      const ok = await localAgent.health();
+      if (!cancelled) setLocalAgentOk(ok);
+    };
+    void check();
+    const timer = window.setInterval(check, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [localAgentUi]);
+
   const headerTitle = activeProjectName
     ? `DevBloom Studio (${activeProjectName})`
     : "DevBloom Studio (select a project...)";
@@ -114,9 +136,23 @@ export function AppHeader() {
   return (
     <header className="app-header">
       <div className="app-header-page">{currentLabel}</div>
-      <Link href="/" className="app-header-title">
-        {headerTitle}
-      </Link>
+      <div className="app-header-title-block">
+        <Link href="/" className="app-header-title">
+          {headerTitle}
+        </Link>
+        {localAgentUi && (
+          <div
+            className="app-header-local-agent"
+            title={localAgentOk ? "Local agent online" : "Local agent offline"}
+          >
+            <span
+              className="app-header-local-agent-dot"
+              style={{ background: localAgentOk ? "#22c55e" : "#ef4444" }}
+            />
+            Local Agent
+          </div>
+        )}
+      </div>
       <nav className="app-header-nav">
         {PAGES.map(({ path, label }) => {
           const isActive = path === pathname || (path !== "/" && pathname?.startsWith(path));
@@ -183,7 +219,7 @@ export function AppHeader() {
             })
           )}
         </div>
-        <div className="app-header-user" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <div className="app-header-user" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {!loading && (
             authUser || user ? (
               <>

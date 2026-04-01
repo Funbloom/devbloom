@@ -406,3 +406,169 @@ def update_cities_location_updates(
 
     cities_file.write_text(json.dumps(cities_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"updated": updated}
+
+
+def generate_cities_payload(prompt: str) -> list[dict[str, Any]]:
+    if not prompt.strip():
+        raise ValueError("Prompt is required.")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY is required for batch city creation.")
+    client = OpenAI(api_key=api_key)
+    system = (
+        "You are generating game content JSON. Return strict JSON only with the schema:\n"
+        "{ \"cities\": [ { \"cityId\": string, \"displayName\": string, "
+        "\"locationUpdates\": [ { \"text\": string, \"image\": string } ], "
+        "\"gifts\": [ { \"giftId\": string, \"displayName\": string, "
+        "\"description\": string, \"activityTags\": [string] } ] } ] }"
+    )
+    response = client.chat.completions.create(
+        model=GPT_MODEL_DEFAULT,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+    )
+    content = response.choices[0].message.content or "{}"
+    payload = json.loads(content)
+    raw_cities = payload.get("cities")
+    if not isinstance(raw_cities, list):
+        raise ValueError("LLM response must include 'cities' array.")
+    return raw_cities
+
+
+def plan_batch_create_cities(
+    prompt: str,
+    count: int,
+    existing_city_ids: list[str],
+    existing_gift_ids: list[str],
+) -> dict[str, Any]:
+    if count <= 0:
+        raise ValueError("Count must be greater than 0.")
+    raw_cities = generate_cities_payload(prompt)
+    existing_city_ids_set = {c.strip() for c in existing_city_ids if c.strip()}
+    existing_gift_ids_set = {g.strip() for g in existing_gift_ids if g.strip()}
+    new_cities: list[dict[str, Any]] = []
+    new_gifts: list[dict[str, Any]] = []
+
+    def _slug(s: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9_-]+", "_", s.strip().lower()).strip("_")
+
+    for city in raw_cities:
+        if len(new_cities) >= count:
+            break
+        if not isinstance(city, dict):
+            continue
+        city_id = _slug(str(city.get("cityId") or ""))
+        display = str(city.get("displayName") or "").strip()
+        gifts = city.get("gifts") if isinstance(city.get("gifts"), list) else []
+        updates = city.get("locationUpdates") if isinstance(city.get("locationUpdates"), list) else []
+        if not city_id or city_id in existing_city_ids_set or any(c.get("nameId") == city_id for c in new_cities):
+            continue
+        if not display:
+            display = city_id.replace("_", " ").title()
+
+        gift_ids: list[str] = []
+        for idx, gift in enumerate(gifts[:5]):
+            if not isinstance(gift, dict):
+                continue
+            raw_gid = str(gift.get("giftId") or "").strip()
+            gid = _slug(raw_gid) if raw_gid else f"{city_id}_gift_{idx+1}"
+            if gid in existing_gift_ids_set or gid in gift_ids:
+                gid = f"{city_id}_gift_{idx+1}"
+            gdisplay = str(gift.get("displayName") or "").strip() or gid.replace("_", " ").title()
+            gdesc = str(gift.get("description") or "").strip()
+            gtags = gift.get("activityTags") if isinstance(gift.get("activityTags"), list) else []
+            tags = [str(t).strip() for t in gtags if str(t).strip()]
+            gift_entry = {
+                "id": gid,
+                "displayName": gdisplay,
+                "description": gdesc,
+                "activityTags": tags,
+                "priority": 10,
+                "weight": 2.0,
+                "imageFileName": "",
+            }
+            existing_gift_ids_set.add(gid)
+            gift_ids.append(gid)
+            new_gifts.append(gift_entry)
+
+        normalized_updates: list[dict[str, str]] = []
+        for update in updates:
+            if not isinstance(update, dict):
+                continue
+            text = str(update.get("text") or "").strip()
+            image = str(update.get("image") or "").strip()
+            if text:
+                normalized_updates.append({"text": text, "image": image})
+
+        new_cities.append(
+            {
+                "nameId": city_id,
+                "displayName": display,
+                "giftIds": gift_ids,
+                "locationUpdates": normalized_updates,
+            }
+        )
+        existing_city_ids_set.add(city_id)
+
+    return {
+        "created_cities": new_cities,
+        "created_gifts": new_gifts,
+    }
+
+
+def generate_location_updates_payload(prompt: str) -> list[dict[str, Any]]:
+    if not prompt.strip():
+        raise ValueError("Prompt is required.")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY is required for location updates.")
+    client = OpenAI(api_key=api_key)
+    system = (
+        "You generate location update JSON. Return strict JSON only with schema:\n"
+        "{ \"updates\": [ { \"cityId\": string, \"updates\": [ { \"text\": string, \"image\": string } ] } ] }"
+    )
+    response = client.chat.completions.create(
+        model=GPT_MODEL_DEFAULT,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+    )
+    content = response.choices[0].message.content or "{}"
+    payload = json.loads(content)
+    raw_updates = payload.get("updates")
+    if not isinstance(raw_updates, list):
+        raise ValueError("LLM response must include 'updates' array.")
+    return raw_updates
+
+
+def plan_location_updates(prompt: str, city_ids: list[str], count: int) -> dict[str, Any]:
+    if count <= 0:
+        raise ValueError("Count must be greater than 0.")
+    target_ids = {cid.strip() for cid in city_ids if cid.strip()}
+    if not target_ids:
+        raise ValueError("At least one valid city id is required.")
+    raw_updates = generate_location_updates_payload(prompt)
+    updates_by_city: dict[str, list[dict[str, str]]] = {}
+    for entry in raw_updates:
+        if not isinstance(entry, dict):
+            continue
+        city_id = str(entry.get("cityId") or "").strip()
+        updates = entry.get("updates") if isinstance(entry.get("updates"), list) else []
+        if not city_id or city_id not in target_ids:
+            continue
+        normalized: list[dict[str, str]] = []
+        for update in updates[:count]:
+            if not isinstance(update, dict):
+                continue
+            text = str(update.get("text") or "").strip()
+            image = str(update.get("image") or "").strip()
+            if text:
+                normalized.append({"text": text, "image": image})
+        if normalized:
+            updates_by_city[city_id] = normalized
+    return {"updates": updates_by_city}

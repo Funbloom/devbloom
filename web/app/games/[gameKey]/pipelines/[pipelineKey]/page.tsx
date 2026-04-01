@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import { fetchApi } from "../../../../lib/api";
+import { localAgent, getLocalProjectPath, isLocalAgentContext } from "../../../../lib/localAgentClient";
 
 function resolveGiftImageFileName(g: Record<string, unknown>): string | null {
   const fn = g.imageFileName ?? g.image_filename;
@@ -18,6 +19,34 @@ function parseStringArray(v: unknown): string[] {
   return v.map((x) => String(x).trim()).filter(Boolean);
 }
 
+const REL_GIFT_IMAGES_DIR = "Assets/StreamingAssets/Gifts/Images";
+
+/** Match `image_exists` from `_normalize_gift_catalog_entry` by listing the gift images folder (one request). */
+async function applyGiftImageExistsFromProject(
+  projectRoot: string,
+  gifts: GiftItem[]
+): Promise<GiftItem[]> {
+  const namesLower = new Set<string>();
+  try {
+    const { entries } = await localAgent.listDir(projectRoot, REL_GIFT_IMAGES_DIR);
+    for (const e of entries) {
+      if (e.is_dir) continue;
+      const n = e.name;
+      if (n.toLowerCase().endsWith(".meta")) continue;
+      namesLower.add(n.toLowerCase());
+    }
+  } catch {
+    // Missing folder or agent error: treat as no files on disk.
+  }
+  return gifts.map((g) => {
+    const fn = g.imageFileName?.trim();
+    if (!fn || fn.toLowerCase().endsWith(".meta")) {
+      return { ...g, image_exists: false };
+    }
+    return { ...g, image_exists: namesLower.has(fn.toLowerCase()) };
+  });
+}
+
 /** Comma-separated place or tag ids; returns undefined if empty. */
 function splitCsvToList(s: string): string[] | undefined {
   const parts = s
@@ -32,6 +61,10 @@ function joinPlatformPath(base: string | null, filename: string): string | null 
   const trimmed = base.replace(/[\\/]+$/, "");
   const sep = trimmed.includes("\\") ? "\\" : "/";
   return `${trimmed}${sep}${filename}`;
+}
+
+function dirFromPath(path: string): string {
+  return path.replace(/[\\/][^\\/]+$/, "");
 }
 
 type PipelineInfo = { key: string; name: string; description?: string };
@@ -93,6 +126,9 @@ type GameDataPaths = {
   citiesJsonExists: boolean;
   giftCatalogJsonExists: boolean;
 };
+
+const REL_GIFTS_JSON = "Assets/StreamingAssets/Gifts/gifts_catalog.json";
+const REL_CITIES_JSON = "Assets/StreamingAssets/Travel/cities.json";
 
 export function PipelinePageContent({
   gameKey,
@@ -159,6 +195,8 @@ export function PipelinePageContent({
   const [gameDataLoadError, setGameDataLoadError] = useState<string | null>(null);
   const [giftCatalogMissingForCities, setGiftCatalogMissingForCities] = useState(false);
   const [activeProjectKeyForGame, setActiveProjectKeyForGame] = useState<string | null>(null);
+  const [localAgentOk, setLocalAgentOk] = useState(false);
+  const [localAgentError, setLocalAgentError] = useState<string | null>(null);
   const [giftToolTab, setGiftToolTab] = useState<"create" | "update">("create");
   const [selectedGiftIds, setSelectedGiftIds] = useState<Record<string, boolean>>({});
   const [giftStyles, setGiftStyles] = useState<StyleInfo[]>([]);
@@ -169,6 +207,7 @@ export function PipelinePageContent({
   const [giftUpdateStatus, setGiftUpdateStatus] = useState<string | null>(null);
   const [isGiftUpdating, setIsGiftUpdating] = useState(false);
   const [giftImageReload, setGiftImageReload] = useState(0);
+  const [catalogReload, setCatalogReload] = useState(0);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewImageTitle, setPreviewImageTitle] = useState<string | null>(null);
 
@@ -233,6 +272,79 @@ export function PipelinePageContent({
     return out;
   };
 
+  const getProjectRoot = () => gameDataPaths?.projectRoot || "";
+
+  const readGiftCatalogRaw = async () => {
+    const root = getProjectRoot();
+    if (!root) throw new Error("Local project path is not set.");
+    return (await localAgent.readJson(root, REL_GIFTS_JSON)).data as Record<string, unknown>;
+  };
+
+  const writeGiftCatalogRaw = async (data: Record<string, unknown>) => {
+    const root = getProjectRoot();
+    if (!root) throw new Error("Local project path is not set.");
+    await localAgent.writeJson(root, REL_GIFTS_JSON, data);
+  };
+
+  const readCitiesRaw = async () => {
+    const root = getProjectRoot();
+    if (!root) throw new Error("Local project path is not set.");
+    return (await localAgent.readJson(root, REL_CITIES_JSON)).data as Record<string, unknown>;
+  };
+
+  const writeCitiesRaw = async (data: Record<string, unknown>) => {
+    const root = getProjectRoot();
+    if (!root) throw new Error("Local project path is not set.");
+    await localAgent.writeJson(root, REL_CITIES_JSON, data);
+  };
+
+  const getGiftItems = (data: Record<string, unknown>) => {
+    const itemsValue = data["items"];
+    const giftsValue = data["gifts"];
+    if (Array.isArray(itemsValue)) return { key: "items", items: itemsValue as Record<string, unknown>[] };
+    if (Array.isArray(giftsValue)) return { key: "gifts", items: giftsValue as Record<string, unknown>[] };
+    return { key: "items", items: [] as Record<string, unknown>[] };
+  };
+
+  const setGiftItems = (data: Record<string, unknown>, key: string, items: Record<string, unknown>[]) => {
+    data[key] = items;
+    if (key === "items") delete data.gifts;
+    if (key === "gifts") delete data.items;
+  };
+
+  const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  };
+
+  const generateImageBytes = async (prompt: string, quality: string, projectKey: string | null) => {
+    const res = await fetchApi("/tools/generate_image_bytes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        width: 1024,
+        height: 1024,
+        quality,
+        model: "gpt-image-1.5",
+        project_key: projectKey,
+      }),
+    });
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
+      throw new Error(errBody.detail || `Image generation failed (${res.status}).`);
+    }
+    const payload = (await res.json()) as { content_base64?: string };
+    if (!payload.content_base64) throw new Error("Image bytes missing.");
+    return payload.content_base64;
+  };
+
   const parseCitiesText = (text: string): CityItem[] => {
     const parsed = JSON.parse(text) as { cities?: unknown };
     if (!Array.isArray(parsed.cities)) {
@@ -275,7 +387,29 @@ export function PipelinePageContent({
     return map;
   };
 
-  /** Resolve JSON paths from Admin project path: Assets/StreamingAssets/... */
+  useEffect(() => {
+    if (pipelineKey !== "gift_images" && pipelineKey !== "cities") return;
+    let cancelled = false;
+    if (!isLocalAgentContext()) {
+      setLocalAgentOk(false);
+      setLocalAgentError(
+        "Gift/cities file tools only work when you open the app from http://localhost (Next.js dev or local build) with the local agent running on your PC. A deployed https:// site cannot use the browser’s 127.0.0.1 agent."
+      );
+      return;
+    }
+    const checkHealth = async () => {
+      const ok = await localAgent.health();
+      if (cancelled) return;
+      setLocalAgentOk(ok);
+      setLocalAgentError(ok ? null : "Local agent is not running. Start it on localhost (e.g. local_agent\\run.bat).");
+    };
+    void checkHealth();
+    return () => {
+      cancelled = true;
+    };
+  }, [pipelineKey]);
+
+  /** Resolve JSON paths from local agent + local project path. */
   useEffect(() => {
     if (pipelineKey !== "gift_images" && pipelineKey !== "cities") return;
     let cancelled = false;
@@ -290,36 +424,31 @@ export function PipelinePageContent({
         setGiftCatalogMissingForCities(false);
         return;
       }
+      if (!localAgentOk) {
+        setGameDataPaths(null);
+        setGameDataLoadError(localAgentError || "Local agent is not running.");
+        return;
+      }
+      const localRoot = getLocalProjectPath(key);
+      if (!localRoot) {
+        setGameDataPaths(null);
+        setGameDataLoadError("Local project path is not set. Set it in Admin → Projects.");
+        return;
+      }
       try {
-        const res = await fetchApi(`/projects/${encodeURIComponent(key)}/game-data-paths`);
-        if (!res.ok) {
-          const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
-          if (!cancelled) {
-            setGameDataPaths(null);
-            setGameDataLoadError(errBody.detail || `Could not resolve game data paths (${res.status}).`);
-            setGiftCatalogMissingForCities(false);
-          }
-          return;
-        }
-        const data = (await res.json()) as {
-          project_root: string;
-          cities_json: string;
-          gift_catalog_json: string;
-          gifts_base_dir: string;
-          cities_json_exists: boolean;
-          gift_catalog_json_exists: boolean;
-        };
+        await localAgent.approveProjectRoot(localRoot);
+        const data = await localAgent.resolveProjectPaths(localRoot);
         if (cancelled) return;
         const paths: GameDataPaths = {
           projectRoot: data.project_root,
           citiesJson: data.cities_json,
           giftCatalogJson: data.gift_catalog_json,
-          giftsBaseDir: data.gifts_base_dir,
+          giftsBaseDir: dirFromPath(data.gift_catalog_json),
           citiesJsonExists: data.cities_json_exists,
           giftCatalogJsonExists: data.gift_catalog_json_exists,
         };
         setGameDataPaths(paths);
-        setLinkedGiftBasePath(data.gifts_base_dir);
+        setLinkedGiftBasePath(dirFromPath(data.gift_catalog_json));
         setGiftCatalogMissingForCities(pipelineKey === "cities" && !data.gift_catalog_json_exists);
         if (pipelineKey === "gift_images") {
           setCatalogPath(data.gift_catalog_json);
@@ -353,13 +482,14 @@ export function PipelinePageContent({
       window.removeEventListener("activeProjectChanged", onProjectChange);
       window.removeEventListener("storage", onProjectChange);
     };
-  }, [pipelineKey]);
+  }, [pipelineKey, localAgentOk, localAgentError]);
 
-  /** Load JSON from disk via API when paths exist. */
+  /** Load JSON from local agent when paths exist. */
   useEffect(() => {
     if (pipelineKey !== "gift_images" && pipelineKey !== "cities") return;
     if (!activeProjectKeyForGame || !gameDataPaths) return;
     if (gameDataLoadError) return;
+    if (!localAgentOk) return;
     let cancelled = false;
     const resetLoadedState = () => {
       setCatalogFileContent(null);
@@ -377,44 +507,44 @@ export function PipelinePageContent({
       try {
         resetLoadedState();
         if (pipelineKey === "gift_images" && gameDataPaths.giftCatalogJsonExists) {
-          const res = await fetchApi(
-            `/projects/${encodeURIComponent(activeProjectKeyForGame)}/game-data-file/gift_catalog`,
-          );
-          if (!res.ok || cancelled) return;
-          const json = await res.json();
+          const json = (
+            await localAgent.readJson(gameDataPaths.projectRoot, REL_GIFTS_JSON)
+          ).data as GiftRunResponse | { gifts?: GiftItem[]; items?: GiftItem[] };
           const text = JSON.stringify(json, null, 2);
           setCatalogFileContent(text);
+          const giftsBase = dirFromPath(gameDataPaths.giftCatalogJson);
+          const computedImagesDir = joinPlatformPath(giftsBase, "Images");
+          if (computedImagesDir) setImagesDir(computedImagesDir);
+          let giftList: GiftItem[];
           if (Array.isArray((json as GiftRunResponse).gifts)) {
             const parsed = json as GiftRunResponse;
-            setGifts(parsed.gifts || []);
+            giftList = parsed.gifts || [];
             if (parsed.images_dir) setImagesDir(parsed.images_dir);
           } else {
-            setGifts(parseCatalogText(text));
+            giftList = parseCatalogText(text);
           }
+          const withImageExists = await applyGiftImageExistsFromProject(
+            gameDataPaths.projectRoot,
+            giftList
+          );
+          setGifts(withImageExists);
           setFileGifts(null);
           setFileError(null);
           if (gameDataPaths.citiesJsonExists) {
-            const resCities = await fetchApi(
-              `/projects/${encodeURIComponent(activeProjectKeyForGame)}/game-data-file/cities`,
-            );
-            if (resCities.ok && !cancelled) {
-              const citiesJson = await resCities.json();
-              const citiesText = JSON.stringify(citiesJson, null, 2);
-              const parsedCities = parseCitiesText(citiesText);
-              setCities(parsedCities);
-              setFileCities(null);
-              setGiftCityMap(buildGiftCityMap(parsedCities));
-            }
+            const citiesJson = (
+              await localAgent.readJson(gameDataPaths.projectRoot, REL_CITIES_JSON)
+            ).data;
+            const citiesText = JSON.stringify(citiesJson, null, 2);
+            const parsedCities = parseCitiesText(citiesText);
+            setCities(parsedCities);
+            setFileCities(null);
+            setGiftCityMap(buildGiftCityMap(parsedCities));
           } else {
             setCities(null);
             setGiftCityMap({});
           }
         } else if (pipelineKey === "cities" && gameDataPaths.citiesJsonExists) {
-          const res = await fetchApi(
-            `/projects/${encodeURIComponent(activeProjectKeyForGame)}/game-data-file/cities`,
-          );
-          if (!res.ok || cancelled) return;
-          const json = await res.json();
+          const json = (await localAgent.readJson(gameDataPaths.projectRoot, REL_CITIES_JSON)).data;
           const text = JSON.stringify(json, null, 2);
           setCatalogFileContent(text);
           const parsed = parseCitiesText(text);
@@ -424,13 +554,8 @@ export function PipelinePageContent({
           setGiftCityMap(buildGiftCityMap(parsed));
         }
         if (pipelineKey === "cities" && gameDataPaths.giftCatalogJsonExists) {
-          const resG = await fetchApi(
-            `/projects/${encodeURIComponent(activeProjectKeyForGame)}/game-data-file/gift_catalog`,
-          );
-          if (resG.ok && !cancelled) {
-            const giftJson = await resG.json();
-            setLinkedGiftsById(parseGiftLinksText(JSON.stringify(giftJson)));
-          }
+          const giftJson = (await localAgent.readJson(gameDataPaths.projectRoot, REL_GIFTS_JSON)).data;
+          setLinkedGiftsById(parseGiftLinksText(JSON.stringify(giftJson)));
         } else if (pipelineKey === "cities") {
           setLinkedGiftsById({});
         }
@@ -442,29 +567,23 @@ export function PipelinePageContent({
     return () => {
       cancelled = true;
     };
-  }, [pipelineKey, activeProjectKeyForGame, gameDataPaths, gameDataLoadError]);
+  }, [pipelineKey, activeProjectKeyForGame, gameDataPaths, gameDataLoadError, localAgentOk, catalogReload]);
 
   useEffect(() => {
     if (pipelineKey !== "cities") return;
     const gift = selectedLinkedGiftId ? linkedGiftsById[selectedLinkedGiftId] : null;
     const giftImage = gift?.imageFileName?.trim();
-    if (!giftImage || !linkedGiftBasePath.trim()) {
+    if (!giftImage || !gameDataPaths?.projectRoot) {
       setSelectedLinkedGiftImage(null);
       return;
     }
     let cancelled = false;
     const loadImage = async () => {
-      const query = new URLSearchParams({
-        catalog_path: linkedGiftBasePath.trim(),
-        filename: giftImage,
-      }).toString();
       try {
-        const res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/image?${query}`);
-        if (!res.ok) {
-          if (!cancelled) setSelectedLinkedGiftImage(null);
-          return;
-        }
-        const blob = await res.blob();
+        const blob = await localAgent.readBinary(
+          gameDataPaths.projectRoot,
+          `Assets/StreamingAssets/Gifts/Images/${giftImage}`
+        );
         if (cancelled) return;
         const objectUrl = URL.createObjectURL(blob);
         setSelectedLinkedGiftImage(objectUrl);
@@ -477,7 +596,7 @@ export function PipelinePageContent({
       cancelled = true;
       if (selectedLinkedGiftImage) URL.revokeObjectURL(selectedLinkedGiftImage);
     };
-  }, [pipelineKey, selectedLinkedGiftId, linkedGiftsById, linkedGiftBasePath, gameKey]);
+  }, [pipelineKey, selectedLinkedGiftId, linkedGiftsById, gameDataPaths, selectedLinkedGiftImage]);
 
   useEffect(() => {
     if (pipelineKey !== "gift_images") return;
@@ -527,41 +646,23 @@ export function PipelinePageContent({
     let cancelled = false;
     const loadImages = async () => {
       const entries: Array<[string, string]> = [];
-      const baseCatalogPath = catalogPath.trim();
+      const projectRoot = gameDataPaths?.projectRoot || "";
       for (const gift of activeGifts) {
         const fn = gift.imageFileName?.trim();
         if (!fn || fn.toLowerCase().endsWith(".meta")) continue;
         if (gift.image_exists === false) {
-          setImageErrors((prev) => ({ ...prev, [fn]: "File not found" }));
+          setImageErrors((prev) => ({ ...prev, [fn]: "File not found!" }));
           continue;
         }
-        const fallbackImageUrl = baseCatalogPath
-          ? `/games/${gameKey}/pipelines/${pipelineKey}/image?${new URLSearchParams({
-              catalog_path: baseCatalogPath,
-              filename: fn,
-            }).toString()}`
-          : null;
-        const sourceUrl = gift.image_url || fallbackImageUrl;
-        if (!sourceUrl) {
-          entries.push([fn, ""]);
-          setImageErrors((prev) => ({ ...prev, [fn]: "File not found" }));
-          continue;
-        }
-        const cacheBust = `v=${giftImageReload}`;
-        const sourceUrlWithBust = `${sourceUrl}${sourceUrl.includes("?") ? "&" : "?"}${cacheBust}`;
+        if (!projectRoot) continue;
+        const relPath = `Assets/StreamingAssets/Gifts/Images/${fn}`;
         try {
-          const res = await fetchApi(sourceUrlWithBust, { cache: "no-store" });
-          if (!res.ok) {
-            if (res.status === 404) {
-              setImageErrors((prev) => ({ ...prev, [fn]: "File not found" }));
-            }
-            continue;
-          }
-          const blob = await res.blob();
+          const blob = await localAgent.readBinary(projectRoot, relPath);
           if (cancelled) return;
           const objectUrl = URL.createObjectURL(blob);
           entries.push([fn, objectUrl]);
-        } catch {
+        } catch (err) {
+          console.warn("[gift_images] readBinary failed", { projectRoot, relPath, filename: fn, err });
           // ignore image fetch failures
         }
       }
@@ -573,7 +674,7 @@ export function PipelinePageContent({
     return () => {
       cancelled = true;
     };
-  }, [gifts, fileGifts, pipelineKey, catalogPath, gameKey, giftImageReload]);
+  }, [gifts, fileGifts, pipelineKey, catalogPath, gameKey, giftImageReload, gameDataPaths]);
 
   useEffect(() => {
     if (pipelineKey === "gift_images") return;
@@ -643,26 +744,32 @@ export function PipelinePageContent({
   };
 
   const handleGenerateGiftImage = async (giftId: string) => {
-    const giftCatalogPathForCreate = gameDataPaths?.giftCatalogJson?.trim() ?? catalogPath.trim();
-    if (!giftCatalogPathForCreate) {
-      setStatus("Gift catalog path is not available.");
+    if (!gameDataPaths?.projectRoot) {
+      setStatus("Local project path is not available.");
       return;
     }
     setGeneratingGiftId(giftId);
     setStatus("Generating gift image...");
     try {
-      const res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ catalog_path: giftCatalogPathForCreate, gift_id: giftId }),
-      });
-      if (!res.ok) {
-        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
-        throw new Error(errBody.detail || `Generate failed: ${res.status}`);
-      }
-      const data = (await res.json()) as GiftRunResponse;
-      setGifts(data.gifts || []);
-      setImagesDir(data.images_dir);
+      const giftData = await readGiftCatalogRaw();
+      const { key, items } = getGiftItems(giftData);
+      const gift = items.find((g) => String(g["id"] || "").trim() === giftId);
+      if (!gift) throw new Error("Gift not found.");
+      const name = String(gift["displayName"] || gift["name"] || giftId).trim();
+      const desc = String(gift["description"] || "").trim();
+      const prompt = desc ? `${name}. ${desc}` : name;
+      const base64 = await generateImageBytes(prompt, "low", activeProjectKeyForGame);
+      const filename = `${giftId}.png`;
+      await localAgent.writeBinary(
+        gameDataPaths.projectRoot,
+        `Assets/StreamingAssets/Gifts/Images/${filename}`,
+        base64
+      );
+      gift["imageFileName"] = filename;
+      setGiftItems(giftData, key, items);
+      await writeGiftCatalogRaw(giftData);
+      setCatalogReload((prev) => prev + 1);
+      setGiftImageReload((prev) => prev + 1);
       setStatus("Gift image generated.");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Generate failed.";
@@ -714,11 +821,8 @@ export function PipelinePageContent({
       : allCityItems;
 
   const handleCreateGift = async (forceGenerate: boolean) => {
-    const giftCatalogPathForCreate = gameDataPaths?.giftCatalogJson?.trim() ?? "";
-    if (!giftCatalogPathForCreate) {
-      setCreateGiftStatus(
-        "Gift catalog path is not available. Set the project path in Admin and ensure gifts_catalog.json exists.",
-      );
+    if (!gameDataPaths?.projectRoot) {
+      setCreateGiftStatus("Local project path is not available.");
       return;
     }
     if (!createGiftId.trim()) {
@@ -740,95 +844,50 @@ export function PipelinePageContent({
       return;
     }
     const tagsList = splitCsvToList(createGiftActivityTags);
-    const payloadBase: Record<string, unknown> = {
-      catalog_path: giftCatalogPathForCreate,
-      gift_id: createGiftId.trim(),
-      description: createGiftDescription.trim(),
-      ...(createGiftDisplayName.trim() ? { display_name: createGiftDisplayName.trim() } : {}),
-      ...(tagsList ? { activity_tags: tagsList } : {}),
-      priority: pr,
-      weight: w,
-    };
-    const wantsGenerate = createGiftImageMode === "generate";
-    if (wantsGenerate) payloadBase.image_mode = "generate";
     setCreateGiftStatus(forceGenerate ? "Creating + generating..." : "Creating...");
     try {
-      let res: Response;
-      if (createGiftImageMode === "file" && createGiftImageFile) {
-        const form = new FormData();
-        form.append("catalog_path", giftCatalogPathForCreate);
-        form.append("gift_id", createGiftId.trim());
-        form.append("description", createGiftDescription.trim());
-        form.append("display_name", createGiftDisplayName.trim());
-        form.append("activity_tags_csv", createGiftActivityTags.trim());
-        form.append("priority_str", String(pr));
-        form.append("weight_str", String(w));
-        form.append("image", createGiftImageFile);
-        res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/upload`, {
-          method: "POST",
-          body: form,
-        });
-      } else {
-        res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payloadBase),
-        });
-      }
-      if (!res.ok) {
-        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
-        throw new Error(errBody.detail || `Create failed: ${res.status}`);
-      }
-      const data = (await res.json()) as {
-        gifts?: GiftItem[];
-        images_dir?: string;
-        created?: Record<string, unknown>;
+      const data = await readGiftCatalogRaw();
+      const { key, items } = getGiftItems(data);
+      const existing = items.find((g) => String(g.id || "").trim() === createGiftId.trim());
+      if (existing) throw new Error("Gift id already exists.");
+      const displayName = createGiftDisplayName.trim() || createGiftId.trim();
+      const description = createGiftDescription.trim();
+      const newGift: Record<string, unknown> = {
+        id: createGiftId.trim(),
+        displayName,
+        description,
+        activityTags: tagsList || [],
+        priority: pr,
+        weight: w,
+        imageFileName: "",
       };
-      setGifts(data.gifts || []);
-      setFileGifts(null);
-      setImagesDir(data.images_dir || null);
-      const created = data.created;
-      if (created && typeof created.id === "string") {
-        const id = created.id as string;
-        const c = created as Record<string, unknown>;
-        const tags = Array.isArray(c.activityTags)
-          ? c.activityTags.map((t) => String(t).trim()).filter(Boolean)
-          : [];
-        const pri = c.priority;
-        const priority = typeof pri === "number" && !Number.isNaN(pri) ? pri : Number(pri) || 10;
-        const wt = c.weight;
-        const weight = typeof wt === "number" && !Number.isNaN(wt) ? wt : Number(wt) || 2;
-        setLinkedGiftsById((prev) => ({
-          ...prev,
-          [id]: {
-            id,
-            displayName: String(c.displayName ?? ""),
-            description: String(c.description ?? ""),
-            activityTags: tags,
-            priority,
-            weight,
-            imageFileName: resolveGiftImageFileName(c),
-          },
-        }));
+      let filename = "";
+      if (createGiftImageMode === "file" && createGiftImageFile) {
+        const buffer = await createGiftImageFile.arrayBuffer();
+        const base64 = arrayBufferToBase64(buffer);
+        const ext = `.${createGiftImageFile.name.split(".").pop() || "png"}`;
+        filename = `${createGiftId.trim()}${ext}`;
+        await localAgent.writeBinary(
+          gameDataPaths.projectRoot,
+          `Assets/StreamingAssets/Gifts/Images/${filename}`,
+          base64
+        );
+      } else if (createGiftImageMode === "generate" && forceGenerate) {
+        const promptBase = `${displayName}${description ? `. ${description}` : ""}`;
+        const base64 = await generateImageBytes(promptBase, "low", activeProjectKeyForGame);
+        filename = `${createGiftId.trim()}.png`;
+        await localAgent.writeBinary(
+          gameDataPaths.projectRoot,
+          `Assets/StreamingAssets/Gifts/Images/${filename}`,
+          base64
+        );
       }
-
-      if (forceGenerate && createGiftImageMode === "generate" && !("image_mode" in payloadBase)) {
-        const genRes = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            catalog_path: giftCatalogPathForCreate,
-            gift_id: createGiftId.trim(),
-          }),
-        });
-        if (!genRes.ok) {
-          const errBody = (await genRes.json().catch(() => ({}))) as { detail?: string };
-          throw new Error(errBody.detail || `Generate failed: ${genRes.status}`);
-        }
-        const genData = (await genRes.json()) as GiftRunResponse;
-        setGifts(genData.gifts || []);
-        setImagesDir(genData.images_dir);
-      }
+      if (filename) newGift.imageFileName = filename;
+      items.push(newGift);
+      setGiftItems(data, key, items);
+      await writeGiftCatalogRaw(data);
+      setCatalogReload((prev) => prev + 1);
+      setGiftImageReload((prev) => prev + 1);
 
       setCreateGiftStatus("Gift created.");
       setShowCreateGift(false);
@@ -847,11 +906,8 @@ export function PipelinePageContent({
   };
 
   const handleEditGift = async () => {
-    const giftCatalogPathForEdit = gameDataPaths?.giftCatalogJson?.trim() ?? "";
-    if (!giftCatalogPathForEdit) {
-      setEditGiftStatus(
-        "Gift catalog path is not available. Set the project path in Admin and ensure gifts_catalog.json exists.",
-      );
+    if (!gameDataPaths?.projectRoot) {
+      setEditGiftStatus("Local project path is not available.");
       return;
     }
     if (!editGiftId.trim()) {
@@ -877,49 +933,45 @@ export function PipelinePageContent({
 
     setEditGiftStatus("Saving...");
     try {
-      let res: Response;
+      const data = await readGiftCatalogRaw();
+      const { key, items } = getGiftItems(data);
+      const gift = items.find((g) => String(g.id || "").trim() === editGiftId.trim());
+      if (!gift) throw new Error("Gift not found.");
+      gift["displayName"] = editGiftDisplayName.trim();
+      gift["description"] = editGiftDescription.trim();
+      gift["activityTags"] = tagsList || [];
+      gift["priority"] = pr;
+      gift["weight"] = w;
+
+      let filename = "";
       if (editGiftImageMode === "file" && editGiftImageFile) {
-        const form = new FormData();
-        form.append("catalog_path", giftCatalogPathForEdit);
-        form.append("gift_id", editGiftId.trim());
-        form.append("description", editGiftDescription.trim());
-        form.append("display_name", editGiftDisplayName.trim());
-        form.append("activity_tags_csv", editGiftActivityTags.trim());
-        form.append("priority_str", String(pr));
-        form.append("weight_str", String(w));
-        form.append("image", editGiftImageFile);
-        res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/${editGiftId.trim()}/upload`, {
-          method: "POST",
-          body: form,
-        });
-      } else {
-        const payload: Record<string, unknown> = {
-          catalog_path: giftCatalogPathForEdit,
-          description: editGiftDescription.trim(),
-          display_name: editGiftDisplayName.trim(),
-          priority: pr,
-          weight: w,
-          image_mode: editGiftImageMode,
-        };
-        if (editGiftActivityTags.trim() !== "") payload.activity_tags = tagsList ?? [];
-        res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/gifts/${editGiftId.trim()}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+        const buffer = await editGiftImageFile.arrayBuffer();
+        const base64 = arrayBufferToBase64(buffer);
+        const ext = `.${editGiftImageFile.name.split(".").pop() || "png"}`;
+        filename = `${editGiftId.trim()}${ext}`;
+        await localAgent.writeBinary(
+          gameDataPaths.projectRoot,
+          `Assets/StreamingAssets/Gifts/Images/${filename}`,
+          base64
+        );
+      } else if (editGiftImageMode === "generate") {
+        const display = String(gift["displayName"] || editGiftId.trim());
+        const desc = String(gift["description"] || "");
+        const promptBase = `${display}${desc ? `. ${desc}` : ""}`;
+        const base64 = await generateImageBytes(promptBase, "low", activeProjectKeyForGame);
+        filename = `${editGiftId.trim()}.png`;
+        await localAgent.writeBinary(
+          gameDataPaths.projectRoot,
+          `Assets/StreamingAssets/Gifts/Images/${filename}`,
+          base64
+        );
       }
-      if (!res.ok) {
-        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
-        throw new Error(errBody.detail || `Update failed: ${res.status}`);
-      }
-      const data = (await res.json()) as {
-        gifts?: GiftItem[];
-        images_dir?: string;
-        updated?: Record<string, unknown>;
-      };
-      setGifts(data.gifts || []);
-      setFileGifts(null);
-      setImagesDir(data.images_dir || null);
+      if (filename) gift["imageFileName"] = filename;
+      setGiftItems(data, key, items);
+      await writeGiftCatalogRaw(data);
+      setCatalogReload((prev) => prev + 1);
+      setGiftImageReload((prev) => prev + 1);
+
       setEditGiftStatus("Gift updated.");
       setShowEditGift(false);
     } catch (err) {
@@ -929,28 +981,25 @@ export function PipelinePageContent({
   };
 
   const handleAddGiftToCity = async (giftId: string, cityId: string) => {
-    if (!gameDataPaths?.citiesJson?.trim()) {
-      setStatus("Cities JSON path is not available.");
+    if (!gameDataPaths?.projectRoot) {
+      setStatus("Local project path is not available.");
       return;
     }
     setStatus("Updating city...");
     try {
-      const res = await fetchApi(`/games/${gameKey}/pipelines/cities/gifts/assign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cities_path: gameDataPaths.citiesJson,
-          city_id: cityId,
-          gift_id: giftId,
-        }),
-      });
-      if (!res.ok) {
-        const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
-        throw new Error(errBody.detail || `Update failed: ${res.status}`);
-      }
-      const data = (await res.json()) as CitiesRunResponse;
-      setCities(data.cities || []);
-      setGiftCityMap(buildGiftCityMap(data.cities || []));
+      const data = await readCitiesRaw();
+      const citiesValue = data["cities"];
+      const citiesList = Array.isArray(citiesValue) ? (citiesValue as Record<string, unknown>[]) : [];
+      const target = citiesList.find(
+        (c) => String(c.nameId || c.name_id || "").trim() === cityId
+      );
+      if (!target) throw new Error("City not found.");
+      const giftIds = Array.isArray(target.giftIds) ? target.giftIds.map(String) : [];
+      if (!giftIds.includes(giftId)) giftIds.push(giftId);
+      target.giftIds = giftIds;
+      data["cities"] = citiesList;
+      await writeCitiesRaw(data);
+      setCatalogReload((prev) => prev + 1);
       setStatus("City updated.");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Update failed.";
@@ -977,8 +1026,8 @@ export function PipelinePageContent({
   };
 
   const handleExecuteBatchCreate = async () => {
-    if (!gameDataPaths?.citiesJson || !gameDataPaths?.giftCatalogJson) {
-      setBatchCityStatus("Cities or gifts catalog path not available.");
+    if (!gameDataPaths?.projectRoot) {
+      setBatchCityStatus("Local project path not available.");
       return;
     }
     const count = Number.parseInt(batchCityCount, 10);
@@ -993,48 +1042,62 @@ export function PipelinePageContent({
     setIsBatchCreating(true);
     setBatchCityStatus("Running batch creation...");
     try {
-      const res = await fetchApi(`/games/${gameKey}/pipelines/cities/batch_create`, {
+      const giftsData = await readGiftCatalogRaw();
+      const { key, items } = getGiftItems(giftsData);
+      const citiesData = await readCitiesRaw();
+      const citiesValue = citiesData["cities"];
+      const citiesList = Array.isArray(citiesValue) ? (citiesValue as Record<string, unknown>[]) : [];
+      const existingCityIds = citiesList
+        .map((c) => String(c.nameId || c.name_id || "").trim())
+        .filter(Boolean);
+      const existingGiftIds = items.map((g) => String(g.id || "").trim()).filter(Boolean);
+
+      const res = await fetchApi(`/games/${gameKey}/pipelines/cities/batch_plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cities_path: gameDataPaths.citiesJson,
-          gifts_path: gameDataPaths.giftCatalogJson,
           count,
           prompt: batchCityPrompt.trim(),
+          existing_city_ids: existingCityIds,
+          existing_gift_ids: existingGiftIds,
         }),
       });
       if (!res.ok) {
         const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
         throw new Error(errBody.detail || `Batch failed: ${res.status}`);
       }
-      const data = (await res.json()) as { cities?: CityItem[]; gifts?: GiftItem[]; errors?: string[] };
-      if (data.gifts) {
-        setGifts(data.gifts);
-      }
-      if (gameDataPaths?.citiesJson) {
-        const reload = await fetchApi(
-          `/projects/${encodeURIComponent(activeProjectKeyForGame || "")}/game-data-file/cities`,
+      const data = (await res.json()) as {
+        created_cities?: Record<string, unknown>[];
+        created_gifts?: Record<string, unknown>[];
+      };
+      const createdCities = Array.isArray(data.created_cities) ? data.created_cities : [];
+      const createdGifts = Array.isArray(data.created_gifts) ? data.created_gifts : [];
+      for (const gift of createdGifts) {
+        const gid = String(gift["id"] || "").trim();
+        if (!gid) continue;
+        const name = String(gift["displayName"] || gift["name"] || gid).trim();
+        const desc = String(gift["description"] || "").trim();
+        const prompt = desc ? `${name}. ${desc}` : name;
+        const base64 = await generateImageBytes(prompt, "low", activeProjectKeyForGame);
+        const filename = `${gid}.png`;
+        await localAgent.writeBinary(
+          gameDataPaths.projectRoot,
+          `Assets/StreamingAssets/Gifts/Images/${filename}`,
+          base64
         );
-        if (reload.ok) {
-          const json = await reload.json();
-          const text = JSON.stringify(json, null, 2);
-          const parsedCities = parseCitiesText(text);
-          setCities(parsedCities);
-          setFileCities(null);
-          setGiftCityMap(buildGiftCityMap(parsedCities));
-        } else if (data.cities) {
-          setCities(data.cities);
-          setGiftCityMap(buildGiftCityMap(data.cities));
-        }
-      } else if (data.cities) {
-        setCities(data.cities);
-        setGiftCityMap(buildGiftCityMap(data.cities));
+        gift["imageFileName"] = filename;
+        items.push(gift);
       }
-      if (data.errors && data.errors.length > 0) {
-        setBatchCityStatus(`Completed with warnings: ${data.errors.slice(0, 3).join(" | ")}`);
-      } else {
-        setBatchCityStatus("Batch creation completed.");
+      for (const city of createdCities) {
+        citiesList.push(city);
       }
+      citiesData["cities"] = citiesList;
+      setGiftItems(giftsData, key, items);
+      await writeGiftCatalogRaw(giftsData);
+      await writeCitiesRaw(citiesData);
+      setCatalogReload((prev) => prev + 1);
+      setGiftImageReload((prev) => prev + 1);
+      setBatchCityStatus(`Created ${createdCities.length} cities.`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Batch failed.";
       setBatchCityStatus(`Error: ${message}`);
@@ -1074,8 +1137,8 @@ export function PipelinePageContent({
   };
 
   const handleExecuteLocationUpdates = async () => {
-    if (!gameDataPaths?.citiesJson) {
-      setUpdateLocStatus("Cities JSON path not available.");
+    if (!gameDataPaths?.projectRoot) {
+      setUpdateLocStatus("Local project path not available.");
       return;
     }
     const selected = (cities ?? []).filter((c) => selectedCityIds[c.name_id]);
@@ -1095,34 +1158,39 @@ export function PipelinePageContent({
     setIsUpdatingLoc(true);
     setUpdateLocStatus("Updating locationUpdates...");
     try {
-      const res = await fetchApi(`/games/${gameKey}/pipelines/cities/update_location_updates`, {
+      const res = await fetchApi(`/games/${gameKey}/pipelines/cities/location_plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cities_path: gameDataPaths.citiesJson,
           city_ids: selected.map((c) => c.name_id),
           prompt: updateLocPrompt.trim(),
           count,
-          replace_existing: updateLocReplace,
         }),
       });
       if (!res.ok) {
         const errBody = (await res.json().catch(() => ({}))) as { detail?: string };
         throw new Error(errBody.detail || `Update failed: ${res.status}`);
       }
-      if (gameDataPaths?.citiesJson) {
-        const reload = await fetchApi(
-          `/projects/${encodeURIComponent(activeProjectKeyForGame || "")}/game-data-file/cities`,
-        );
-        if (reload.ok) {
-          const json = await reload.json();
-          const text = JSON.stringify(json, null, 2);
-          const parsedCities = parseCitiesText(text);
-          setCities(parsedCities);
-          setFileCities(null);
-          setGiftCityMap(buildGiftCityMap(parsedCities));
+      const payload = (await res.json()) as { updates?: Record<string, CityUpdate[]> };
+      const updatesByCity = payload.updates || {};
+      const citiesData = await readCitiesRaw();
+      const citiesValue = citiesData["cities"];
+      const citiesList = Array.isArray(citiesValue) ? (citiesValue as Record<string, unknown>[]) : [];
+      for (const city of citiesList) {
+        const cityId = String(city.nameId || city.name_id || "").trim();
+        if (!cityId) continue;
+        const incoming = updatesByCity[cityId] || [];
+        if (incoming.length === 0) continue;
+        if (updateLocReplace) {
+          city.locationUpdates = incoming;
+        } else {
+          const existing = Array.isArray(city.locationUpdates) ? city.locationUpdates : [];
+          city.locationUpdates = [...existing, ...incoming];
         }
       }
+      citiesData["cities"] = citiesList;
+      await writeCitiesRaw(citiesData);
+      setCatalogReload((prev) => prev + 1);
       setUpdateLocStatus("locationUpdates updated.");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Update failed.";
@@ -1133,8 +1201,8 @@ export function PipelinePageContent({
   };
 
   const handleUpdateGiftImages = async () => {
-    if (!catalogPath.trim()) {
-      setGiftUpdateStatus("Missing gift catalog path.");
+    if (!gameDataPaths?.projectRoot) {
+      setGiftUpdateStatus("Local project path not available.");
       return;
     }
     const selectedIds = Object.entries(selectedGiftIds)
@@ -1148,43 +1216,40 @@ export function PipelinePageContent({
     setIsGiftUpdating(true);
     setGiftUpdateStatus(null);
     try {
-      const res = await fetchApi(`/games/${gameKey}/pipelines/gift_images/update_images`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          catalog_path: catalogPath,
-          gift_ids: selectedIds,
-          style_prompt: selectedStyle?.prompt || "",
-          extra_prompt: giftStyleExtra,
-          quality: giftStyleQuality,
-          style_mode: giftStyleMode,
-        }),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        detail?: string | { msg?: string }[] | Record<string, unknown>;
-        errors?: string[];
-        gifts?: GiftItem[];
-        images_dir?: string;
-      };
-      if (!res.ok) {
-        const detail = body.detail;
-        const message = Array.isArray(detail)
-          ? detail.map((d) => d.msg || JSON.stringify(d)).join("; ")
-          : typeof detail === "string"
-          ? detail
-          : detail
-          ? JSON.stringify(detail)
-          : "Update failed.";
-        throw new Error(message);
+      const data = await readGiftCatalogRaw();
+      const { key, items } = getGiftItems(data);
+      const errors: string[] = [];
+      for (const gift of items) {
+        const gid = String(gift.id || "").trim();
+        if (!gid || !selectedIds.includes(gid)) continue;
+        const name = String(gift.displayName || gift.name || gid).trim();
+        const desc = String(gift.description || "").trim();
+        const promptParts = [name];
+        if (desc) promptParts.push(desc);
+        if (selectedStyle?.prompt) promptParts.push(selectedStyle.prompt);
+        if (giftStyleMode) promptParts.push(`Style mode: ${giftStyleMode}`);
+        if (giftStyleExtra.trim()) promptParts.push(giftStyleExtra.trim());
+        const prompt = promptParts.filter(Boolean).join(". ");
+        try {
+          const base64 = await generateImageBytes(prompt, giftStyleQuality, activeProjectKeyForGame);
+          const filename = `${gid}.png`;
+          await localAgent.writeBinary(
+            gameDataPaths.projectRoot,
+            `Assets/StreamingAssets/Gifts/Images/${filename}`,
+            base64
+          );
+          gift["imageFileName"] = filename;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Update failed.";
+          errors.push(`Gift ${gid}: ${message}`);
+        }
       }
-      if (Array.isArray(body.gifts)) {
-        setGifts(body.gifts);
-      }
-      if (body.images_dir) setImagesDir(body.images_dir);
+      setGiftItems(data, key, items);
+      await writeGiftCatalogRaw(data);
+      setCatalogReload((prev) => prev + 1);
       setGiftImageReload((prev) => prev + 1);
-      const errList = Array.isArray(body.errors) ? body.errors : [];
-      if (errList.length > 0) {
-        setGiftUpdateStatus(`Updated with ${errList.length} errors: ${errList.join(" | ")}`);
+      if (errors.length > 0) {
+        setGiftUpdateStatus(`Updated with ${errors.length} errors: ${errors.join(" | ")}`);
       } else {
         setGiftUpdateStatus("Images updated.");
       }
@@ -1241,6 +1306,9 @@ export function PipelinePageContent({
             </div>
             {gameDataLoadError && (
               <p style={{ margin: 0, color: "#fca5a5", fontSize: 13 }}>{gameDataLoadError}</p>
+            )}
+            {localAgentError && !gameDataLoadError && (
+              <p style={{ margin: 0, color: "#fca5a5", fontSize: 13 }}>{localAgentError}</p>
             )}
             {pipelineKey === "cities" && giftCatalogMissingForCities && !gameDataLoadError && (
               <p style={{ margin: 0, color: "#fbbf24", fontSize: 13 }}>

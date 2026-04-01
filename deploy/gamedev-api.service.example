@@ -1,6 +1,7 @@
 # Example systemd unit for Game Dev King API (FastAPI).
 # Copy to /etc/systemd/system/gamedev-api.service
 # Replace APP_ROOT with your app directory (e.g. /home/ec2-user/gamedev-king) and USER if not ec2-user.
+# Layout: APP_ROOT/api (this WorkingDirectory), APP_ROOT/games (manifest + game packages; required for imports).
 # Then: sudo systemctl daemon-reload && sudo systemctl enable --now gamedev-api
 
 [Unit]

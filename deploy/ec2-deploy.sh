@@ -4,17 +4,25 @@
 #   No arg or "latest" -> downloads s3://BUCKET/releases/latest.zip
 #   Otherwise -> downloads s3://BUCKET/releases/<s3-key> (e.g. gamedev-king-20250316_1430.zip)
 #
-# Prereqs on EC2: AWS CLI configured (or instance role), unzip, Node for web (standalone), Python 3 + venv for API.
+# Environment (optional):
+#   APP_ROOT          App directory (default: /home/ec2-user/gamedev-king)
+#   S3_BUCKET         S3 bucket (default: devbloom)
+#   S3_PREFIX         Key prefix under bucket (default: releases)
+#   RESTART_SERVICES  Set to 0 to skip systemctl restart (default: 1)
+#
+# Prereqs on EC2: AWS CLI configured (or instance role), unzip, rsync, Node for web (standalone), Python 3.10+ venv for API.
 # For standalone web, use gamedev-web-standalone.service.example (ExecStart=node server.js).
+# The release zip must contain gamedev-king/{web,api,games}/ — games/ is required for API routes that import game services.
 
-set -e
-S3_BUCKET="devbloom"
-S3_PREFIX="releases"
+set -euo pipefail
+S3_BUCKET="${S3_BUCKET:-devbloom}"
+S3_PREFIX="${S3_PREFIX:-releases}"
 APP_ROOT="${APP_ROOT:-/home/ec2-user/gamedev-king}"
+RESTART_SERVICES="${RESTART_SERVICES:-1}"
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-if [[ -z "$1" || "$1" == "latest" ]]; then
+if [[ -z "${1:-}" || "${1:-}" == "latest" ]]; then
   S3_KEY="${S3_PREFIX}/latest.zip"
 else
   S3_KEY="${S3_PREFIX}/$1"
@@ -41,10 +49,15 @@ if [[ -f "${APP_ROOT}/api/.env" ]]; then
   cp "${APP_ROOT}/api/.env" "${ENV_BACKUP}"
 fi
 
-echo "Syncing web and api into ${APP_ROOT}..."
+echo "Syncing web, api, and games into ${APP_ROOT}..."
 mkdir -p "${APP_ROOT}"
 rsync -a --delete "${TMP_DIR}/gamedev-king/web/" "${APP_ROOT}/web/"
 rsync -a --delete "${TMP_DIR}/gamedev-king/api/" "${APP_ROOT}/api/"
+if [[ -d "${TMP_DIR}/gamedev-king/games" ]]; then
+  rsync -a --delete "${TMP_DIR}/gamedev-king/games/" "${APP_ROOT}/games/"
+else
+  echo "WARNING: Zip has no games/ directory (legacy build?). Game pipelines may fail until you add games/ or redeploy with a current package."
+fi
 
 if [[ -n "$ENV_BACKUP" ]]; then
   echo "Restoring api/.env..."
@@ -82,8 +95,12 @@ if ! .venv/bin/pip install -r requirements.txt; then
   exit 1
 fi
 
-echo "Restarting services..."
-sudo systemctl restart gamedev-api
-sudo systemctl restart gamedev-web
-
-echo "Done. Check: sudo systemctl status gamedev-api gamedev-web"
+if [[ "${RESTART_SERVICES}" == "1" ]]; then
+  echo "Restarting services..."
+  sudo systemctl daemon-reload
+  sudo systemctl restart gamedev-api
+  sudo systemctl restart gamedev-web
+  echo "Done. Check: sudo systemctl status gamedev-api gamedev-web --no-pager"
+else
+  echo "Skipped service restart (RESTART_SERVICES!=1). Restart manually when ready."
+fi

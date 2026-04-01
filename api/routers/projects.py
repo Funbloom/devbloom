@@ -1,5 +1,7 @@
 import json
 import re
+import sys
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -133,12 +135,25 @@ def update_project(project_key: str, body: ProjectUpdate) -> dict:
 
 def _game_data_paths(project_key: str) -> tuple[Path, Path, Path]:
     """Project root and standard JSON paths under Assets/StreamingAssets."""
+    if os.getenv("ALLOW_SERVER_FILE_ACCESS", "false").lower() != "true":
+        raise HTTPException(
+            status_code=400,
+            detail="Server file access is disabled. Use the local agent.",
+        )
     cleaned = validate_project_key(project_key)
     root_raw = get_local_project_path(cleaned)
     if not root_raw:
         raise HTTPException(
             status_code=400,
             detail="Local project path is not set for this project. Set it in Admin → Projects.",
+        )
+    if sys.platform != "win32" and re.match(r"^[A-Za-z]:[\\/]", root_raw):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Local project path looks like a Windows path. "
+                "Set the server path in Admin → Projects."
+            ),
         )
     root = Path(root_raw).resolve()
     cities_json = root / "Assets" / "StreamingAssets" / "Travel" / "cities.json"

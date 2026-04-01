@@ -1,9 +1,9 @@
 @echo off
 setlocal EnableDelayedExpansion
-set S3_BUCKET=devbloom
-set S3_PREFIX=releases
-:: Production API URL - baked into the Next.js build so the browser calls this instead of localhost
-set PRODUCTION_API_URL=https://dev.funbloomstudio.com/api
+if not defined S3_BUCKET set S3_BUCKET=devbloom
+if not defined S3_PREFIX set S3_PREFIX=releases
+:: Production API URL - baked into the Next.js build (override before run: set PRODUCTION_API_URL=https://your-host/api)
+if not defined PRODUCTION_API_URL set PRODUCTION_API_URL=https://dev.funbloomstudio.com/api
 :: Optional: set AWS_PROFILE to your SSO profile name (from "aws configure sso") so upload uses that profile
 set AWS_PROFILE=%AWS_PROFILE%
 
@@ -20,7 +20,7 @@ for /f "tokens=*" %%i in ('powershell -NoProfile -Command "Get-Date -Format 'yyy
 set ZIPNAME=gamedev-king-%TS%.zip
 set STAGING=%ROOT%\deploy\staging
 
-echo [0/7] AWS credentials...
+echo [0/8] AWS credentials...
 if defined AWS_PROFILE (
   echo Signing in with SSO profile: %AWS_PROFILE%
   aws sso login %AWS_PROFILE_ARG%
@@ -39,7 +39,7 @@ if errorlevel 1 (
 )
 echo.
 
-echo [1/7] Building web (Next.js) with API URL: %PRODUCTION_API_URL%
+echo [1/8] Building web (Next.js) with API URL: %PRODUCTION_API_URL%
 cd "%ROOT%\web"
 set NEXT_PUBLIC_API_URL_BASE=%PRODUCTION_API_URL%
 set NEXT_PUBLIC_API_URL=%PRODUCTION_API_URL%
@@ -48,7 +48,7 @@ call npm run build
 if errorlevel 1 ( echo Build failed. & exit /b 1 )
 cd "%ROOT%"
 
-echo [2/7] Preparing standalone web output...
+echo [2/8] Preparing standalone web output...
 set WEB_STANDALONE=%ROOT%\web\.next\standalone
 set WEB_OUT=%STAGING%\gamedev-king\web
 mkdir "%STAGING%\gamedev-king" 2>nul
@@ -62,23 +62,29 @@ if exist "%ROOT%\web\public" (
   xcopy /E /I /Y "%ROOT%\web\public\*" "%WEB_OUT%\public\" >nul
 )
 
-echo [3/7] Copying API (excluding .venv, __pycache__, .env)...
+echo [3/8] Copying API (excluding .venv, __pycache__, .env)...
 set API_OUT=%STAGING%\gamedev-king\api
 mkdir "%API_OUT%" 2>nul
 robocopy "%ROOT%\api" "%API_OUT%" /E /XD .venv __pycache__ .git /XF .env /NFL /NDL /NJH /NJS /NC /NS /NP
 if errorlevel 8 ( echo Robocopy had errors. & exit /b 1 )
 
-echo [4/7] Creating archive %ZIPNAME%...
+echo [4/8] Copying games/ (required by API: manifest + pocket_voyager)...
+set GAMES_OUT=%STAGING%\gamedev-king\games
+mkdir "%GAMES_OUT%" 2>nul
+robocopy "%ROOT%\games" "%GAMES_OUT%" /E /XD __pycache__ .git .venv node_modules /NFL /NDL /NJH /NJS /NC /NS /NP
+if errorlevel 8 ( echo Robocopy had errors copying games. & exit /b 1 )
+
+echo [5/8] Creating archive %ZIPNAME%...
 cd "%STAGING%"
 tar -a -c -f "%ROOT%\deploy\%ZIPNAME%" gamedev-king
 cd "%ROOT%"
 
-echo [5/7] Uploading to s3://%S3_BUCKET%/%S3_PREFIX%/...
+echo [6/8] Uploading to s3://%S3_BUCKET%/%S3_PREFIX%/...
 aws s3 cp "%ROOT%\deploy\%ZIPNAME%" "s3://%S3_BUCKET%/%S3_PREFIX%/%ZIPNAME%" --no-progress %AWS_PROFILE_ARG%
 if errorlevel 1 ( echo S3 upload failed. Check AWS CLI and credentials. & exit /b 1 )
 aws s3 cp "s3://%S3_BUCKET%/%S3_PREFIX%/%ZIPNAME%" "s3://%S3_BUCKET%/%S3_PREFIX%/latest.zip" --no-progress %AWS_PROFILE_ARG%
 
-echo [6/7] Cleaning staging...
+echo [7/8] Cleaning staging...
 rd /s /q "%STAGING%" 2>nul
 
 echo.

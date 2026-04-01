@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { fetchApi, API_BASE } from "../lib/api";
+import { localAgent, getLocalProjectPath, setLocalProjectPath } from "../lib/localAgentClient";
 import { useAuth } from "../contexts/AuthContext";
 
 type SourceItem = {
@@ -365,8 +366,8 @@ export default function AdminPage() {
   const handleProjectSave = async () => {
     setProjectStatus(null);
     const projectKeyInput = newProject.project_key.trim();
-    if (!projectKeyInput || !newProject.display_name.trim() || !newProject.project_path.trim()) {
-      setProjectStatus("Error: All project fields are required.");
+    if (!projectKeyInput || !newProject.display_name.trim()) {
+      setProjectStatus("Error: project_key and display_name are required.");
       return;
     }
     if (projects.some((project) => project.project_key === projectKeyInput)) {
@@ -374,13 +375,22 @@ export default function AdminPage() {
       return;
     }
     try {
+      const localPath = newProject.project_path.trim();
+      if (localPath) {
+        const ok = await localAgent.health();
+        if (!ok) {
+          setProjectStatus("Error: Local agent is not running.");
+          return;
+        }
+        await localAgent.approveProjectRoot(localPath);
+        setLocalProjectPath(projectKeyInput, localPath);
+      }
       const response = await fetchApi("/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_key: projectKeyInput,
           display_name: newProject.display_name.trim(),
-          project_path: newProject.project_path.trim(),
         }),
       });
       if (!response.ok) {
@@ -389,6 +399,9 @@ export default function AdminPage() {
       }
       setNewProject({ project_key: "", display_name: "", project_path: "" });
       await loadProjects();
+      if (!localPath) {
+        setProjectStatus("Project saved. Set a local path for local agent features.");
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setProjectStatus(`Error: ${message}`);
@@ -399,24 +412,33 @@ export default function AdminPage() {
     setEditProjectKey(project.project_key);
     setEditProject({
       display_name: project.display_name,
-      project_path: project.project_path,
+      project_path: getLocalProjectPath(project.project_key) || "",
     });
   };
 
   const handleProjectUpdate = async () => {
     if (!editProjectKey) return;
     setProjectStatus(null);
-    if (!editProject.display_name.trim() || !editProject.project_path.trim()) {
-      setProjectStatus("Error: display_name and project_path are required.");
+    if (!editProject.display_name.trim()) {
+      setProjectStatus("Error: display_name is required.");
       return;
     }
     try {
+      const localPath = editProject.project_path.trim();
+      if (localPath) {
+        const ok = await localAgent.health();
+        if (!ok) {
+          setProjectStatus("Error: Local agent is not running.");
+          return;
+        }
+        await localAgent.approveProjectRoot(localPath);
+        setLocalProjectPath(editProjectKey, localPath);
+      }
       const response = await fetchApi(`/projects/${editProjectKey}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           display_name: editProject.display_name.trim(),
-          project_path: editProject.project_path.trim(),
         }),
       });
       if (!response.ok) {
@@ -425,6 +447,9 @@ export default function AdminPage() {
       }
       setEditProjectKey(null);
       await loadProjects();
+      if (!localPath) {
+        setProjectStatus("Project updated. Set a local path for local agent features.");
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setProjectStatus(`Error: ${message}`);
@@ -848,14 +873,15 @@ export default function AdminPage() {
             <div className="admin-project-table">
               {projects.map((project) => {
                 const isEditing = editProjectKey === project.project_key;
+                const localPath = getLocalProjectPath(project.project_key) || "";
                 return (
                   <div className="admin-project-row" key={project.project_key}>
                     <div className="admin-project-main">
                       <div className="admin-project-title">{project.display_name}</div>
                       <div className="admin-project-meta">
                         <span className="admin-project-key">{project.project_key}</span> ·{" "}
-                        {project.project_path || "Path not set"}
-                        {!project.project_path && (
+                        {localPath || "Local path not set"}
+                        {!localPath && (
                           <>
                             {" · "}
                             <span className="admin-path-missing">Path not set</span>

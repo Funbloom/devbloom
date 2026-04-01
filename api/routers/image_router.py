@@ -1,5 +1,6 @@
 import mimetypes
 import logging
+import base64
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -16,6 +17,7 @@ from services.image_tool import (
     resize_image,
     safe_resolve_path,
     validate_image_filename,
+    generate_openai_image_bytes,
 )
 from services.storyboard import list_styles
 from core.code_settings import resolve_image_model
@@ -49,6 +51,16 @@ class GenerateImageRequest(BaseModel):
     quality: str | None = None
     style: str | None = None
     transparent_background: bool | None = None
+    project_key: str | None = None
+
+
+class GenerateImageBytesRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=4000)
+    width: int = Field(default=1024, ge=256, le=2048)
+    height: int = Field(default=1024, ge=256, le=2048)
+    quality: str | None = None
+    transparent_background: bool | None = None
+    model: str | None = None
     project_key: str | None = None
 
 
@@ -202,6 +214,36 @@ def generate_image_route(
         return result
     except HTTPException:
         raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@image_router.post("/tools/generate_image_bytes")
+def generate_image_bytes_route(
+    body: GenerateImageBytesRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    check_can_generate_images(
+        user.get("id") or "",
+        user.get("is_admin") or False,
+        count=1,
+    )
+    try:
+        model_key = body.model or "gpt-image-1.5"
+        data = generate_openai_image_bytes(
+            prompt=body.prompt,
+            width=body.width,
+            height=body.height,
+            quality=body.quality,
+            transparent_background=body.transparent_background,
+            model_name=model_key,
+            project_key=body.project_key,
+        )
+        increment_usage(user.get("id") or "", 1)
+        return {
+            "content_base64": base64.b64encode(data).decode("utf-8"),
+            "mime": "image/png",
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

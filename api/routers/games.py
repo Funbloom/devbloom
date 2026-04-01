@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -27,10 +28,20 @@ from games.pocket_voyager.services.cities_service import (
     add_gift_to_city,
     batch_create_cities,
     load_cities_catalog,
+    plan_batch_create_cities,
+    plan_location_updates,
     update_cities_location_updates,
 )
 
 games_router = APIRouter()
+
+
+def _require_server_file_access() -> None:
+    if os.getenv("ALLOW_SERVER_FILE_ACCESS", "false").lower() != "true":
+        raise HTTPException(
+            status_code=400,
+            detail="Server file access is disabled. Use the local agent.",
+        )
 
 
 class PipelineRunRequest(BaseModel):
@@ -85,6 +96,19 @@ class CityUpdateLocationRequest(BaseModel):
     replace_existing: bool = False
 
 
+class CityBatchPlanRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+    count: int = Field(default=1, ge=1, le=200)
+    existing_city_ids: list[str] = []
+    existing_gift_ids: list[str] = []
+
+
+class CityLocationPlanRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+    city_ids: list[str] = Field(min_items=1)
+    count: int = Field(default=3, ge=1, le=20)
+
+
 class GiftUpdateImagesRequest(BaseModel):
     catalog_path: str = Field(min_length=1)
     gift_ids: list[str] = Field(min_items=1)
@@ -122,6 +146,8 @@ def run_pipeline_route(
     body: PipelineRunRequest,
     _user: dict = Depends(get_current_user),
 ) -> dict:
+    if pipeline_key in {"gift_images", "cities"}:
+        _require_server_file_access()
     if pipeline_key == "gift_images":
         try:
             catalog = load_gift_catalog(body.catalog_path or "")
@@ -186,6 +212,7 @@ def get_pipeline_image(
 ) -> FileResponse:
     if game_key != "pocket_voyager" or pipeline_key != "gift_images":
         raise HTTPException(status_code=404, detail="Pipeline not found.")
+    _require_server_file_access()
 
     original_filename = filename
     filename = Path(original_filename).name
@@ -215,6 +242,7 @@ def create_gift_route(
 ) -> dict:
     if game_key != "pocket_voyager":
         raise HTTPException(status_code=404, detail="Game not found.")
+    _require_server_file_access()
     image_mode = (body.image_mode or "").strip().lower()
     if image_mode and image_mode != "generate":
         raise HTTPException(status_code=400, detail="Invalid image_mode.")
@@ -261,6 +289,7 @@ def edit_gift_route(
 ) -> dict:
     if game_key != "pocket_voyager":
         raise HTTPException(status_code=404, detail="Game not found.")
+    _require_server_file_access()
     image_mode = (body.image_mode or "keep").strip().lower()
     if image_mode not in {"keep", "generate"}:
         raise HTTPException(status_code=400, detail="Invalid image_mode.")
@@ -313,6 +342,7 @@ async def edit_gift_with_image_route(
 ) -> dict:
     if game_key != "pocket_voyager":
         raise HTTPException(status_code=404, detail="Game not found.")
+    _require_server_file_access()
     try:
         raw = await image.read()
         if not raw:
@@ -369,6 +399,7 @@ def assign_gift_to_city_route(
 ) -> dict:
     if game_key != "pocket_voyager":
         raise HTTPException(status_code=404, detail="Game not found.")
+    _require_server_file_access()
     try:
         result = add_gift_to_city(body.cities_path, body.city_id, body.gift_id)
     except FileNotFoundError as exc:
@@ -386,6 +417,7 @@ def batch_create_cities_route(
 ) -> dict:
     if game_key != "pocket_voyager":
         raise HTTPException(status_code=404, detail="Game not found.")
+    _require_server_file_access()
     try:
         result = batch_create_cities(
             cities_path=body.cities_path,
@@ -407,6 +439,26 @@ def batch_create_cities_route(
     }
 
 
+@games_router.post("/games/{game_key}/pipelines/cities/batch_plan")
+def batch_plan_cities_route(
+    game_key: str,
+    body: CityBatchPlanRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    if game_key != "pocket_voyager":
+        raise HTTPException(status_code=404, detail="Game not found.")
+    try:
+        result = plan_batch_create_cities(
+            prompt=body.prompt,
+            count=body.count,
+            existing_city_ids=body.existing_city_ids,
+            existing_gift_ids=body.existing_gift_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
 @games_router.post("/games/{game_key}/pipelines/cities/update_location_updates")
 def update_location_updates_route(
     game_key: str,
@@ -415,6 +467,7 @@ def update_location_updates_route(
 ) -> dict:
     if game_key != "pocket_voyager":
         raise HTTPException(status_code=404, detail="Game not found.")
+    _require_server_file_access()
     try:
         result = update_cities_location_updates(
             cities_path=body.cities_path,
@@ -435,6 +488,25 @@ def update_location_updates_route(
     }
 
 
+@games_router.post("/games/{game_key}/pipelines/cities/location_plan")
+def plan_location_updates_route(
+    game_key: str,
+    body: CityLocationPlanRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    if game_key != "pocket_voyager":
+        raise HTTPException(status_code=404, detail="Game not found.")
+    try:
+        result = plan_location_updates(
+            prompt=body.prompt,
+            city_ids=body.city_ids,
+            count=body.count,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
 @games_router.post("/games/{game_key}/pipelines/gift_images/update_images")
 def update_gift_images_route(
     game_key: str,
@@ -443,6 +515,7 @@ def update_gift_images_route(
 ) -> dict:
     if game_key != "pocket_voyager":
         raise HTTPException(status_code=404, detail="Game not found.")
+    _require_server_file_access()
     try:
         result = batch_update_gift_images(
             catalog_path=body.catalog_path,
@@ -481,6 +554,7 @@ def generate_gift_image_route(
 ) -> dict:
     if game_key != "pocket_voyager":
         raise HTTPException(status_code=404, detail="Game not found.")
+    _require_server_file_access()
     try:
         result = generate_gift_image(body.catalog_path, body.gift_id)
         catalog = load_gift_catalog(body.catalog_path)

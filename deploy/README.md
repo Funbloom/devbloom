@@ -14,8 +14,8 @@ Replace `/home/ec2-user/gamedev-king` and `ec2-user` if your app lives elsewhere
 
 ### Deploy from S3 (no build on EC2)
 
-- **build-and-upload.bat** (run on Windows): builds web (Next.js standalone), zips web + api, uploads to `s3://devbloom/releases/` as a timestamped zip and as `latest.zip`. Requires [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and `npm` in PATH. Use `aws configure` (access keys) or remove `login_session` from `~/.aws/config` so the CLI uses your credentials file.
-- **ec2-deploy.sh** (run on EC2): downloads the zip from S3, extracts into `APP_ROOT`, restores `api/.env`, installs API deps, restarts services. See **Get zip from S3 and deploy** below for the exact commands.
+- **build-and-upload.bat** (run on Windows, from repo root via `deploy\build-and-upload.bat`): builds web (Next.js standalone), stages **`web/`**, **`api/`**, and **`games/`** into `deploy/staging/gamedev-king/`, zips that tree, uploads to S3 as a timestamped zip and as **`latest.zip`**. The **`games/`** tree (e.g. `manifest.json`, `pocket_voyager`) is required at runtime: the API imports `games.*` and reads `games/manifest.json` next to `api/`. Requires [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and `npm` in PATH. Use `aws configure` (access keys) or SSO; optional **`AWS_PROFILE`** selects the profile. Optional overrides before running the batch file (same `cmd` session): `set S3_BUCKET=...`, `set S3_PREFIX=releases`, `set PRODUCTION_API_URL=https://your-domain/api` (baked into the Next.js client).
+- **ec2-deploy.sh** (run on EC2): downloads the zip from S3, `rsync`s **`web/`**, **`api/`**, and **`games/`** into `APP_ROOT`, restores `api/.env`, recreates/updates the API venv and `pip install -r requirements.txt`, runs **`systemctl daemon-reload`** and restarts **`gamedev-api`** and **`gamedev-web`**. Environment overrides: `APP_ROOT`, `S3_BUCKET`, `S3_PREFIX`, `RESTART_SERVICES=0` to skip restarts. See **Get zip from S3 and deploy** below.
 - **gamedev-web-standalone.service.example** — Use this for the web service when deploying via S3. It runs `node server.js` instead of `npm start`. Copy to `/etc/systemd/system/gamedev-web.service` and run `sudo systemctl daemon-reload && sudo systemctl restart gamedev-web`.
 
 ### Get zip from S3 and deploy (on EC2)
@@ -49,7 +49,7 @@ chmod +x deploy/ec2-deploy.sh
 ./deploy/ec2-deploy.sh
 ```
 
-The script will: download from `s3://devbloom/releases/latest.zip` (or the given key), extract, sync `web/` and `api/` into `/home/ec2-user/gamedev-king`, keep existing `api/.env`, run `pip install -r requirements.txt` in the API venv, and restart `gamedev-api` and `gamedev-web`.
+The script will: download from `s3://devbloom/releases/latest.zip` (or the given key), extract, sync `web/`, `api/`, and `games/` into `/home/ec2-user/gamedev-king`, keep existing `api/.env`, run `pip install -r requirements.txt` in the API venv, run `daemon-reload`, and restart `gamedev-api` and `gamedev-web`.
 
 **5. Check services**
 
@@ -83,7 +83,7 @@ APP_ROOT=/opt/gamedev-king ./deploy/ec2-deploy.sh
 - **web**: `sudo systemctl stop gamedev-web`
 
 **Restart**
--  'sudo systemctl daemon-reload'
+- **reload units**: `sudo systemctl daemon-reload`
 - **nginx**: `sudo systemctl restart nginx`
 - **API**: `sudo systemctl restart gamedev-api`
 - **web**: `sudo systemctl restart gamedev-web`

@@ -582,6 +582,53 @@ def generate_openai_image_to_dir(
     return {"filename": output_path.name, "path": str(output_path)}
 
 
+def generate_openai_image_bytes(
+    prompt: str,
+    width: int = 1024,
+    height: int = 1024,
+    quality: str | None = None,
+    transparent_background: bool | None = None,
+    model_name: str = "gpt-image-1.5",
+    project_key: Optional[str] = None,
+) -> bytes:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OpenAI API key is missing. Set OPENAI_API_KEY.")
+
+    safe_width = max(256, int(width))
+    safe_height = max(256, int(height))
+    if safe_width == safe_height:
+        size = "1024x1024"
+    elif safe_width > safe_height:
+        size = "1536x1024"
+    else:
+        size = "1024x1536"
+
+    client = OpenAI(api_key=api_key)
+    params: dict = {
+        "model": model_name,
+        "prompt": prompt,
+        "size": size,
+        "n": 1,
+        "user": project_key or None,
+    }
+    if quality:
+        params["quality"] = quality
+    if transparent_background is True:
+        params["background"] = "transparent"
+    elif transparent_background is False:
+        params["background"] = "opaque"
+
+    response = client.images.generate(**params)
+    data_item = response.data[0] if response.data else None
+    b64 = getattr(data_item, "b64_json", None) if data_item else None
+    if not b64 and isinstance(data_item, dict):
+        b64 = data_item.get("b64_json")
+    if not b64:
+        raise ValueError("OpenAI image generation returned no image data.")
+    return base64.b64decode(b64)
+
+
 def generate_image(
     prompt: str,
     negative_prompt: str | None = None,

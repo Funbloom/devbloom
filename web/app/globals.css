@@ -103,6 +103,31 @@ body {
   flex-shrink: 0;
 }
 
+.app-header-title-block {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.app-header-local-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted, #94a3b8);
+  white-space: nowrap;
+}
+
+.app-header-local-agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .app-header-page {
   min-width: 100px;
   padding: 8px 14px;
@@ -115,13 +140,17 @@ body {
 }
 
 .app-header-title {
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 20px;
   font-weight: 700;
   color: var(--color-text);
   text-decoration: none;
   letter-spacing: -0.02em;
   text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-header-title:hover {
