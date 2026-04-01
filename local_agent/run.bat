@@ -31,7 +31,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
+:: CORS: deployed UI at https://dev.funbloomstudio.com can call this agent from your browser. Override or clear: set LOCAL_AGENT_EXTRA_CORS_ORIGINS= before running.
+if not defined LOCAL_AGENT_EXTRA_CORS_ORIGINS set "LOCAL_AGENT_EXTRA_CORS_ORIGINS=https://dev.funbloomstudio.com"
+
 echo [local_agent] http://127.0.0.1:8765  ^(Ctrl+C to stop^)
+echo [local_agent] LOCAL_AGENT_EXTRA_CORS_ORIGINS=%LOCAL_AGENT_EXTRA_CORS_ORIGINS%
 "%VENV_PY%" -m uvicorn local_agent.main:app --host 127.0.0.1 --port 8765
 exit /b %ERRORLEVEL%
 

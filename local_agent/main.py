@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 from pathlib import Path
 from typing import Any
 
@@ -27,16 +28,32 @@ from local_agent.security import (
 )
 from local_agent.json_patch import apply_json_patch
 
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+
+def _cors_allow_origins() -> list[str]:
+    """Default dev origins plus LOCAL_AGENT_EXTRA_CORS_ORIGINS (comma-separated full origins, e.g. https://dev.example.com)."""
+    extra_raw = os.getenv("LOCAL_AGENT_EXTRA_CORS_ORIGINS", "")
+    extra = [x.strip() for x in extra_raw.split(",") if x.strip()]
+    seen: set[str] = set()
+    out: list[str] = []
+    for o in _DEFAULT_CORS_ORIGINS + extra:
+        if o not in seen:
+            seen.add(o)
+            out.append(o)
+    return out
+
+
 app = FastAPI(title="Local Agent", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

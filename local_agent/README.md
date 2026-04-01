@@ -41,6 +41,24 @@ You can override the base URL with:
 NEXT_PUBLIC_LOCAL_AGENT_URL=http://127.0.0.1:8765
 ```
 
+## Deployed https:// UI + local agent on your PC
+
+If the Next.js app is served at **https://your-domain.com** but you still want gift/cities pipelines to talk to **127.0.0.1:8765** on your machine:
+
+1. **Web build** — set hostname(s) (no scheme), comma-separated:
+   ```
+   NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS=dev.funbloomstudio.com
+   ```
+   (`deploy/build-and-upload.bat` sets this for dev.funbloomstudio.com by default.)
+
+2. **Local agent** — allow that browser `Origin` in CORS (full URL with `https://`):
+   ```
+   LOCAL_AGENT_EXTRA_CORS_ORIGINS=https://dev.funbloomstudio.com
+   ```
+   (`local_agent/run.bat` sets this by default for the same host. For manual uvicorn, export the variable before starting.)
+
+Requests still hit **your PC’s** loopback; `ensure_localhost` only allows connections from 127.0.0.1/::1.
+
 ## Approval flow
 The UI approves a project root by calling:
 ```

@@ -393,7 +393,7 @@ export function PipelinePageContent({
     if (!isLocalAgentContext()) {
       setLocalAgentOk(false);
       setLocalAgentError(
-        "Gift/cities file tools only work when you open the app from http://localhost (Next.js dev or local build) with the local agent running on your PC. A deployed https:// site cannot use the browser’s 127.0.0.1 agent."
+        "Gift/cities file tools need the local agent on your PC. From http://localhost, this works automatically. From a deployed https:// URL, set NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS to your hostname at web build time and LOCAL_AGENT_EXTRA_CORS_ORIGINS on the agent (see local_agent/README.md)."
       );
       return;
     }

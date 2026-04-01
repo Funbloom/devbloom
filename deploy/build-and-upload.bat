@@ -43,6 +43,8 @@ echo [1/8] Building web (Next.js) with API URL: %PRODUCTION_API_URL%
 cd "%ROOT%\web"
 set NEXT_PUBLIC_API_URL_BASE=%PRODUCTION_API_URL%
 set NEXT_PUBLIC_API_URL=%PRODUCTION_API_URL%
+:: Hostnames allowed to use the local agent in the browser (comma-separated). Matches LOCAL_AGENT_EXTRA_CORS_ORIGINS on the agent. Clear with set NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS= before build to disable.
+if not defined NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS set NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS=dev.funbloomstudio.com
 call npm ci
 call npm run build
 if errorlevel 1 ( echo Build failed. & exit /b 1 )

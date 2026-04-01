@@ -128,6 +128,15 @@ body {
   flex-shrink: 0;
 }
 
+.app-header-local-agent--inactive {
+  opacity: 0.72;
+  font-size: 11px;
+}
+
+.app-header-local-agent--inactive .app-header-local-agent-dot {
+  background: #64748b !important;
+}
+
 .app-header-page {
   min-width: 100px;
   padding: 8px 14px;

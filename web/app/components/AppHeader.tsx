@@ -38,10 +38,11 @@ export function AppHeader() {
   const [games, setGames] = useState<GameInfo[]>([]);
   const [pipelinesByGame, setPipelinesByGame] = useState<Record<string, PipelineInfo[]>>({});
   const [localAgentOk, setLocalAgentOk] = useState(false);
-  const [localAgentUi, setLocalAgentUi] = useState(false);
+  /** This tab’s hostname may call the agent on 127.0.0.1 (localhost or NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS). */
+  const [localAgentEligible, setLocalAgentEligible] = useState(false);
 
   useEffect(() => {
-    setLocalAgentUi(isLocalAgentContext());
+    setLocalAgentEligible(isLocalAgentContext());
   }, []);
 
   useEffect(() => {
@@ -115,7 +116,7 @@ export function AppHeader() {
   }, [loading, authUser, user]);
 
   useEffect(() => {
-    if (!localAgentUi) return;
+    if (!localAgentEligible) return;
     let cancelled = false;
     const check = async () => {
       const ok = await localAgent.health();
@@ -127,7 +128,7 @@ export function AppHeader() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [localAgentUi]);
+  }, [localAgentEligible]);
 
   const headerTitle = activeProjectName
     ? `DevBloom Studio (${activeProjectName})`
@@ -140,18 +141,26 @@ export function AppHeader() {
         <Link href="/" className="app-header-title">
           {headerTitle}
         </Link>
-        {localAgentUi && (
-          <div
-            className="app-header-local-agent"
-            title={localAgentOk ? "Local agent online" : "Local agent offline"}
-          >
-            <span
-              className="app-header-local-agent-dot"
-              style={{ background: localAgentOk ? "#22c55e" : "#ef4444" }}
-            />
-            Local Agent
-          </div>
-        )}
+        <div
+          className={`app-header-local-agent${localAgentEligible ? "" : " app-header-local-agent--inactive"}`}
+          title={
+            localAgentEligible
+              ? localAgentOk
+                ? "Local agent online (this PC, port 8765)"
+                : "Local agent offline — start it on this machine (e.g. local_agent/run.bat)"
+              : "Gift/cities file tools use a small app on your PC (127.0.0.1:8765). On this host the UI does not call it — use localhost or set NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS when building the web app."
+          }
+        >
+          <span
+            className="app-header-local-agent-dot"
+            style={
+              localAgentEligible
+                ? { background: localAgentOk ? "#22c55e" : "#ef4444" }
+                : undefined
+            }
+          />
+          {localAgentEligible ? "Local Agent" : "Local agent — N/A on this host"}
+        </div>
       </div>
       <nav className="app-header-nav">
         {PAGES.map(({ path, label }) => {

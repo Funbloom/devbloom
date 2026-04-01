@@ -3,21 +3,33 @@ const LOCAL_AGENT_BASE =
 
 const LOCAL_PROJECT_PATHS_KEY = "localProjectPaths";
 
+function extraLocalAgentPageHosts(): Set<string> {
+  const raw = process.env.NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS || "";
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
 /**
- * The local agent binds to 127.0.0.1 and only allows browser origins on localhost.
- * A page served from https://your-domain.com must not call it: that would hit the user's
- * own machine (or fail CORS), not the server.
+ * True when this browser tab may call the local agent (127.0.0.1 on the user's PC).
+ * - Always true for localhost / 127.0.0.1.
+ * - Also true when the page hostname is listed in NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS (build-time),
+ *   if the agent allows that origin via LOCAL_AGENT_EXTRA_CORS_ORIGINS.
  */
 export function isLocalAgentContext(): boolean {
   if (typeof window === "undefined") return false;
-  const h = window.location.hostname;
-  return h === "localhost" || h === "127.0.0.1";
+  const h = window.location.hostname.toLowerCase();
+  if (h === "localhost" || h === "127.0.0.1") return true;
+  return extraLocalAgentPageHosts().has(h);
 }
 
 function assertLocalAgentContext(): void {
   if (!isLocalAgentContext()) {
     throw new Error(
-      "Local agent is only available when you open the app from http://localhost or http://127.0.0.1 on your PC."
+      "Local agent is not enabled for this site host. Use http://localhost, or set NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS at build time and LOCAL_AGENT_EXTRA_CORS_ORIGINS on the agent (see local_agent/README.md)."
     );
   }
 }
