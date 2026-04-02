@@ -16,6 +16,7 @@ import {
   uploadImageToCloud,
 } from "./client";
 import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
+import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
 import { DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
 import { useAuth } from "../contexts/AuthContext";
 import { fetchApi } from "../lib/api";
@@ -222,13 +223,30 @@ export default function ImageGenPage() {
     void loadDefaults();
   }, [session]);
 
+  const imageTabStylePrefHydrated = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
     getStyles().then((data) => {
       if (!cancelled) setStyles(data);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    if (styles.length === 0) return;
+    if (!imageTabStylePrefHydrated.current) {
+      imageTabStylePrefHydrated.current = true;
+      const saved = readImagegenMainStyleId();
+      if (saved && styles.some((s) => s.id === saved)) {
+        setSelectedStyleId(saved);
+        return;
+      }
+    }
+    writeImagegenMainStyleId(selectedStyleId);
+  }, [styles, selectedStyleId]);
 
   useEffect(() => {
     if (!projectKey) return;

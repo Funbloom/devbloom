@@ -6,8 +6,8 @@
       "pipelines": [
         {
           "key": "gift_images",
-          "name": "Gift Images",
-          "description": "Generate gift images from an input JSON file."
+          "name": "Gifts",
+          "description": "Generate and edit gifts from an input JSON file."
         },
         {
           "key": "cities",

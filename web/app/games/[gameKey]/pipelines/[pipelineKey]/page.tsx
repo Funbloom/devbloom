@@ -1,7 +1,10 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useLayoutEffect, useRef, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { fetchApi } from "../../../../lib/api";
+import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../../../../lib/imagegenMainStyle";
+import type { Style } from "../../../../storyboard/types";
 import { localAgent, getLocalProjectPath, isLocalAgentContext } from "../../../../lib/localAgentClient";
 
 function resolveGiftImageFileName(g: Record<string, unknown>): string | null {
@@ -20,6 +23,165 @@ function parseStringArray(v: unknown): string[] {
 }
 
 const REL_GIFT_IMAGES_DIR = "Assets/StreamingAssets/Gifts/Images";
+
+/** Appended to gift image prompts so the model returns one scene, not a collage / grid / comic strip. */
+const GIFT_IMAGE_SINGLE_SUBJECT_SUFFIX =
+  " Single image only: one clear focal subject, one scene. No collage, photo grid, comic strip, split panels, or tiled layout.";
+const REL_LOCATION_UPDATE_IMAGES_DIR = "Assets/StreamingAssets/Travel/LocationUpdateImages";
+/** Value written to cities.json `image` for generated / auto-resolved assets (under StreamingAssets). */
+const LOC_UPDATE_JSON_PATH_PREFIX = "Travel/LocationUpdateImages";
+
+/** Appended to every location-update image generation prompt. */
+const LOCATION_UPDATE_IMAGE_SCENE_CONSTRAINTS =
+  "Do not show a main character or any prominent person; no portraits or selfie-style framing. " +
+  "No text, letters, captions, watermarks in the image.";
+
+const LOC_UPDATE_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "as", "by", "with", "from",
+  "is", "was", "are", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did",
+  "will", "would", "could", "should", "may", "might", "must", "shall", "can",
+  "i", "im", "ive", "ill", "id", "you", "your", "me", "my", "we", "our", "they", "their", "it", "its",
+  "this", "that", "these", "those", "some", "any", "no", "not", "just", "like", "about", "into",
+  "someone", "something", "everyone", "anyone", "everybody", "told", "said", "know", "think", "used", "get", "got",
+  "mind", "blown", "really", "very", "also", "too", "so", "then", "than", "here", "there", "where", "when",
+  "what", "which", "who", "how", "why",
+]);
+
+const LOC_UPDATE_THEMATIC_TAIL = new Set([
+  "station", "museum", "park", "cathedral", "market", "tower", "palace", "garden", "beach", "square", "bridge",
+  "gallery", "castle", "temple", "mosque", "fair", "hall", "church", "cafe", "coffee", "restaurant", "shop",
+  "monument", "statue", "fountain", "harbor", "harbour", "viewpoint", "trail", "walk",
+]);
+
+/** Higher = better slug tail when multiple thematic pairs exist (e.g. train_station beats world_fair). */
+const LOC_UPDATE_THEMATIC_RANK: Record<string, number> = {
+  station: 6,
+  museum: 6,
+  gallery: 6,
+  cathedral: 6,
+  park: 5,
+  bridge: 5,
+  market: 5,
+  tower: 5,
+  palace: 5,
+  castle: 5,
+  beach: 4,
+  square: 4,
+  garden: 4,
+  monument: 4,
+  statue: 4,
+  harbor: 4,
+  harbour: 4,
+  viewpoint: 4,
+  trail: 4,
+  walk: 3,
+  temple: 3,
+  mosque: 3,
+  hall: 3,
+  church: 3,
+  cafe: 3,
+  coffee: 3,
+  restaurant: 3,
+  shop: 3,
+  fountain: 3,
+  fair: 2,
+};
+
+function basenameOnly(pathOrName: string): string {
+  const t = pathOrName.trim().replace(/\\/g, "/");
+  const seg = t.split("/").pop() || t;
+  return seg.trim();
+}
+
+function isSafeImageBasename(name: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name) && name.length <= 120;
+}
+
+function sanitizeCityStub(cityId: string): string {
+  const s = cityId.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+  return s.slice(0, 40) || "city";
+}
+
+function locationUpdateRowKey(cityId: string, idx: number): string {
+  return `${cityId}|${idx}`;
+}
+
+function stripDiacriticsLower(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+}
+
+/** Derive a short snake_case tail from update text (e.g. train_station from Musée d'Orsay / train station story). */
+function slugFromLocationUpdateText(text: string): string {
+  const norm = stripDiacriticsLower(text)
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = norm.split(" ").filter((w) => w.length > 0);
+  const sig = tokens.filter((w) => w.length >= 3 && !LOC_UPDATE_STOPWORDS.has(w));
+  const pairs: Array<[string, string]> = [];
+  for (let i = 0; i < sig.length - 1; i++) {
+    pairs.push([sig[i], sig[i + 1]]);
+  }
+  let bestPair: [string, string] | null = null;
+  let bestRank = -1;
+  let bestJ = -1;
+  for (let j = 0; j < pairs.length; j++) {
+    const [a, b] = pairs[j];
+    if (a.length < 3 || b.length < 4 || !LOC_UPDATE_THEMATIC_TAIL.has(b)) continue;
+    const rank = LOC_UPDATE_THEMATIC_RANK[b] ?? 3;
+    if (rank > bestRank || (rank === bestRank && j > bestJ)) {
+      bestRank = rank;
+      bestJ = j;
+      bestPair = [a, b];
+    }
+  }
+  if (bestPair) {
+    return `${bestPair[0]}_${bestPair[1]}`.slice(0, 64);
+  }
+  for (let j = pairs.length - 1; j >= 0; j--) {
+    const [a, b] = pairs[j];
+    if (a.length >= 4 && b.length >= 4) {
+      return `${a}_${b}`.slice(0, 64);
+    }
+  }
+  const longOnes = sig.filter((w) => w.length >= 4).slice(0, 2);
+  if (longOnes.length >= 2) return `${longOnes[0]}_${longOnes[1]}`.slice(0, 64);
+  if (longOnes.length === 1) return longOnes[0].slice(0, 48);
+  const shortPair = sig.slice(0, 2).join("_");
+  return (shortPair || "update").slice(0, 48);
+}
+
+function suggestLocationUpdateBasename(cityId: string, updateIndex: number, text: string): string {
+  const city = sanitizeCityStub(cityId);
+  const tail = slugFromLocationUpdateText(text);
+  let stem = `${city}_${tail}`.replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 76);
+  if (!stem) stem = `${city}_update_${updateIndex}`;
+  return `${stem}.png`;
+}
+
+function uniqueLocationUpdateBasename(stemWithExt: string, existingLower: Set<string>): string {
+  const stem = stemWithExt.replace(/\.png$/i, "").replace(/\.jpg$/i, "").replace(/\.jpeg$/i, "");
+  let n = 0;
+  let name = `${stem}.png`;
+  while (existingLower.has(name.toLowerCase())) {
+    n += 1;
+    name = `${stem}_${n}.png`;
+  }
+  return name;
+}
+
+function jsonImagePathForLocationUpdate(diskBasename: string): string {
+  const base = basenameOnly(diskBasename);
+  return `${LOC_UPDATE_JSON_PATH_PREFIX}/${base}`;
+}
+
+function isPlaceholderLocationImage(base: string): boolean {
+  const b = base.toLowerCase();
+  return b === "placeholder.jpg" || b === "placeholder.jpeg" || b === "placeholder.png";
+}
 
 /** Match `image_exists` from `_normalize_gift_catalog_entry` by listing the gift images folder (one request). */
 async function applyGiftImageExistsFromProject(
@@ -67,12 +229,17 @@ function deriveGiftMetadataForCity(giftId: string, cityDisplayName: string): {
   displayName: string;
   description: string;
   activityTags: string[];
+  /** Short prompt for image gen only; catalog `description` stays long for search/UX. */
+  imagePrompt: string;
 } {
   const displayName = humanizeGiftId(giftId);
   const cityLabel = cityDisplayName.trim() || "this destination";
   const description =
     `${displayName} is a souvenir-style collectible tied to ${cityLabel}. ` +
     `While exploring ${cityLabel}, try a short themed walk, stop at a viewpoint or park, browse a local craft or book shop, taste a regional snack, and take photos in areas that fit the gift's theme—all light activities visitors can do on location.`;
+  const imagePrompt =
+    `Souvenir collectible "${displayName}" themed to ${cityLabel}: one iconic object, mascot, or stylized emblem, ` +
+    `centered composition, simple background, souvenir icon style.`;
   const fromId = giftId
     .toLowerCase()
     .split(/[_\s.-]+/)
@@ -86,7 +253,7 @@ function deriveGiftMetadataForCity(giftId: string, cityDisplayName: string): {
     0,
     8
   );
-  return { displayName, description, activityTags };
+  return { displayName, description, activityTags, imagePrompt };
 }
 
 function joinPlatformPath(base: string | null, filename: string): string | null {
@@ -101,7 +268,6 @@ function dirFromPath(path: string): string {
 }
 
 type PipelineInfo = { key: string; name: string; description?: string };
-type StyleInfo = { id: string; name: string; prompt?: string };
 type GiftItem = {
   id: string;
   displayName: string;
@@ -170,6 +336,10 @@ export function PipelinePageContent({
   gameKey: string;
   pipelineKey: string;
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const giftImagesDeepLinkQ = searchParams.get("q")?.trim() ?? "";
+  const giftImagesDeepLinkTab = searchParams.get("giftTab")?.trim() ?? "";
   const [pipeline, setPipeline] = useState<PipelineInfo | null>(null);
   const [inputs, setInputs] = useState<string[]>([]);
   const [selected, setSelected] = useState("");
@@ -198,7 +368,14 @@ export function PipelinePageContent({
   const [updateLocStatus, setUpdateLocStatus] = useState<string | null>(null);
   const [isUpdatingLoc, setIsUpdatingLoc] = useState(false);
   const [updateLocCount, setUpdateLocCount] = useState("3");
-  const [updateLocReplace, setUpdateLocReplace] = useState(false);
+  const [locationUpdateAction, setLocationUpdateAction] = useState<
+    "add_new" | "append_new" | "update_images" | "recreate_images"
+  >("append_new");
+  const [locationUpdateImageGenNotes, setLocationUpdateImageGenNotes] = useState("");
+  const [locationUpdateImageStyleId, setLocationUpdateImageStyleId] = useState("");
+  /** Same pattern as ImageGen Image tab: hydrate from localStorage once, then persist dropdown changes. */
+  const locationUpdateImageStyleHydrated = useRef(false);
+  const [pipelineGenerationLog, setPipelineGenerationLog] = useState("");
   const [citiesToolTab, setCitiesToolTab] = useState<"create" | "updates" | "pipelines">("create");
   const [missingGiftsPipelineStatus, setMissingGiftsPipelineStatus] = useState<string | null>(null);
   const [isCreatingMissingGifts, setIsCreatingMissingGifts] = useState(false);
@@ -234,7 +411,7 @@ export function PipelinePageContent({
   const [localAgentError, setLocalAgentError] = useState<string | null>(null);
   const [giftToolTab, setGiftToolTab] = useState<"create" | "update">("create");
   const [selectedGiftIds, setSelectedGiftIds] = useState<Record<string, boolean>>({});
-  const [giftStyles, setGiftStyles] = useState<StyleInfo[]>([]);
+  const [giftStyles, setGiftStyles] = useState<Style[]>([]);
   const [giftStyleId, setGiftStyleId] = useState("");
   const [giftStyleExtra, setGiftStyleExtra] = useState("");
   const [giftStyleQuality, setGiftStyleQuality] = useState("low");
@@ -243,8 +420,18 @@ export function PipelinePageContent({
   const [isGiftUpdating, setIsGiftUpdating] = useState(false);
   const [giftImageReload, setGiftImageReload] = useState(0);
   const [catalogReload, setCatalogReload] = useState(0);
+  /** Scroll container for the main city/gift list (split view or tall list). */
+  const mainListScrollRef = useRef<HTMLDivElement>(null);
+  const pendingMainListScrollTop = useRef<number | null>(null);
+  const preserveMainListScrollForNextCatalogReload = useCallback(() => {
+    const el = mainListScrollRef.current;
+    if (el) pendingMainListScrollTop.current = el.scrollTop;
+  }, []);
+
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewImageTitle, setPreviewImageTitle] = useState<string | null>(null);
+  const [locationUpdateImageBlobs, setLocationUpdateImageBlobs] = useState<Record<string, string>>({});
+  const [locationUpdateImagesLoading, setLocationUpdateImagesLoading] = useState(false);
 
   const parseCatalogText = (text: string): GiftItem[] => {
     const parsed = JSON.parse(text) as { items?: unknown; gifts?: unknown };
@@ -379,6 +566,15 @@ export function PipelinePageContent({
     if (!payload.content_base64) throw new Error("Image bytes missing.");
     return payload.content_base64;
   };
+
+  const appendPipelineLog = useCallback((line: string) => {
+    const ts = new Date().toISOString();
+    setPipelineGenerationLog((prev) => {
+      const entry = `[${ts}] ${line}`;
+      const next = prev ? `${prev}\n${entry}` : entry;
+      return next.length > 120_000 ? next.slice(next.length - 120_000) : next;
+    });
+  }, []);
 
   const parseCitiesText = (text: string): CityItem[] => {
     const parsed = JSON.parse(text) as { cities?: unknown };
@@ -604,6 +800,19 @@ export function PipelinePageContent({
     };
   }, [pipelineKey, activeProjectKeyForGame, gameDataPaths, gameDataLoadError, localAgentOk, catalogReload]);
 
+  useLayoutEffect(() => {
+    if (pipelineKey !== "gift_images" && pipelineKey !== "cities") return;
+    const y = pendingMainListScrollTop.current;
+    if (y == null || !mainListScrollRef.current) return;
+    if (pipelineKey === "cities") {
+      if ((fileCities ?? cities) == null) return;
+    } else {
+      if ((fileGifts ?? gifts) == null) return;
+    }
+    mainListScrollRef.current.scrollTop = y;
+    pendingMainListScrollTop.current = null;
+  }, [catalogReload, fileCities, cities, fileGifts, gifts, pipelineKey, linkedGiftsById]);
+
   useEffect(() => {
     if (pipelineKey !== "cities") return;
     const gift = selectedLinkedGiftId ? linkedGiftsById[selectedLinkedGiftId] : null;
@@ -634,13 +843,13 @@ export function PipelinePageContent({
   }, [pipelineKey, selectedLinkedGiftId, linkedGiftsById, gameDataPaths, selectedLinkedGiftImage]);
 
   useEffect(() => {
-    if (pipelineKey !== "gift_images") return;
+    if (pipelineKey !== "gift_images" && pipelineKey !== "cities") return;
     let cancelled = false;
     const loadStyles = async () => {
       try {
         const res = await fetchApi("/storyboard/styles");
         if (!res.ok) return;
-        const data = (await res.json()) as StyleInfo[];
+        const data = (await res.json()) as Style[];
         if (!cancelled) {
           setGiftStyles(Array.isArray(data) ? data : []);
         }
@@ -653,6 +862,32 @@ export function PipelinePageContent({
       cancelled = true;
     };
   }, [pipelineKey]);
+
+  useEffect(() => {
+    if (pipelineKey !== "cities") {
+      locationUpdateImageStyleHydrated.current = false;
+      return;
+    }
+    if (giftStyles.length === 0) return;
+    if (!locationUpdateImageStyleHydrated.current) {
+      locationUpdateImageStyleHydrated.current = true;
+      const saved = readImagegenMainStyleId();
+      if (saved && giftStyles.some((s) => s.id === saved)) {
+        setLocationUpdateImageStyleId(saved);
+        return;
+      }
+    }
+    writeImagegenMainStyleId(locationUpdateImageStyleId || "");
+  }, [pipelineKey, giftStyles, locationUpdateImageStyleId]);
+
+  useEffect(() => {
+    if (pipelineKey !== "gift_images") return;
+    if (giftImagesDeepLinkQ) {
+      setGiftSearch(giftImagesDeepLinkQ);
+      setSelectedGiftIds((prev) => ({ ...prev, [giftImagesDeepLinkQ]: true }));
+    }
+    if (giftImagesDeepLinkTab === "update") setGiftToolTab("update");
+  }, [pipelineKey, giftImagesDeepLinkQ, giftImagesDeepLinkTab]);
 
   useEffect(() => {
     const load = async () => {
@@ -710,6 +945,58 @@ export function PipelinePageContent({
       cancelled = true;
     };
   }, [gifts, fileGifts, pipelineKey, catalogPath, gameKey, giftImageReload, gameDataPaths]);
+
+  useEffect(() => {
+    if (pipelineKey !== "cities") {
+      const prevUrls = Object.values(locationUpdateImageBlobs);
+      prevUrls.forEach((url) => URL.revokeObjectURL(url));
+      setLocationUpdateImageBlobs({});
+      setLocationUpdateImagesLoading(false);
+      return;
+    }
+    const prevUrls = Object.values(locationUpdateImageBlobs);
+    prevUrls.forEach((url) => URL.revokeObjectURL(url));
+    setLocationUpdateImageBlobs({});
+
+    const projectRoot = gameDataPaths?.projectRoot;
+    const all = fileCities ?? cities;
+    if (!projectRoot || !all?.length) {
+      setLocationUpdateImagesLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLocationUpdateImagesLoading(true);
+
+    const loadImages = async () => {
+      const entries: Array<[string, string]> = [];
+      for (const city of all) {
+        const cid = city.name_id;
+        if (!cid) continue;
+        for (let idx = 0; idx < city.location_updates.length; idx++) {
+          const u = city.location_updates[idx];
+          const base = basenameOnly((u.image || "").trim()).trim();
+          if (!base || !isSafeImageBasename(base)) continue;
+          const relPath = `${REL_LOCATION_UPDATE_IMAGES_DIR}/${base}`;
+          try {
+            const blob = await localAgent.readBinary(projectRoot, relPath);
+            if (cancelled) return;
+            entries.push([locationUpdateRowKey(cid, idx), URL.createObjectURL(blob)]);
+          } catch {
+            // File missing or unreadable
+          }
+        }
+      }
+      if (!cancelled) {
+        setLocationUpdateImageBlobs(Object.fromEntries(entries));
+        setLocationUpdateImagesLoading(false);
+      }
+    };
+    void loadImages();
+    return () => {
+      cancelled = true;
+    };
+  }, [pipelineKey, cities, fileCities, gameDataPaths, catalogReload]);
 
   useEffect(() => {
     if (pipelineKey === "gift_images") return;
@@ -783,6 +1070,7 @@ export function PipelinePageContent({
       setStatus("Local project path is not available.");
       return;
     }
+    preserveMainListScrollForNextCatalogReload();
     setGeneratingGiftId(giftId);
     setStatus("Generating gift image...");
     try {
@@ -792,7 +1080,7 @@ export function PipelinePageContent({
       if (!gift) throw new Error("Gift not found.");
       const name = String(gift["displayName"] || gift["name"] || giftId).trim();
       const desc = String(gift["description"] || "").trim();
-      const prompt = desc ? `${name}. ${desc}` : name;
+      const prompt = `${desc ? `${name}. ${desc}` : name}${GIFT_IMAGE_SINGLE_SUBJECT_SUFFIX}`;
       const base64 = await generateImageBytes(prompt, "low", activeProjectKeyForGame);
       const filename = `${giftId}.png`;
       await localAgent.writeBinary(
@@ -805,6 +1093,7 @@ export function PipelinePageContent({
       await writeGiftCatalogRaw(giftData);
       setCatalogReload((prev) => prev + 1);
       setGiftImageReload((prev) => prev + 1);
+      appendPipelineLog(`image: ${REL_GIFT_IMAGES_DIR}/${filename} (generated) [gift ${giftId}]`);
       setStatus("Gift image generated.");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Generate failed.";
@@ -814,7 +1103,9 @@ export function PipelinePageContent({
     }
   };
 
-  const openEditGift = (gift: GiftItem) => {
+  const openEditGift = (
+    gift: Pick<GiftItem, "id" | "displayName" | "description" | "activityTags" | "priority" | "weight">
+  ) => {
     setEditGiftId(gift.id || "");
     setEditGiftDisplayName(gift.displayName || "");
     setEditGiftDescription(gift.description || "");
@@ -865,6 +1156,8 @@ export function PipelinePageContent({
     imageMode: "file" | "generate";
     imageFile: File | null;
     forceGenerate: boolean;
+    /** If set, used as the image generation prompt instead of displayName + description (catalog text unchanged). */
+    imagePrompt?: string;
   }) => {
     if (!gameDataPaths?.projectRoot) throw new Error("Local project path is not available.");
     const data = await readGiftCatalogRaw();
@@ -894,7 +1187,9 @@ export function PipelinePageContent({
     } else if (opts.imageMode === "generate" && opts.forceGenerate) {
       const display = String(newGift.displayName);
       const desc = String(newGift.description || "");
-      const promptBase = `${display}${desc ? `. ${desc}` : ""}`;
+      const base =
+        (opts.imagePrompt && opts.imagePrompt.trim()) || `${display}${desc ? `. ${desc}` : ""}`;
+      const promptBase = `${base.trim()}${GIFT_IMAGE_SINGLE_SUBJECT_SUFFIX}`;
       const base64 = await generateImageBytes(promptBase, "low", activeProjectKeyForGame);
       filename = `${gid}.png`;
       await localAgent.writeBinary(root, `Assets/StreamingAssets/Gifts/Images/${filename}`, base64);
@@ -903,6 +1198,12 @@ export function PipelinePageContent({
     items.push(newGift);
     setGiftItems(data, key, items);
     await writeGiftCatalogRaw(data);
+    appendPipelineLog(`data: gift catalog entry "${gid}" (${String(newGift.displayName || "")})`);
+    if (filename) {
+      appendPipelineLog(
+        `image: ${REL_GIFT_IMAGES_DIR}/${filename} (${opts.imageMode === "file" ? "uploaded" : "generated"})`
+      );
+    }
   };
 
   const handleCreateGift = async (forceGenerate: boolean) => {
@@ -931,6 +1232,7 @@ export function PipelinePageContent({
     const tagsList = splitCsvToList(createGiftActivityTags);
     setCreateGiftStatus(forceGenerate ? "Creating + generating..." : "Creating...");
     try {
+      preserveMainListScrollForNextCatalogReload();
       await createGiftInCatalogCore({
         giftId: createGiftId.trim(),
         displayName: createGiftDisplayName.trim() || createGiftId.trim(),
@@ -985,6 +1287,7 @@ export function PipelinePageContent({
       return;
     }
     setIsCreatingMissingGifts(true);
+    preserveMainListScrollForNextCatalogReload();
     setMissingGiftsPipelineStatus(`Creating ${missingById.size} missing gift(s) (same as red link: catalog + generated image)...`);
     let ok = 0;
     const errors: string[] = [];
@@ -1003,6 +1306,7 @@ export function PipelinePageContent({
           imageMode: "generate",
           imageFile: null,
           forceGenerate: true,
+          imagePrompt: meta.imagePrompt,
         });
         ok += 1;
         setCatalogReload((prev) => prev + 1);
@@ -1050,6 +1354,7 @@ export function PipelinePageContent({
 
     setEditGiftStatus("Saving...");
     try {
+      preserveMainListScrollForNextCatalogReload();
       const data = await readGiftCatalogRaw();
       const { key, items } = getGiftItems(data);
       const gift = items.find((g) => String(g.id || "").trim() === editGiftId.trim());
@@ -1074,7 +1379,7 @@ export function PipelinePageContent({
       } else if (editGiftImageMode === "generate") {
         const display = String(gift["displayName"] || editGiftId.trim());
         const desc = String(gift["description"] || "");
-        const promptBase = `${display}${desc ? `. ${desc}` : ""}`;
+        const promptBase = `${display}${desc ? `. ${desc}` : ""}${GIFT_IMAGE_SINGLE_SUBJECT_SUFFIX}`;
         const base64 = await generateImageBytes(promptBase, "low", activeProjectKeyForGame);
         filename = `${editGiftId.trim()}.png`;
         await localAgent.writeBinary(
@@ -1088,6 +1393,12 @@ export function PipelinePageContent({
       await writeGiftCatalogRaw(data);
       setCatalogReload((prev) => prev + 1);
       setGiftImageReload((prev) => prev + 1);
+      appendPipelineLog(`data: gift catalog updated "${editGiftId.trim()}"`);
+      if (filename) {
+        appendPipelineLog(
+          `image: ${REL_GIFT_IMAGES_DIR}/${filename} (${editGiftImageMode === "file" ? "uploaded" : "generated"})`
+        );
+      }
 
       setEditGiftStatus("Gift updated.");
       setShowEditGift(false);
@@ -1104,6 +1415,7 @@ export function PipelinePageContent({
     }
     setStatus("Updating city...");
     try {
+      preserveMainListScrollForNextCatalogReload();
       const data = await readCitiesRaw();
       const citiesValue = data["cities"];
       const citiesList = Array.isArray(citiesValue) ? (citiesValue as Record<string, unknown>[]) : [];
@@ -1117,6 +1429,7 @@ export function PipelinePageContent({
       data["cities"] = citiesList;
       await writeCitiesRaw(data);
       setCatalogReload((prev) => prev + 1);
+      appendPipelineLog(`data: cities.json — added gift "${giftId}" to city "${cityId}".`);
       setStatus("City updated.");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Update failed.";
@@ -1159,6 +1472,7 @@ export function PipelinePageContent({
     setIsBatchCreating(true);
     setBatchCityStatus("Running batch creation...");
     try {
+      preserveMainListScrollForNextCatalogReload();
       const giftsData = await readGiftCatalogRaw();
       const { key, items } = getGiftItems(giftsData);
       const citiesData = await readCitiesRaw();
@@ -1204,6 +1518,7 @@ export function PipelinePageContent({
         );
         gift["imageFileName"] = filename;
         items.push(gift);
+        appendPipelineLog(`image: ${REL_GIFT_IMAGES_DIR}/${filename} (generated) [batch gift ${gid}]`);
       }
       for (const city of createdCities) {
         citiesList.push(city);
@@ -1214,6 +1529,9 @@ export function PipelinePageContent({
       await writeCitiesRaw(citiesData);
       setCatalogReload((prev) => prev + 1);
       setGiftImageReload((prev) => prev + 1);
+      appendPipelineLog(
+        `data: batch create — ${createdGifts.length} gift(s) in catalog, ${createdCities.length} new cities in cities.json.`
+      );
       setBatchCityStatus(`Created ${createdCities.length} cities.`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Batch failed.";
@@ -1242,7 +1560,11 @@ export function PipelinePageContent({
   };
 
   const handleBuildLocationPrompt = () => {
-    const selected = (cities ?? []).filter((c) => selectedCityIds[c.name_id]);
+    if (locationUpdateAction === "update_images" || locationUpdateAction === "recreate_images") {
+      setUpdateLocStatus("Build prompt applies to Add new or Append new only.");
+      return;
+    }
+    const selected = allCityItems.filter((c) => selectedCityIds[c.name_id]);
     if (selected.length === 0) {
       setUpdateLocStatus("Select at least one city.");
       return;
@@ -1253,12 +1575,155 @@ export function PipelinePageContent({
     setUpdateLocStatus(null);
   };
 
+  const handleExecuteLocationUpdateImages = async (
+    recreateExisting: boolean,
+    onlyRow?: { cityId: string; index: number }
+  ) => {
+    if (!gameDataPaths?.projectRoot) {
+      setUpdateLocStatus("Local project path not available.");
+      return;
+    }
+    const root = gameDataPaths.projectRoot;
+    const selectedIds = new Set(
+      allCityItems.filter((c) => selectedCityIds[c.name_id]).map((c) => c.name_id)
+    );
+    if (onlyRow) {
+      if (!selectedIds.has(onlyRow.cityId)) {
+        setUpdateLocStatus("Select this city with the checkbox first.");
+        return;
+      }
+    } else if (selectedIds.size === 0) {
+      setUpdateLocStatus("Select at least one city.");
+      return;
+    }
+    preserveMainListScrollForNextCatalogReload();
+    const existingLower = new Set<string>();
+    try {
+      const { entries } = await localAgent.listDir(root, REL_LOCATION_UPDATE_IMAGES_DIR);
+      for (const e of entries) {
+        if (!e.is_file) continue;
+        if (e.name.toLowerCase().endsWith(".meta")) continue;
+        existingLower.add(e.name.toLowerCase());
+      }
+    } catch {
+      // Folder may not exist yet; treat as empty.
+    }
+    setIsUpdatingLoc(true);
+    setUpdateLocStatus(
+      onlyRow
+        ? "Recreating this location image..."
+        : recreateExisting
+          ? "Regenerating location update images (overwrite if present)..."
+          : "Scanning location updates for missing images..."
+    );
+    let generated = 0;
+    let skipped = 0;
+    try {
+      const citiesData = await readCitiesRaw();
+      const citiesValue = citiesData["cities"];
+      const citiesList = Array.isArray(citiesValue) ? (citiesValue as Record<string, unknown>[]) : [];
+      for (const city of citiesList) {
+        const cityId = String(city.nameId || city.name_id || "").trim();
+        if (!cityId || !selectedIds.has(cityId)) continue;
+        if (onlyRow && cityId !== onlyRow.cityId) continue;
+        const rawUpdates = city.locationUpdates;
+        const arr = Array.isArray(rawUpdates) ? (rawUpdates as Record<string, unknown>[]) : [];
+        for (let i = 0; i < arr.length; i++) {
+          if (onlyRow && i !== onlyRow.index) continue;
+          const u = arr[i];
+          if (!u || typeof u !== "object") continue;
+          const text = String(u.text ?? "").trim();
+          if (!text) continue;
+          const rawImage = String(u.image ?? "").trim();
+          const base = basenameOnly(rawImage).trim();
+          const isPlaceholder = isPlaceholderLocationImage(base);
+          const useSemanticBasename = isPlaceholder || !base || !isSafeImageBasename(base);
+          const semanticSuggested = suggestLocationUpdateBasename(cityId, i, text);
+          const diskBasename = useSemanticBasename
+            ? recreateExisting
+              ? semanticSuggested
+              : uniqueLocationUpdateBasename(semanticSuggested, existingLower)
+            : base;
+          if (!recreateExisting && existingLower.has(diskBasename.toLowerCase())) {
+            if (isPlaceholder) {
+              u.image = jsonImagePathForLocationUpdate(diskBasename);
+              appendPipelineLog(
+                `location image: replaced placeholder with existing ${REL_LOCATION_UPDATE_IMAGES_DIR}/${diskBasename} [${cityId}]`
+              );
+            } else {
+              skipped += 1;
+              appendPipelineLog(
+                `location image skip (exists): ${REL_LOCATION_UPDATE_IMAGES_DIR}/${diskBasename} [${cityId}]`
+              );
+            }
+            continue;
+          }
+          const notes = locationUpdateImageGenNotes.trim();
+          const styleObj = giftStyles.find((s) => s.id === locationUpdateImageStyleId);
+          const stylePrompt = styleObj?.prompt?.trim() ?? "";
+          const promptParts = [text];
+          if (notes) promptParts.push(notes);
+          if (stylePrompt) promptParts.push(stylePrompt);
+          promptParts.push(LOCATION_UPDATE_IMAGE_SCENE_CONSTRAINTS);
+          const imagePrompt = promptParts.join(". ");
+          const base64 = await generateImageBytes(imagePrompt, "low", activeProjectKeyForGame);
+          const rel = `${REL_LOCATION_UPDATE_IMAGES_DIR}/${diskBasename}`;
+          const alreadyOnDisk = existingLower.has(diskBasename.toLowerCase());
+          await localAgent.writeBinary(root, rel, base64);
+          const storedRel = jsonImagePathForLocationUpdate(diskBasename);
+          u.image = storedRel;
+          existingLower.add(diskBasename.toLowerCase());
+          generated += 1;
+          const verb =
+            recreateExisting && alreadyOnDisk ? "regenerated" : "generated";
+          appendPipelineLog(
+            `image: ${rel} (${verb}${stylePrompt ? " + preset style" : ""}${notes ? " + notes" : ""}) [${cityId}] → ${storedRel}`
+          );
+        }
+      }
+      citiesData["cities"] = citiesList;
+      await writeCitiesRaw(citiesData);
+      setCatalogReload((prev) => prev + 1);
+      if (onlyRow) {
+        appendPipelineLog(
+          generated > 0
+            ? `data: cities.json — location image recreated [${onlyRow.cityId}] #${onlyRow.index + 1}.`
+            : `data: cities.json — location image row skipped [${onlyRow.cityId}] #${onlyRow.index + 1} (empty text).`
+        );
+        setUpdateLocStatus(
+          generated > 0 ? "Image recreated (style + notes from the left pane)." : "Nothing to recreate (empty update text)."
+        );
+      } else {
+        appendPipelineLog(
+          recreateExisting
+            ? `data: cities.json — location update images done (${generated} regenerated or created).`
+            : `data: cities.json — location update images done (${generated} generated, ${skipped} already on disk).`
+        );
+        setUpdateLocStatus(
+          recreateExisting
+            ? `Done. ${generated} image(s) regenerated or created (existing files overwritten in place).`
+            : `Done. Generated ${generated} image(s); skipped ${skipped} (file already present).`
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Update failed.";
+      setUpdateLocStatus(`Error: ${message}`);
+      appendPipelineLog(`location update images error: ${message}`);
+    } finally {
+      setIsUpdatingLoc(false);
+    }
+  };
+
   const handleExecuteLocationUpdates = async () => {
     if (!gameDataPaths?.projectRoot) {
       setUpdateLocStatus("Local project path not available.");
       return;
     }
-    const selected = (cities ?? []).filter((c) => selectedCityIds[c.name_id]);
+    if (locationUpdateAction === "update_images" || locationUpdateAction === "recreate_images") {
+      await handleExecuteLocationUpdateImages(locationUpdateAction === "recreate_images", undefined);
+      return;
+    }
+    const selected = allCityItems.filter((c) => selectedCityIds[c.name_id]);
     if (selected.length === 0) {
       setUpdateLocStatus("Select at least one city.");
       return;
@@ -1272,6 +1737,8 @@ export function PipelinePageContent({
       setUpdateLocStatus("Prompt is required.");
       return;
     }
+    const replaceExisting = locationUpdateAction === "add_new";
+    preserveMainListScrollForNextCatalogReload();
     setIsUpdatingLoc(true);
     setUpdateLocStatus("Updating locationUpdates...");
     try {
@@ -1293,12 +1760,14 @@ export function PipelinePageContent({
       const citiesData = await readCitiesRaw();
       const citiesValue = citiesData["cities"];
       const citiesList = Array.isArray(citiesValue) ? (citiesValue as Record<string, unknown>[]) : [];
+      let touched = 0;
       for (const city of citiesList) {
         const cityId = String(city.nameId || city.name_id || "").trim();
         if (!cityId) continue;
         const incoming = updatesByCity[cityId] || [];
         if (incoming.length === 0) continue;
-        if (updateLocReplace) {
+        touched += 1;
+        if (replaceExisting) {
           city.locationUpdates = incoming;
         } else {
           const existing = Array.isArray(city.locationUpdates) ? city.locationUpdates : [];
@@ -1308,10 +1777,14 @@ export function PipelinePageContent({
       citiesData["cities"] = citiesList;
       await writeCitiesRaw(citiesData);
       setCatalogReload((prev) => prev + 1);
+      appendPipelineLog(
+        `data: cities.json — locationUpdates (${replaceExisting ? "replace" : "append"}) for ${touched} city/cities via LLM plan.`
+      );
       setUpdateLocStatus("locationUpdates updated.");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Update failed.";
       setUpdateLocStatus(`Error: ${message}`);
+      appendPipelineLog(`locationUpdates LLM error: ${message}`);
     } finally {
       setIsUpdatingLoc(false);
     }
@@ -1329,6 +1802,7 @@ export function PipelinePageContent({
       setGiftUpdateStatus("Select at least one gift.");
       return;
     }
+    preserveMainListScrollForNextCatalogReload();
     const selectedStyle = giftStyles.find((s) => s.id === giftStyleId);
     setIsGiftUpdating(true);
     setGiftUpdateStatus(null);
@@ -1346,7 +1820,7 @@ export function PipelinePageContent({
         if (selectedStyle?.prompt) promptParts.push(selectedStyle.prompt);
         if (giftStyleMode) promptParts.push(`Style mode: ${giftStyleMode}`);
         if (giftStyleExtra.trim()) promptParts.push(giftStyleExtra.trim());
-        const prompt = promptParts.filter(Boolean).join(". ");
+        const prompt = `${promptParts.filter(Boolean).join(". ")}${GIFT_IMAGE_SINGLE_SUBJECT_SUFFIX}`;
         try {
           const base64 = await generateImageBytes(prompt, giftStyleQuality, activeProjectKeyForGame);
           const filename = `${gid}.png`;
@@ -1356,6 +1830,7 @@ export function PipelinePageContent({
             base64
           );
           gift["imageFileName"] = filename;
+          appendPipelineLog(`image: ${REL_GIFT_IMAGES_DIR}/${filename} (generated) [batch update gift ${gid}]`);
         } catch (err) {
           const message = err instanceof Error ? err.message : "Update failed.";
           errors.push(`Gift ${gid}: ${message}`);
@@ -1379,17 +1854,65 @@ export function PipelinePageContent({
     }
   };
 
-  return (
-    <div style={{ width: "100%", maxWidth: "100vw", margin: "2rem 0", padding: "0 1rem" }}>
-      <h1 style={{ marginBottom: "0.5rem" }}>
-        {pipeline?.name ?? pipelineKey}
-      </h1>
-      {pipeline?.description && (
-        <p style={{ color: "var(--muted, #94a3b8)" }}>{pipeline.description}</p>
-      )}
+  const isSplitPipeline = pipelineKey === "gift_images" || pipelineKey === "cities";
 
-      {pipelineKey === "gift_images" || pipelineKey === "cities" ? (
-        <div style={{ marginTop: "1.5rem", display: "grid", gridTemplateColumns: "25% 75%", gap: "1rem", alignItems: "start" }}>
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: "100%",
+        padding: "0 1rem",
+        boxSizing: "border-box",
+        ...(isSplitPipeline
+          ? {
+              margin: 0,
+              height: "100dvh",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              overflow: "hidden",
+              overflowX: "hidden",
+            }
+          : { margin: "2rem 0", maxWidth: "100vw" }),
+      }}
+    >
+      {isSplitPipeline ? (
+        <>
+          <div style={{ flexShrink: 0, paddingTop: "0.35rem" }}>
+            <h1 style={{ margin: "0 0 0.35rem" }}>{pipeline?.name ?? pipelineKey}</h1>
+            {pipeline?.description && (
+              <p style={{ margin: "0 0 0.15rem", color: "var(--muted, #94a3b8)", fontSize: 14 }}>
+                {pipeline.description}
+              </p>
+            )}
+          </div>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowX: "hidden",
+              overflowY:
+                pipelineKey === "cities" && isSplitPipeline ? "hidden" : "auto",
+              marginTop: "0.25rem",
+              ...(pipelineKey === "cities" && isSplitPipeline
+                ? { display: "flex", flexDirection: "column" }
+                : {}),
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isSplitPipeline ? "minmax(0, 25%) minmax(0, 75%)" : "25% 75%",
+                gap: "1rem",
+                alignItems: isSplitPipeline ? "stretch" : "start",
+                width: "100%",
+                minWidth: 0,
+                boxSizing: "border-box",
+                ...(pipelineKey === "cities" && isSplitPipeline
+                  ? { flex: 1, minHeight: 0 }
+                  : {}),
+              }}
+            >
           <div
             style={{
               background: "rgba(15, 23, 42, 0.6)",
@@ -1398,6 +1921,12 @@ export function PipelinePageContent({
               display: "flex",
               flexDirection: "column",
               gap: "0.75rem",
+              minWidth: 0,
+              ...(isSplitPipeline && pipelineKey === "cities"
+                ? { minHeight: 0, overflowY: "auto" }
+                : isSplitPipeline
+                  ? { minHeight: 0, overflowY: "visible" }
+                  : {}),
             }}
           >
             <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
@@ -1535,7 +2064,7 @@ export function PipelinePageContent({
                     className={citiesToolTab === "pipelines" ? "sidebar-tab active" : "sidebar-tab"}
                     onClick={() => setCitiesToolTab("pipelines")}
                   >
-                    Pipelines
+                    Other Pipelines
                   </button>
                 </div>
 
@@ -1582,40 +2111,117 @@ export function PipelinePageContent({
                   <div style={{ display: "grid", gap: "0.75rem" }}>
                     <div style={{ fontWeight: 600 }}>Update locationUpdates (selected)</div>
                     <label style={{ display: "grid", gap: "0.25rem" }}>
-                      <span>Updates per city</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={updateLocCount}
-                        onChange={(e) => setUpdateLocCount(e.target.value)}
-                      />
+                      <span>Action</span>
+                      <select
+                        value={locationUpdateAction}
+                        onChange={(e) =>
+                          setLocationUpdateAction(
+                            e.target.value as
+                              | "add_new"
+                              | "append_new"
+                              | "update_images"
+                              | "recreate_images"
+                          )
+                        }
+                      >
+                        <option value="add_new">Add new (replace existing updates)</option>
+                        <option value="append_new">Append new</option>
+                        <option value="update_images">Update images</option>
+                        <option value="recreate_images">Recreate images</option>
+                      </select>
                     </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 12 }}>
-                      <input
-                        type="checkbox"
-                        checked={updateLocReplace}
-                        onChange={(e) => setUpdateLocReplace(e.target.checked)}
-                      />
-                      Replace existing updates
-                    </label>
-                    <button type="button" onClick={handleBuildLocationPrompt}>
-                      Build prompt for selected cities
-                    </button>
-                    <label style={{ display: "grid", gap: "0.25rem" }}>
-                      <span>Prompt</span>
-                      <textarea
-                        rows={6}
-                        value={updateLocPrompt}
-                        onChange={(e) => setUpdateLocPrompt(e.target.value)}
-                      />
-                    </label>
+                    {locationUpdateAction !== "update_images" &&
+                      locationUpdateAction !== "recreate_images" && (
+                      <>
+                        <label style={{ display: "grid", gap: "0.25rem" }}>
+                          <span>Updates per city</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={updateLocCount}
+                            onChange={(e) => setUpdateLocCount(e.target.value)}
+                          />
+                        </label>
+                        <button type="button" onClick={handleBuildLocationPrompt}>
+                          Build prompt for selected cities
+                        </button>
+                        <label style={{ display: "grid", gap: "0.25rem" }}>
+                          <span>Prompt</span>
+                          <textarea
+                            rows={6}
+                            value={updateLocPrompt}
+                            onChange={(e) => setUpdateLocPrompt(e.target.value)}
+                          />
+                        </label>
+                      </>
+                    )}
+                    {(locationUpdateAction === "update_images" ||
+                      locationUpdateAction === "recreate_images") && (
+                      <>
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                          {locationUpdateAction === "recreate_images" ? (
+                            <>
+                              Same prompts and paths as Update images, but always runs generation: if the PNG already
+                              exists it is overwritten with the same filename; if not, it is created. The{" "}
+                              <code style={{ fontSize: 11 }}>image</code> field is set to{" "}
+                              <code style={{ fontSize: 11 }}>Travel/LocationUpdateImages/…</code>. For placeholder or
+                              auto names, the target basename is the stable semantic name (city + text), not a uniquified
+                              variant.
+                            </>
+                          ) : (
+                            <>
+                              For each selected city update with a missing image file: generates a PNG under{" "}
+                              <code style={{ fontSize: 11 }}>{REL_LOCATION_UPDATE_IMAGES_DIR}</code> using a name like{" "}
+                              <code style={{ fontSize: 11 }}>paris_train_station.png</code> (city id prefix + words from
+                              the update text). The <code style={{ fontSize: 11 }}>image</code> field is set to{" "}
+                              <code style={{ fontSize: 11 }}>Travel/LocationUpdateImages/…</code>. Placeholder filenames
+                              are replaced with a new semantic name. You can still set an explicit safe basename to keep
+                              a chosen filename.
+                            </>
+                          )}
+                        </p>
+                        <label style={{ display: "grid", gap: "0.25rem" }}>
+                          <span>Image style (defaults from ImageGen → Image tab → Style)</span>
+                          <select
+                            value={locationUpdateImageStyleId}
+                            onChange={(e) => setLocationUpdateImageStyleId(e.target.value)}
+                          >
+                            <option value="">None</option>
+                            {giftStyles.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label style={{ display: "grid", gap: "0.25rem" }}>
+                          <span>Image generation notes (extra details, appended after the update text)</span>
+                          <textarea
+                            rows={3}
+                            value={locationUpdateImageGenNotes}
+                            onChange={(e) => setLocationUpdateImageGenNotes(e.target.value)}
+                            placeholder="e.g. golden hour, wide establishing shot of the building exterior"
+                          />
+                        </label>
+                        <p style={{ margin: 0, fontSize: 11, color: "var(--muted, #94a3b8)" }}>
+                          Every image prompt also requires: no main character / prominent people, and no text in the
+                          picture.
+                        </p>
+                      </>
+                    )}
                     <button
                       type="button"
-                      onClick={handleExecuteLocationUpdates}
+                      onClick={() => void handleExecuteLocationUpdates()}
                       disabled={isUpdatingLoc}
                     >
-                      {isUpdatingLoc ? "Executing..." : "Add Location Updates"}
+                      {isUpdatingLoc
+                        ? "Working..."
+                        : locationUpdateAction === "update_images"
+                          ? "Update missing location images"
+                          : locationUpdateAction === "recreate_images"
+                            ? "Recreate location images"
+                            : "Add Location Updates"}
                     </button>
                     {updateLocStatus && (
                       <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
@@ -1685,12 +2291,21 @@ export function PipelinePageContent({
               display: "flex",
               flexDirection: "column",
               gap: "0.75rem",
-              minHeight: 420,
+              minHeight: isSplitPipeline ? 0 : 420,
+              minWidth: 0,
+              ...(isSplitPipeline
+                ? {
+                    flex: 1,
+                    minHeight: 0,
+                    overflow: "hidden",
+                  }
+                : {}),
             }}
           >
             <input
               value={giftSearch}
               onChange={(e) => setGiftSearch(e.target.value)}
+              style={isSplitPipeline ? { width: "100%", minWidth: 0, boxSizing: "border-box", flexShrink: 0 } : undefined}
               placeholder={
                 pipelineKey === "cities"
                   ? "Search by city name..."
@@ -1698,7 +2313,7 @@ export function PipelinePageContent({
               }
             />
             {pipelineKey === "cities" && (
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", flexShrink: 0 }}>
                 <button
                   type="button"
                   onClick={() => {
@@ -1740,15 +2355,44 @@ export function PipelinePageContent({
                 </button>
               </div>
             )}
-            <div style={{ color: "var(--muted, #94a3b8)", fontSize: 12 }}>
+            <div style={{ color: "var(--muted, #94a3b8)", fontSize: 12, flexShrink: 0 }}>
               {pipelineKey === "cities"
                 ? `Showing ${filteredCityItems.length} of ${allCityItems.length} cities`
                 : `Showing ${filteredGiftItems.length} of ${allGiftItems.length} items`}
             </div>
-            <div style={{ overflowY: "auto", maxHeight: "70vh", display: "grid", gap: "1rem", paddingRight: 4 }}>
+            <div
+              ref={mainListScrollRef}
+              style={{
+                display: "grid",
+                gap: "1rem",
+                width: "100%",
+                minWidth: 0,
+                boxSizing: "border-box",
+                ...(isSplitPipeline
+                  ? {
+                      flex: 1,
+                      minHeight: 0,
+                      overflowY: "auto",
+                      overflowX: "hidden",
+                      paddingRight: 4,
+                    }
+                  : { overflowY: "auto", maxHeight: "70vh", paddingRight: 4 }),
+              }}
+            >
               {pipelineKey === "cities" ? (
-                <div style={{ display: "grid", gridTemplateColumns: "65% 35%", gap: "1rem", alignItems: "start" }}>
-                  <div style={{ display: "grid", gap: "1rem" }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: isSplitPipeline
+                      ? "minmax(0, 13fr) minmax(0, 7fr)"
+                      : "65% 35%",
+                    gap: "1rem",
+                    alignItems: "start",
+                    width: "100%",
+                    minWidth: 0,
+                  }}
+                >
+                  <div style={{ display: "grid", gap: "1rem", minWidth: 0 }}>
                     {filteredCityItems.length === 0 && <p>No matching cities found.</p>}
                     {filteredCityItems.map((city) => (
                       <div
@@ -1841,11 +2485,125 @@ export function PipelinePageContent({
                         <div style={{ color: "var(--muted, #94a3b8)", fontSize: 12 }}>
                           updates: {city.location_updates.length}
                         </div>
-                        {city.location_updates.map((u, idx) => (
-                          <div key={`${city.name_id}-${idx}`} style={{ fontSize: 13 }}>
-                            - {u.text}
-                          </div>
-                        ))}
+                        {city.location_updates.map((u, idx) => {
+                          const rowKey = locationUpdateRowKey(city.name_id, idx);
+                          const blobUrl = locationUpdateImageBlobs[rowKey];
+                          const rawImage = (u.image || "").trim();
+                          const base = basenameOnly(rawImage).trim();
+                          const nameOk = Boolean(base && isSafeImageBasename(base));
+                          const blue = "var(--header-link-color, #3b82f6)";
+                          const red = "#ef4444";
+                          const title = `Location update · ${city.display_name || city.name_id} · #${idx + 1}`;
+                          return (
+                            <div
+                              key={`${city.name_id}-${idx}`}
+                              style={{
+                                fontSize: 13,
+                                display: "flex",
+                                gap: "0.5rem",
+                                alignItems: "flex-start",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  flexShrink: 0,
+                                  width: 72,
+                                  textAlign: "center",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  alignItems: "center",
+                                  gap: 6,
+                                }}
+                              >
+                                {blobUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPreviewImageTitle(title);
+                                      setPreviewImageUrl(blobUrl);
+                                    }}
+                                    title="View image"
+                                    style={{
+                                      background: "none",
+                                      border: "none",
+                                      padding: 0,
+                                      margin: 0,
+                                      cursor: "pointer",
+                                      color: blue,
+                                      textDecoration: "underline",
+                                      font: "inherit",
+                                    }}
+                                  >
+                                    <img
+                                      src={blobUrl}
+                                      alt=""
+                                      style={{
+                                        display: "block",
+                                        width: 64,
+                                        height: 64,
+                                        objectFit: "cover",
+                                        borderRadius: 6,
+                                        border: `1px solid ${blue}`,
+                                      }}
+                                    />
+                                    <span style={{ fontSize: 11, display: "block", marginTop: 2 }}>Image</span>
+                                  </button>
+                                ) : locationUpdateImagesLoading && nameOk ? (
+                                  <span style={{ fontSize: 11, color: "var(--muted, #94a3b8)" }}>Loading…</span>
+                                ) : (
+                                  <span
+                                    role="status"
+                                    title={
+                                      !rawImage
+                                        ? "No image filename on this update"
+                                        : !nameOk
+                                          ? "Image filename is not safe to load"
+                                          : "Image file not found under Travel/LocationUpdateImages"
+                                    }
+                                    style={{
+                                      display: "inline-block",
+                                      color: red,
+                                      textDecoration: "underline",
+                                      fontSize: 11,
+                                      padding: "0.35rem",
+                                      maxWidth: 72,
+                                      wordBreak: "break-word",
+                                    }}
+                                  >
+                                    {!rawImage ? "No image" : !nameOk ? "Bad name" : "Missing file"}
+                                  </span>
+                                )}
+                                {citiesToolTab === "updates" && selectedCityIds[city.name_id] && (
+                                  <button
+                                    type="button"
+                                    title="Regenerate this image using Image style and notes from Update locationUpdates"
+                                    disabled={isUpdatingLoc || !localAgentOk}
+                                    onClick={() =>
+                                      void handleExecuteLocationUpdateImages(true, {
+                                        cityId: city.name_id,
+                                        index: idx,
+                                      })
+                                    }
+                                    style={{
+                                      fontSize: 10,
+                                      padding: "2px 6px",
+                                      borderRadius: 4,
+                                      border: "1px solid rgba(148, 163, 184, 0.45)",
+                                      background: "rgba(30, 41, 59, 0.8)",
+                                      color: "var(--muted, #e2e8f0)",
+                                      cursor: isUpdatingLoc || !localAgentOk ? "not-allowed" : "pointer",
+                                      width: "100%",
+                                      maxWidth: 72,
+                                    }}
+                                  >
+                                    Recreate
+                                  </button>
+                                )}
+                              </span>
+                              <span style={{ flex: 1, minWidth: 0 }}>- {u.text}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                     ))}
                   </div>
@@ -1857,6 +2615,7 @@ export function PipelinePageContent({
                       borderRadius: 8,
                       background: "rgba(15, 23, 42, 0.4)",
                       border: "1px solid rgba(148, 163, 184, 0.2)",
+                      minWidth: 0,
                     }}
                   >
                     <strong>Gift details</strong>
@@ -1899,6 +2658,43 @@ export function PipelinePageContent({
                         ) : (
                           <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>No image preview found.</div>
                         )}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.25rem" }}>
+                          <button
+                            type="button"
+                            onClick={() => openEditGift(linkedGiftsById[selectedLinkedGiftId])}
+                            style={{
+                              fontSize: 12,
+                              padding: "0.35rem 0.65rem",
+                              borderRadius: 6,
+                              border: "1px solid rgba(148, 163, 184, 0.45)",
+                              background: "rgba(30, 41, 59, 0.9)",
+                              color: "var(--foreground, #e2e8f0)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const gid = linkedGiftsById[selectedLinkedGiftId].id;
+                              router.push(
+                                `/games/${encodeURIComponent(gameKey)}/pipelines/gift_images?q=${encodeURIComponent(gid)}&giftTab=update`
+                              );
+                            }}
+                            style={{
+                              fontSize: 12,
+                              padding: "0.35rem 0.65rem",
+                              borderRadius: 6,
+                              border: "1px solid rgba(148, 163, 184, 0.45)",
+                              background: "rgba(30, 41, 59, 0.9)",
+                              color: "var(--foreground, #e2e8f0)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Update image
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2063,8 +2859,66 @@ export function PipelinePageContent({
             </div>
           </div>
         </div>
+        </div>
+        <div
+          style={{
+            flex: "0 0 10dvh",
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            minHeight: 48,
+            maxHeight: "10dvh",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            paddingTop: 6,
+            paddingBottom: 4,
+            borderTop: "1px solid rgba(148, 163, 184, 0.2)",
+            boxSizing: "border-box",
+            overflow: "hidden",
+            overflowX: "hidden",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.35rem", flexShrink: 0 }}>
+            <strong style={{ fontSize: 12 }}>Generation log</strong>
+            <button type="button" onClick={() => setPipelineGenerationLog("")}>
+              Clear log
+            </button>
+          </div>
+          <textarea
+            readOnly
+            aria-label="Generation log"
+            value={pipelineGenerationLog}
+            placeholder="Generated catalog/cities data and images are logged here as you run tools."
+            style={{
+              width: "100%",
+              maxWidth: "100%",
+              minWidth: 0,
+              flex: 1,
+              minHeight: 0,
+              boxSizing: "border-box",
+              fontFamily: "ui-monospace, monospace",
+              fontSize: 10,
+              lineHeight: 1.35,
+              padding: "0.35rem 0.45rem",
+              borderRadius: 6,
+              border: "1px solid rgba(148, 163, 184, 0.25)",
+              background: "rgba(15, 23, 42, 0.5)",
+              color: "var(--foreground, #e2e8f0)",
+              resize: "none",
+              overflowY: "auto",
+              overflowX: "hidden",
+            }}
+          />
+        </div>
+        </>
       ) : (
-        <div style={{ marginTop: "1.5rem", display: "flex", gap: "1rem", alignItems: "center" }}>
+        <>
+          <h1 style={{ marginBottom: "0.5rem" }}>{pipeline?.name ?? pipelineKey}</h1>
+          {pipeline?.description && (
+            <p style={{ color: "var(--muted, #94a3b8)" }}>{pipeline.description}</p>
+          )}
+          <div style={{ marginTop: "1.5rem", display: "flex", gap: "1rem", alignItems: "center" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
             <span>Input JSON</span>
             <select value={selected} onChange={(e) => setSelected(e.target.value)}>
@@ -2076,7 +2930,8 @@ export function PipelinePageContent({
               ))}
             </select>
           </label>
-        </div>
+          </div>
+        </>
       )}
 
       {result && (
@@ -2282,7 +3137,7 @@ export function PipelinePageContent({
           </div>
         </div>
       )}
-      {pipelineKey === "gift_images" && showEditGift && (
+      {(pipelineKey === "gift_images" || pipelineKey === "cities") && showEditGift && (
         <div
           style={{
             position: "fixed",
@@ -2426,5 +3281,9 @@ export function PipelinePageContent({
 
 export default function PipelinePage({ params }: PageProps) {
   const { gameKey, pipelineKey } = use(params);
-  return <PipelinePageContent gameKey={gameKey} pipelineKey={pipelineKey} />;
+  return (
+    <Suspense fallback={<div style={{ padding: "1rem", color: "var(--muted, #94a3b8)" }}>Loading pipeline…</div>}>
+      <PipelinePageContent gameKey={gameKey} pipelineKey={pipelineKey} />
+    </Suspense>
+  );
 }
