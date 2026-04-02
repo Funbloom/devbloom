@@ -198,6 +198,54 @@ def _placeholder_image(width: int, height: int, text: str) -> bytes:
     return output.getvalue()
 
 
+def _gemini_reference_inline_part(
+    source: str, project_key: Optional[str] = None
+) -> Optional[dict]:
+    """
+    Build one Gemini content part (inline image) from either:
+    - https?://... URL (fetched; used for storyboard Supabase URLs), or
+    - bare filename under the project Images directory (existing behavior).
+    """
+    s = str(source or "").strip()
+    if not s:
+        return None
+    data: bytes
+    mime_type: str
+    if s.startswith("http://") or s.startswith("https://"):
+        try:
+            resp = requests.get(s, timeout=60)
+            resp.raise_for_status()
+            data = resp.content
+            ct = (resp.headers.get("content-type") or "").split(";")[0].strip()
+            mime_type = ct if ct.startswith("image/") else (
+                mimetypes.guess_type(s.split("?", 1)[0])[0] or "image/png"
+            )
+        except Exception as exc:
+            print(f"[image_tool] reference URL fetch failed ({s[:96]}…): {exc}")
+            return None
+    else:
+        try:
+            safe_name = validate_image_filename(s)
+            image_path = safe_resolve_path(safe_name, project_key)
+            if not image_path.exists():
+                print(f"[image_tool] reference file missing: {image_path}")
+                return None
+            data = image_path.read_bytes()
+            mime_type, _ = mimetypes.guess_type(image_path.name)
+            if not mime_type:
+                mime_type = "image/png"
+        except Exception as exc:
+            print(f"[image_tool] reference local load failed ({s[:80]}): {exc}")
+            return None
+    b64 = base64.b64encode(data).decode("ascii")
+    return {
+        "inline_data": {
+            "mime_type": mime_type,
+            "data": b64,
+        }
+    }
+
+
 def _extract_error_details(payload: object) -> str:
     if isinstance(payload, dict):
         return str(payload.get("error") or payload.get("detail") or payload)
@@ -243,33 +291,12 @@ def _generate_image_gemini(
 
     parts: list[dict] = [{"text": prompt}]
 
-    filenames = list(reference_image_filenames or [])
-    for name in filenames[:14]:
-        cleaned = str(name or "").strip()
-        if not cleaned:
-            continue
-        try:
-            # We deliberately only accept bare filenames that live in our images directory.
-            safe_name = validate_image_filename(cleaned)
-            image_path = safe_resolve_path(safe_name, project_key)
-            if not image_path.exists():
-                continue
-            data = image_path.read_bytes()
-            mime_type, _ = mimetypes.guess_type(image_path.name)
-            if not mime_type:
-                mime_type = "image/png"
-            b64 = base64.b64encode(data).decode("ascii")
-            parts.append(
-                {
-                    "inline_data": {
-                        "mime_type": mime_type,
-                        "data": b64,
-                    }
-                }
-            )
-        except Exception:
-            # Best-effort: skip any problematic reference image.
-            continue
+    # Each entry: bare filename (project Images/) or http(s) URL (e.g. storyboard Supabase).
+    sources = list(reference_image_filenames or [])
+    for src in sources[:14]:
+        inline = _gemini_reference_inline_part(src, project_key)
+        if inline:
+            parts.append(inline)
 
     payload = {
         "contents": [
@@ -641,7 +668,7 @@ def generate_image(
     style: str | None = None,
     transparent_background: bool | None = None,
     project_key: Optional[str] = None,
-    reference_image_filenames: Optional[Iterable[str]] = None,
+    reference_image_filenames: Optional[Iterable[str]] = None,  # filenames in project Images/ or https URLs
 ) -> dict:
     if not prompt or len(prompt.strip()) == 0:
         raise ValueError("Prompt is required.")

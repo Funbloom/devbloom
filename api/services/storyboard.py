@@ -720,25 +720,35 @@ def generate_tile_image(
             raw = raw.strip()
             return raw or None
 
-        reference_files: List[str] = []
+        # Pass full https URLs to generate_image so Gemini gets bytes even when files are not on the API host
+        # (e.g. character images only in Supabase). Otherwise use bare filenames in project Images/.
+        reference_sources: List[str] = []
+
+        def _add_reference_image(raw: Optional[str]) -> None:
+            if not raw:
+                return
+            s = str(raw).strip()
+            if not s:
+                return
+            if s.startswith("http://") or s.startswith("https://"):
+                if s not in reference_sources:
+                    reference_sources.append(s)
+                return
+            fname = _extract_filename(s)
+            if fname and fname not in reference_sources:
+                reference_sources.append(fname)
+
         if location and location.get("image"):
-            fname = _extract_filename(str(location.get("image")))
-            if fname:
-                reference_files.append(fname)
+            _add_reference_image(str(location.get("image")))
 
         for char in characters:
-            img_url = char.get("image")
-            if not img_url:
-                continue
-            fname = _extract_filename(str(img_url))
-            if fname and fname not in reference_files:
-                reference_files.append(fname)
+            _add_reference_image(char.get("image"))
 
         model_key = resolve_image_model("storyboard", model)
         gen_result = generate_image(
             prompt=full_prompt,
             project_key=project_key or None,
-            reference_image_filenames=reference_files or None,
+            reference_image_filenames=reference_sources or None,
             model=model_key,
         )
         images = gen_result.get("images") or []
