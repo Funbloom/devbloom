@@ -34,8 +34,7 @@ function getCurrentPageLabel(pathname: string): string {
     if (m?.[1] === "cities") return "Cities";
     return POCKET_VOYAGER_LABEL;
   }
-  if (pathname.startsWith("/games/")) return "Games";
-  if (pathname === "/games") return "Games";
+  if (pathname.startsWith("/games/")) return POCKET_VOYAGER_LABEL;
   if (pathname.startsWith("/login")) return "Log in";
   return "Agents";
 }
@@ -299,10 +298,6 @@ export function AppHeader() {
                 </Link>
               );
             })}
-            <div className="app-header-dropdown-divider" />
-            <Link href="/games" className="app-header-dropdown-link">
-              All games…
-            </Link>
           </HeaderMenu>
 
           <Link

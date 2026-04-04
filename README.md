@@ -44,7 +44,32 @@ npm run dev
 
 Open: http://localhost:3000
 
-## Test chat
+## Test
+
+### Automated checks (CI)
+
+**GitHub Actions** runs on every **push** and **pull request** to `main` or `master`:
+
+- **Web** (`web/`): `npm ci`, `npm run lint` (TypeScript `tsc --noEmit`), `npm run build`
+- **API** (`api/`): install `requirements.txt` + `requirements-dev.txt`, then `pytest` on `api/tests/`
+
+Run the **same checks locally** before you commit (from the **repository root**):
+
+| Environment | Command |
+|-------------|---------|
+| **Windows** (PowerShell) | `.\scripts\ci-local.ps1` |
+| **macOS / Linux / Git Bash / WSL** | `chmod +x scripts/ci-local.sh && ./scripts/ci-local.sh` |
+
+**Manual equivalent** (if you prefer not to use the scripts):
+
+```bash
+cd web && npm ci && npm run lint && npm run build && cd ../api && python -m pip install -r requirements.txt -r requirements-dev.txt && python -m pytest tests -q
+```
+
+API-only tests and layout are described in [api/tests/README.md](api/tests/README.md).
+
+### Test chat (manual)
+
 1. Start API server (port 8000)
 2. Start Web app (port 3000)
 3. Send a message and watch the assistant stream back
