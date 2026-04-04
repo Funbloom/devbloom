@@ -2,22 +2,42 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { API_BASE, fetchApi } from "../lib/api";
 import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
 
-const PAGES: { path: string; label: string }[] = [
-  { path: "/", label: "Agents" },
-  { path: "/admin", label: "Admin" },
+const POCKET_VOYAGER_KEY = "pocket_voyager";
+const POCKET_VOYAGER_LABEL = "Pocket Voyager";
+
+const STUDIO_LINKS: { path: string; label: string }[] = [
   { path: "/storyboard", label: "Storyboard" },
   { path: "/imageGen", label: "Image Gen" },
   { path: "/meshgen", label: "Mesh Gen" },
 ];
 
+const POCKET_VOYAGER_FALLBACK_PIPELINES: { key: string; name: string }[] = [
+  { key: "gift_images", name: "Gifts" },
+  { key: "cities", name: "Cities" },
+];
+
 function getCurrentPageLabel(pathname: string): string {
-  const page = PAGES.find((p) => p.path === pathname || (p.path !== "/" && pathname.startsWith(p.path)));
-  return page?.label ?? "Agents";
+  if (!pathname || pathname === "/") return "Agents";
+  if (pathname.startsWith("/admin")) return "Admin";
+  if (pathname.startsWith("/storyboard")) return "Storyboard";
+  if (pathname.startsWith("/imageGen")) return "Image Gen";
+  if (pathname.startsWith("/meshgen")) return "Mesh Gen";
+  if (pathname.startsWith("/games/pocket_voyager")) {
+    const m = pathname.match(/\/pipelines\/([^/]+)/);
+    if (m?.[1] === "gift_images") return "Gifts";
+    if (m?.[1] === "cities") return "Cities";
+    return POCKET_VOYAGER_LABEL;
+  }
+  if (pathname.startsWith("/games/")) return "Games";
+  if (pathname === "/games") return "Games";
+  if (pathname.startsWith("/login")) return "Log in";
+  return "Agents";
 }
 
 function initials(email: string): string {
@@ -27,17 +47,33 @@ function initials(email: string): string {
   return (part.slice(0, 2) || "?").toUpperCase();
 }
 
-type GameInfo = { key: string; name: string };
 type PipelineInfo = { key: string; name: string; description?: string };
+
+function HeaderMenu({
+  label,
+  children,
+  summaryClassName = "",
+  wide,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  summaryClassName?: string;
+  wide?: boolean;
+}) {
+  return (
+    <details className="app-header-menu">
+      <summary className={`app-header-menu-summary app-header-link ${summaryClassName}`.trim()}>{label}</summary>
+      <div className={`app-header-dropdown${wide ? " app-header-dropdown--wide" : ""}`}>{children}</div>
+    </details>
+  );
+}
 
 export function AppHeader() {
   const pathname = usePathname();
   const currentLabel = getCurrentPageLabel(pathname ?? "");
   const { authUser, user, signOut, loading } = useAuth();
-  const [activeProjectKey, setActiveProjectKey] = useState("");
   const [activeProjectName, setActiveProjectName] = useState("");
-  const [games, setGames] = useState<GameInfo[]>([]);
-  const [pipelinesByGame, setPipelinesByGame] = useState<Record<string, PipelineInfo[]>>({});
+  const [pocketApiPipelines, setPocketApiPipelines] = useState<PipelineInfo[] | null>(null);
   const [localAgentOk, setLocalAgentOk] = useState(false);
   /** This tab’s hostname may call the agent on 127.0.0.1 (localhost or NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS). */
   const [localAgentEligible, setLocalAgentEligible] = useState(false);
@@ -51,7 +87,6 @@ export function AppHeader() {
     const refreshProject = async () => {
       const stored = window.localStorage.getItem("activeProjectKey") || "";
       const storedName = window.localStorage.getItem("activeProjectName") || "";
-      setActiveProjectKey(stored);
       if (!stored) {
         setActiveProjectName("");
         return;
@@ -90,31 +125,23 @@ export function AppHeader() {
   useEffect(() => {
     if (loading) return;
     if (!authUser && !user) {
-      setGames([]);
-      setPipelinesByGame({});
+      setPocketApiPipelines(null);
       return;
     }
-    const loadGames = async () => {
+    const loadPocketPipelines = async () => {
       try {
-        const response = await fetchApi("/games");
-        if (!response.ok) return;
-        const data = (await response.json()) as GameInfo[];
-        setGames(data);
-        for (const game of data) {
-          try {
-            const pipelinesRes = await fetchApi(`/games/${game.key}/pipelines`);
-            if (!pipelinesRes.ok) continue;
-            const pipelines = (await pipelinesRes.json()) as PipelineInfo[];
-            setPipelinesByGame((prev) => ({ ...prev, [game.key]: pipelines }));
-          } catch {
-            // Ignore pipeline load errors.
-          }
+        const pipelinesRes = await fetchApi(`/games/${POCKET_VOYAGER_KEY}/pipelines`);
+        if (!pipelinesRes.ok) {
+          setPocketApiPipelines(null);
+          return;
         }
+        const pipelines = (await pipelinesRes.json()) as PipelineInfo[];
+        setPocketApiPipelines(pipelines.length ? pipelines : null);
       } catch {
-        // Ignore game load errors.
+        setPocketApiPipelines(null);
       }
     };
-    void loadGames();
+    void loadPocketPipelines();
   }, [loading, authUser, user]);
 
   useEffect(() => {
@@ -151,9 +178,40 @@ export function AppHeader() {
     };
   }, []);
 
+  useEffect(() => {
+    const closeAllHeaderMenus = () => {
+      document.querySelectorAll("header.app-header details.app-header-menu").forEach((node) => {
+        (node as HTMLDetailsElement).open = false;
+      });
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      const menu = t.closest("details.app-header-menu");
+      if (!menu) {
+        closeAllHeaderMenus();
+        return;
+      }
+      document.querySelectorAll("header.app-header details.app-header-menu").forEach((node) => {
+        if (node !== menu) (node as HTMLDetailsElement).open = false;
+      });
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
   const headerTitle = activeProjectName
     ? `DevBloom Studio (${activeProjectName})`
     : "DevBloom Studio (select a project...)";
+
+  const studioActive = STUDIO_LINKS.some(
+    ({ path }) => path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path))),
+  );
+  const pocketPipelines =
+    pocketApiPipelines?.length ? pocketApiPipelines : POCKET_VOYAGER_FALLBACK_PIPELINES;
+  const pocketActive = pathname?.startsWith(`/games/${POCKET_VOYAGER_KEY}`) ?? false;
+
+  const isAgentsActive = pathname === "/" || pathname === "";
 
   return (
     <header className="app-header">
@@ -199,92 +257,88 @@ export function AppHeader() {
           </div>
         </div>
       </div>
-      <nav className="app-header-nav">
-        {PAGES.map(({ path, label }) => {
-          const isActive = path === pathname || (path !== "/" && pathname?.startsWith(path));
-          return (
-            <Link
-              key={path}
-              href={path}
-              className={`app-header-link ${isActive ? "app-header-link-active" : ""}`}
-            >
-              {label}
-            </Link>
-          );
-        })}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          {games.length === 0 ? (
-            <Link href="/games" className="app-header-link">
-              Games
-            </Link>
-          ) : (
-            games.map((game) => {
-              const pipelines = pipelinesByGame[game.key] || [];
+      <nav className="app-header-nav" aria-label="Main">
+        <div className="app-header-toolbar">
+          <Link
+            href="/"
+            className={`app-header-link ${isAgentsActive ? "app-header-link-active" : ""}`}
+          >
+            Agents
+          </Link>
+
+          <HeaderMenu
+            label="Studio"
+            summaryClassName={studioActive ? "app-header-link-active" : ""}
+            wide
+          >
+            {STUDIO_LINKS.map(({ path, label }) => {
+              const isActive = path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path)));
               return (
-                <details key={game.key} style={{ position: "relative" }}>
-                  <summary className="app-header-link" style={{ cursor: "pointer", listStyle: "none" }}>
-                    {game.name}
-                  </summary>
-                  <div
-                    style={{
-                      position: "absolute",
-                      right: 0,
-                      top: "110%",
-                      background: "var(--panel-bg, #0f172a)",
-                      border: "1px solid rgba(148, 163, 184, 0.2)",
-                      borderRadius: 8,
-                      padding: "0.5rem",
-                      minWidth: 180,
-                      zIndex: 10,
-                    }}
-                  >
-                    {pipelines.length === 0 ? (
-                      <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>No pipelines</div>
-                    ) : (
-                      pipelines.map((pipeline) => (
-                        <Link
-                          key={pipeline.key}
-                          href={`/games/${game.key}/pipelines/${pipeline.key}`}
-                          className="app-header-link"
-                          style={{ display: "block", padding: "0.25rem 0" }}
-                        >
-                          {pipeline.name}
-                        </Link>
-                      ))
-                    )}
-                    <Link
-                      href="/games"
-                      className="app-header-link"
-                      style={{ display: "block", padding: "0.25rem 0", opacity: 0.8 }}
-                    >
-                      View all
-                    </Link>
-                  </div>
-                </details>
+                <Link
+                  key={path}
+                  href={path}
+                  className={`app-header-dropdown-link ${isActive ? "app-header-link-active" : ""}`}
+                >
+                  {label}
+                </Link>
               );
-            })
-          )}
-        </div>
-        <div className="app-header-user" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          {!loading && (
-            authUser || user ? (
-              <>
-                <span className="app-header-avatar" title={authUser?.email ?? user?.email ?? ""} style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--header-link-color, #3b82f6)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>
-                  {initials(authUser?.email ?? user?.email ?? "")}
-                </span>
-                <span className="app-header-email" style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {authUser?.email ?? user?.email}
-                </span>
-                <button type="button" onClick={() => signOut()} className="app-header-link" style={{ cursor: "pointer", background: "none", border: "none", font: "inherit" }}>
-                  Log out
-                </button>
-              </>
-            ) : (
-              <Link href="/login" className="app-header-link">
-                Log in
-              </Link>
-            )
-          )}
+            })}
+          </HeaderMenu>
+
+          <HeaderMenu
+            label={POCKET_VOYAGER_LABEL}
+            summaryClassName={pocketActive ? "app-header-link-active" : ""}
+            wide
+          >
+            {pocketPipelines.map((pipeline) => {
+              const href = `/games/${POCKET_VOYAGER_KEY}/pipelines/${pipeline.key}`;
+              const isActive = pathname === href || pathname?.startsWith(`${href}/`);
+              return (
+                <Link key={pipeline.key} href={href} className={`app-header-dropdown-link ${isActive ? "app-header-link-active" : ""}`}>
+                  {pipeline.name}
+                </Link>
+              );
+            })}
+            <div className="app-header-dropdown-divider" />
+            <Link href="/games" className="app-header-dropdown-link">
+              All games…
+            </Link>
+          </HeaderMenu>
+
+          <Link
+            href="/admin"
+            className={`app-header-link ${pathname === "/admin" || pathname?.startsWith("/admin/") ? "app-header-link-active" : ""}`}
+          >
+            Admin
+          </Link>
+
+          <div className="app-header-user" style={{ display: "flex", alignItems: "center" }}>
+            {!loading &&
+              (authUser || user ? (
+                <HeaderMenu
+                  label={
+                    <span className="app-header-avatar" title={authUser?.email ?? user?.email ?? ""}>
+                      {initials(authUser?.email ?? user?.email ?? "")}
+                    </span>
+                  }
+                  summaryClassName="app-header-menu-summary-avatar"
+                >
+                  <div className="app-header-account-email">{authUser?.email ?? user?.email}</div>
+                  <button
+                    type="button"
+                    onClick={() => signOut()}
+                    className="app-header-dropdown-link"
+                    style={{ cursor: "pointer", width: "100%", textAlign: "left", border: "none", font: "inherit", background: "none" }}
+                  >
+                    Log out
+                  </button>
+                </HeaderMenu>
+              ) : (
+                <Link href="/login" className="app-header-link">
+                  Log in
+                </Link>
+              ))}
+          </div>
         </div>
       </nav>
     </header>
