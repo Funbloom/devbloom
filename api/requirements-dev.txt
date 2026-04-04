@@ -1,0 +1,3 @@
+# Dev-only: API tests (install alongside api/requirements.txt)
+pytest>=8.0
+httpx>=0.27

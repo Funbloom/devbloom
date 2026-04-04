@@ -9,14 +9,13 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from core.project_key import validate_project_key
 from services.rag import get_supabase_client
 from games.pocket_voyager.services.gifts_service import load_gift_catalog
 from games.pocket_voyager.services.cities_service import load_cities_catalog
 from core.local_paths import delete_local_project_path, get_local_project_path, set_local_project_path
 
 projects_router = APIRouter()
-
-PROJECT_KEY_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 
 
 class ProjectCreate(BaseModel):
@@ -28,18 +27,6 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     display_name: str = Field(min_length=1)
     project_path: Optional[str] = None
-
-
-def validate_project_key(project_key: str) -> str:
-    cleaned = project_key.strip()
-    if not cleaned:
-        raise HTTPException(status_code=400, detail="project_key is required.")
-    if not PROJECT_KEY_PATTERN.match(cleaned):
-        raise HTTPException(
-            status_code=400,
-            detail="project_key must be lowercase letters, numbers, dashes, or underscores.",
-        )
-    return cleaned
 
 
 @projects_router.get("/projects")
