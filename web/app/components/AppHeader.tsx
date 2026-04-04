@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { fetchApi } from "../lib/api";
+import { API_BASE, fetchApi } from "../lib/api";
 import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
 
 const PAGES: { path: string; label: string }[] = [
@@ -12,6 +12,7 @@ const PAGES: { path: string; label: string }[] = [
   { path: "/admin", label: "Admin" },
   { path: "/storyboard", label: "Storyboard" },
   { path: "/imageGen", label: "Image Gen" },
+  { path: "/meshgen", label: "Mesh Gen" },
 ];
 
 function getCurrentPageLabel(pathname: string): string {
@@ -40,6 +41,7 @@ export function AppHeader() {
   const [localAgentOk, setLocalAgentOk] = useState(false);
   /** This tab’s hostname may call the agent on 127.0.0.1 (localhost or NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS). */
   const [localAgentEligible, setLocalAgentEligible] = useState(false);
+  const [apiServerOk, setApiServerOk] = useState(false);
 
   useEffect(() => {
     setLocalAgentEligible(isLocalAgentContext());
@@ -130,6 +132,25 @@ export function AppHeader() {
     };
   }, [localAgentEligible]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const base = API_BASE.replace(/\/+$/, "");
+        const res = await fetch(`${base}/health`, { method: "GET", cache: "no-store" });
+        if (!cancelled) setApiServerOk(res.ok);
+      } catch {
+        if (!cancelled) setApiServerOk(false);
+      }
+    };
+    void check();
+    const timer = window.setInterval(check, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const headerTitle = activeProjectName
     ? `DevBloom Studio (${activeProjectName})`
     : "DevBloom Studio (select a project...)";
@@ -141,25 +162,41 @@ export function AppHeader() {
         <Link href="/" className="app-header-title">
           {headerTitle}
         </Link>
-        <div
-          className={`app-header-local-agent${localAgentEligible ? "" : " app-header-local-agent--inactive"}`}
-          title={
-            localAgentEligible
-              ? localAgentOk
-                ? "Local agent online (this PC, port 8765)"
-                : "Local agent offline — start it on this machine (e.g. local_agent/run.bat)"
-              : "Gift/cities file tools use a small app on your PC (127.0.0.1:8765). On this host the UI does not call it — use localhost or set NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS when building the web app."
-          }
-        >
-          <span
-            className="app-header-local-agent-dot"
-            style={
+        <div className="app-header-services">
+          <div
+            className={`app-header-local-agent${localAgentEligible ? "" : " app-header-local-agent--inactive"}`}
+            title={
               localAgentEligible
-                ? { background: localAgentOk ? "#22c55e" : "#ef4444" }
-                : undefined
+                ? localAgentOk
+                  ? "Local agent online (this PC, port 8765)"
+                  : "Local agent offline — start it on this machine (e.g. local_agent/run.bat)"
+                : "Gift/cities file tools use a small app on your PC (127.0.0.1:8765). On this host the UI does not call it — use localhost or set NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS when building the web app."
             }
-          />
-          {localAgentEligible ? "Local Agent" : "Local agent — N/A on this host"}
+          >
+            <span
+              className="app-header-local-agent-dot"
+              style={
+                localAgentEligible
+                  ? { background: localAgentOk ? "#22c55e" : "#ef4444" }
+                  : undefined
+              }
+            />
+            {localAgentEligible ? "Local Agent" : "Local agent — N/A on this host"}
+          </div>
+          <div
+            className="app-header-local-agent"
+            title={
+              apiServerOk
+                ? `API server online (${API_BASE.replace(/\/+$/, "")})`
+                : `API server offline — start it (e.g. api/run.bat or uvicorn on port 8000). Expected: ${API_BASE.replace(/\/+$/, "")}`
+            }
+          >
+            <span
+              className="app-header-local-agent-dot"
+              style={{ background: apiServerOk ? "#22c55e" : "#ef4444" }}
+            />
+            API Server
+          </div>
         </div>
       </div>
       <nav className="app-header-nav">

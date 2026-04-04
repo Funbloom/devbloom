@@ -24,7 +24,7 @@ if str(_repo_root) not in sys.path:
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
@@ -297,6 +297,12 @@ def log_unexpected_path(title: str, **details: Any) -> None:
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@app.head("/auth/me")
+def auth_me_reachable() -> Response:
+    """Login page uses HEAD (no Bearer) to check the API is up; GET /auth/me still requires auth."""
+    return Response(status_code=200)
 
 
 @app.get("/auth/me")

@@ -21,6 +21,24 @@
                 "8000"
             ],
             "jinja": true
+        },
+        {
+            "name": "Python Debugger: Local Agent",
+            "cwd": "${workspaceFolder}",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/local_agent/.venv/Scripts/python.exe",
+            "osx": {
+                "python": "${workspaceFolder}/local_agent/.venv/bin/python"
+            },
+            "module": "uvicorn",
+            "args": [
+                "local_agent.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8765"
+            ]
         }
     ]
 }

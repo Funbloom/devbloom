@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -17,6 +19,7 @@ from local_agent.models import (
     FileJsonWriteRequest,
     FileBinaryReadRequest,
     FileBinaryWriteRequest,
+    MeshGenGenerateRequest,
     ProjectResolveRequest,
 )
 from local_agent.security import (
@@ -50,6 +53,11 @@ def _cors_allow_origins() -> list[str]:
 
 
 app = FastAPI(title="Local Agent", version="0.1.0")
+
+_root = logging.getLogger()
+if not _root.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+logging.getLogger("local_agent").setLevel(logging.INFO)
 
 app.add_middleware(
     CORSMiddleware,
@@ -158,6 +166,38 @@ def read_binary_file(request: Request, body: FileBinaryReadRequest) -> Response:
     data = path.read_bytes()
     media_type = guess_media_type(path)
     return Response(content=data, media_type=media_type)
+
+
+@app.post("/meshgen/generate")
+async def meshgen_generate(request: Request, body: MeshGenGenerateRequest) -> dict[str, Any]:
+    """Run Hunyuan3D-2 in-process (same venv as the agent) and write mesh bytes under the project."""
+    ensure_localhost(request)
+    root = ensure_root_approved(body.project_root)
+    out_path = resolve_under_root(root, body.relative_path)
+    params: dict[str, Any] = {
+        "image": body.image,
+        "seed": body.seed,
+        "octree_resolution": body.octree_resolution,
+        "num_inference_steps": body.num_inference_steps,
+        "guidance_scale": body.guidance_scale,
+        "texture": body.texture,
+        "type": body.type,
+        "face_count": body.face_count,
+    }
+    try:
+        from local_agent.meshgen_hunyuan import run_mesh_generation
+
+        raw = await asyncio.to_thread(run_mesh_generation, params)
+    except RuntimeError as exc:
+        logging.getLogger(__name__).error("MeshGen: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logging.getLogger(__name__).exception("MeshGen: generation failed")
+        raise HTTPException(status_code=500, detail=f"Mesh generation failed: {exc}") from exc
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(raw)
+    return {"ok": True, "path": str(out_path), "relative_path": body.relative_path}
 
 
 @app.post("/files/binary/write")

@@ -142,6 +142,23 @@ export const localAgent = {
       }),
     });
   },
+  meshgenGenerate(body: {
+    project_root: string;
+    relative_path: string;
+    image: string;
+    seed: number;
+    octree_resolution: number;
+    num_inference_steps: number;
+    guidance_scale: number;
+    texture: boolean;
+    type: "glb" | "obj";
+    face_count: number;
+  }): Promise<{ ok: boolean; path: string; relative_path: string }> {
+    return requestLocalAgent("/meshgen/generate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
 };
 
 export function getLocalProjectPath(projectKey: string): string | null {

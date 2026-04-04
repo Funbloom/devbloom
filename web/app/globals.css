@@ -112,6 +112,14 @@ body {
   min-width: 0;
 }
 
+.app-header-services {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
 .app-header-local-agent {
   display: flex;
   align-items: center;
