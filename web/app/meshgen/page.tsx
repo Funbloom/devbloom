@@ -113,7 +113,6 @@ export default function MeshGenPage() {
     }
 
     setIsWorking(true);
-    setStatus("Encoding image; local agent will run Hunyuan3D-2 (GPU)…");
     try {
       await localAgent.approveProjectRoot(projectRoot.trim());
       const imageB64 = await fileToBase64Raw(imageFile);
@@ -123,7 +122,7 @@ export default function MeshGenPage() {
         (imageFile.name || "mesh").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 48) || "mesh";
       const relPath = `gen/3dmesh/${safeStem}_${stamp}.${exportType}`;
 
-      await localAgent.meshgenGenerate({
+      const result = await localAgent.meshgenGenerate({
         project_root: projectRoot.trim(),
         relative_path: relPath,
         image: imageB64,
@@ -135,8 +134,14 @@ export default function MeshGenPage() {
         type: exportType,
         face_count: faces,
       });
-      setLastSavedPath(relPath);
-      setStatus(`Saved mesh to project: ${relPath}`);
+      const displayPath = (result.path || "").trim();
+      if (displayPath) {
+        setLastSavedPath(displayPath);
+        setStatus(`Saved mesh to:\n${displayPath}`);
+      } else {
+        setLastSavedPath(null);
+        setStatus(`Saved mesh (relative to project): ${result.relative_path ?? relPath}`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Generation failed.";
       setStatus(`Error: ${msg}`);
@@ -160,7 +165,23 @@ export default function MeshGenPage() {
   }
 
   return (
-    <div style={{ maxWidth: 720, margin: "2rem auto", padding: "0 1rem", display: "grid", gap: "1.25rem" }}>
+    <div
+      style={{
+        position: "relative",
+        maxWidth: 720,
+        margin: "2rem auto",
+        padding: "0 1rem",
+        display: "grid",
+        gap: "1.25rem",
+        ...(isWorking ? { minHeight: "min(70vh, 900px)" } : {}),
+      }}
+    >
+      {isWorking && (
+        <div className="generate-overlay" aria-live="polite" aria-busy="true">
+          <div className="generate-spinner" />
+          <div className="generate-overlay-text">Generating mesh…</div>
+        </div>
+      )}
       <div>
         <h1 style={{ marginTop: 0 }}>Mesh Gen</h1>
         <p style={{ margin: 0, color: "var(--muted, #94a3b8)", fontSize: 14 }}>
@@ -267,7 +288,16 @@ export default function MeshGenPage() {
       </button>
 
       {status && (
-        <div style={{ fontSize: 14, color: lastSavedPath ? "var(--muted, #94a3b8)" : undefined }}>{status}</div>
+        <div
+          style={{
+            fontSize: 14,
+            color: lastSavedPath ? "var(--muted, #94a3b8)" : undefined,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {status}
+        </div>
       )}
     </div>
   );
