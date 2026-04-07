@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { fetchApi, API_BASE } from "../lib/api";
+import { projectKeyFromDisplayName } from "../lib/projectKey";
 import { localAgent, getLocalProjectPath, setLocalProjectPath, isLocalAgentContext } from "../lib/localAgentClient";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -63,7 +64,6 @@ export default function AdminPage() {
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [projectStatus, setProjectStatus] = useState<string | null>(null);
   const [newProject, setNewProject] = useState({
-    project_key: "",
     display_name: "",
     project_path: "",
   });
@@ -365,13 +365,16 @@ export default function AdminPage() {
 
   const handleProjectSave = async () => {
     setProjectStatus(null);
-    const projectKeyInput = newProject.project_key.trim();
-    if (!projectKeyInput || !newProject.display_name.trim()) {
-      setProjectStatus("Error: project_key and display_name are required.");
+    const displayName = newProject.display_name.trim();
+    if (!displayName) {
+      setProjectStatus("Error: project name is required.");
       return;
     }
+    const projectKeyInput = projectKeyFromDisplayName(displayName);
     if (projects.some((project) => project.project_key === projectKeyInput)) {
-      setProjectStatus("Error: project_key already exists.");
+      setProjectStatus(
+        `Error: a project with key "${projectKeyInput}" already exists. Change the name slightly.`,
+      );
       return;
     }
     try {
@@ -392,14 +395,14 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_key: projectKeyInput,
-          display_name: newProject.display_name.trim(),
+          display_name: displayName,
         }),
       });
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || `Create failed: ${response.status}`);
       }
-      setNewProject({ project_key: "", display_name: "", project_path: "" });
+      setNewProject({ display_name: "", project_path: "" });
       await loadProjects();
       if (!localPath) {
         setProjectStatus("Project saved. Set a local path for local agent features.");
@@ -800,15 +803,11 @@ export default function AdminPage() {
                 onChange={(e) => setNewProject((prev) => ({ ...prev, display_name: e.target.value }))}
               />
             </label>
-            <label className="admin-field">
-              <span>Project key</span>
-              <input
-                type="text"
-                placeholder="Project key (e.g. mygame)"
-                value={newProject.project_key}
-                onChange={(e) => setNewProject((prev) => ({ ...prev, project_key: e.target.value }))}
-              />
-            </label>
+            {newProject.display_name.trim() !== "" && (
+              <div className="admin-field-hint" style={{ marginTop: -4, marginBottom: 4, fontSize: 13, color: "var(--muted, #94a3b8)" }}>
+                Project key: <code>{projectKeyFromDisplayName(newProject.display_name)}</code>
+              </div>
+            )}
             <label className="admin-field admin-field-path">
               <span>Project root path</span>
               <div className="admin-path-input">

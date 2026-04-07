@@ -33,6 +33,25 @@ def _load_manifest() -> dict:
         return {"games": []}
 
 
+def _project_keys_for_game(game: dict, game_key: str) -> list[str]:
+    """Which studio `project_key` values show this game in the nav. Default: the game key only."""
+    raw = game.get("project_keys")
+    keys: list[str] = []
+    if isinstance(raw, list) and raw:
+        for item in raw:
+            try:
+                keys.append(_safe_key(str(item), "project"))
+            except ValueError:
+                continue
+        keys = list(dict.fromkeys(keys))
+    if not keys:
+        try:
+            keys = [_safe_key(game_key, "game")]
+        except ValueError:
+            keys = []
+    return keys
+
+
 def list_games() -> list[dict]:
     manifest = _load_manifest()
     games = manifest.get("games") or []
@@ -43,7 +62,17 @@ def list_games() -> list[dict]:
         key = (g.get("key") or "").strip()
         name = (g.get("name") or "").strip()
         if key and name:
-            out.append({"key": key, "name": name})
+            try:
+                safe_key = _safe_key(key, "game")
+            except ValueError:
+                continue
+            out.append(
+                {
+                    "key": safe_key,
+                    "name": name,
+                    "project_keys": _project_keys_for_game(g, safe_key),
+                }
+            )
     return out
 
 

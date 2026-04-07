@@ -2,7 +2,7 @@
   "games": [
     {
       "key": "pocket_voyager",
-      "name": "PocketVoyager",
+      "name": "Pocket Voyager",
       "pipelines": [
         {
           "key": "gift_images",

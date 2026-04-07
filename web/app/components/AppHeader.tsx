@@ -3,13 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { API_BASE, fetchApi } from "../lib/api";
 import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
-
-const POCKET_VOYAGER_KEY = "pocket_voyager";
-const POCKET_VOYAGER_LABEL = "Pocket Voyager";
 
 const STUDIO_LINKS: { path: string; label: string }[] = [
   { path: "/storyboard", label: "Storyboard" },
@@ -17,10 +14,11 @@ const STUDIO_LINKS: { path: string; label: string }[] = [
   { path: "/meshgen", label: "Mesh Gen" },
 ];
 
-const POCKET_VOYAGER_FALLBACK_PIPELINES: { key: string; name: string }[] = [
-  { key: "gift_images", name: "Gifts" },
-  { key: "cities", name: "Cities" },
-];
+function humanizeSegment(segment: string): string {
+  const s = segment.replace(/_/g, " ").trim();
+  if (!s) return segment;
+  return s.replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 function getCurrentPageLabel(pathname: string): string {
   if (!pathname || pathname === "/") return "Agents";
@@ -28,13 +26,14 @@ function getCurrentPageLabel(pathname: string): string {
   if (pathname.startsWith("/storyboard")) return "Storyboard";
   if (pathname.startsWith("/imageGen")) return "Image Gen";
   if (pathname.startsWith("/meshgen")) return "Mesh Gen";
-  if (pathname.startsWith("/games/pocket_voyager")) {
-    const m = pathname.match(/\/pipelines\/([^/]+)/);
-    if (m?.[1] === "gift_images") return "Gifts";
-    if (m?.[1] === "cities") return "Cities";
-    return POCKET_VOYAGER_LABEL;
+  const gamesPath = pathname.match(/^\/games\/([^/]+)(?:\/pipelines\/([^/]+))?/);
+  if (gamesPath) {
+    const pipelineKey = gamesPath[2];
+    if (pipelineKey === "gift_images") return "Gifts";
+    if (pipelineKey === "cities") return "Cities";
+    if (pipelineKey) return humanizeSegment(pipelineKey);
+    return humanizeSegment(gamesPath[1]);
   }
-  if (pathname.startsWith("/games/")) return POCKET_VOYAGER_LABEL;
   if (pathname.startsWith("/login")) return "Log in";
   return "Agents";
 }
@@ -47,6 +46,8 @@ function initials(email: string): string {
 }
 
 type PipelineInfo = { key: string; name: string; description?: string };
+
+type GameRegistryEntry = { key: string; name: string; project_keys: string[] };
 
 function HeaderMenu({
   label,
@@ -71,8 +72,10 @@ export function AppHeader() {
   const pathname = usePathname();
   const currentLabel = getCurrentPageLabel(pathname ?? "");
   const { authUser, user, signOut, loading } = useAuth();
+  const [activeProjectKey, setActiveProjectKey] = useState("");
   const [activeProjectName, setActiveProjectName] = useState("");
-  const [pocketApiPipelines, setPocketApiPipelines] = useState<PipelineInfo[] | null>(null);
+  const [gamesRegistry, setGamesRegistry] = useState<GameRegistryEntry[]>([]);
+  const [pipelinesByGameKey, setPipelinesByGameKey] = useState<Record<string, PipelineInfo[]>>({});
   const [localAgentOk, setLocalAgentOk] = useState(false);
   /** This tab’s hostname may call the agent on 127.0.0.1 (localhost or NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS). */
   const [localAgentEligible, setLocalAgentEligible] = useState(false);
@@ -86,6 +89,7 @@ export function AppHeader() {
     const refreshProject = async () => {
       const stored = window.localStorage.getItem("activeProjectKey") || "";
       const storedName = window.localStorage.getItem("activeProjectName") || "";
+      setActiveProjectKey(stored);
       if (!stored) {
         setActiveProjectName("");
         return;
@@ -124,24 +128,85 @@ export function AppHeader() {
   useEffect(() => {
     if (loading) return;
     if (!authUser && !user) {
-      setPocketApiPipelines(null);
+      setGamesRegistry([]);
       return;
     }
-    const loadPocketPipelines = async () => {
+    const loadGames = async () => {
       try {
-        const pipelinesRes = await fetchApi(`/games/${POCKET_VOYAGER_KEY}/pipelines`);
-        if (!pipelinesRes.ok) {
-          setPocketApiPipelines(null);
+        const res = await fetchApi("/games");
+        if (!res.ok) {
+          setGamesRegistry([]);
           return;
         }
-        const pipelines = (await pipelinesRes.json()) as PipelineInfo[];
-        setPocketApiPipelines(pipelines.length ? pipelines : null);
+        const raw = (await res.json()) as unknown;
+        if (!Array.isArray(raw)) {
+          setGamesRegistry([]);
+          return;
+        }
+        const parsed: GameRegistryEntry[] = [];
+        for (const item of raw) {
+          if (!item || typeof item !== "object") continue;
+          const rec = item as Record<string, unknown>;
+          const key = typeof rec.key === "string" ? rec.key.trim() : "";
+          const name = typeof rec.name === "string" ? rec.name.trim() : "";
+          const pkRaw = rec.project_keys;
+          const project_keys: string[] = [];
+          if (Array.isArray(pkRaw)) {
+            for (const p of pkRaw) {
+              if (typeof p === "string" && p.trim()) project_keys.push(p.trim());
+            }
+          }
+          if (key && name) {
+            parsed.push({
+              key,
+              name,
+              project_keys: project_keys.length > 0 ? project_keys : [key],
+            });
+          }
+        }
+        setGamesRegistry(parsed);
       } catch {
-        setPocketApiPipelines(null);
+        setGamesRegistry([]);
       }
     };
-    void loadPocketPipelines();
+    void loadGames();
   }, [loading, authUser, user]);
+
+  const visibleGames = useMemo(
+    () => gamesRegistry.filter((g) => activeProjectKey && g.project_keys.includes(activeProjectKey)),
+    [gamesRegistry, activeProjectKey],
+  );
+
+  useEffect(() => {
+    if (!visibleGames.length) {
+      setPipelinesByGameKey({});
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const next: Record<string, PipelineInfo[]> = {};
+      await Promise.all(
+        visibleGames.map(async (g) => {
+          try {
+            const res = await fetchApi(`/games/${encodeURIComponent(g.key)}/pipelines`);
+            if (!res.ok) {
+              next[g.key] = [];
+              return;
+            }
+            const list = (await res.json()) as PipelineInfo[];
+            next[g.key] = Array.isArray(list) && list.length > 0 ? list : [];
+          } catch {
+            next[g.key] = [];
+          }
+        }),
+      );
+      if (!cancelled) setPipelinesByGameKey(next);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [visibleGames]);
 
   useEffect(() => {
     if (!localAgentEligible) return;
@@ -206,9 +271,8 @@ export function AppHeader() {
   const studioActive = STUDIO_LINKS.some(
     ({ path }) => path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path))),
   );
-  const pocketPipelines =
-    pocketApiPipelines?.length ? pocketApiPipelines : POCKET_VOYAGER_FALLBACK_PIPELINES;
-  const pocketActive = pathname?.startsWith(`/games/${POCKET_VOYAGER_KEY}`) ?? false;
+  const gamesPathMatch = pathname?.match(/^\/games\/([^/]+)/);
+  const activeGameKeyFromPath = gamesPathMatch?.[1] ?? "";
 
   const isAgentsActive = pathname === "/" || pathname === "";
 
@@ -284,21 +348,34 @@ export function AppHeader() {
             })}
           </HeaderMenu>
 
-          <HeaderMenu
-            label={POCKET_VOYAGER_LABEL}
-            summaryClassName={pocketActive ? "app-header-link-active" : ""}
-            wide
-          >
-            {pocketPipelines.map((pipeline) => {
-              const href = `/games/${POCKET_VOYAGER_KEY}/pipelines/${pipeline.key}`;
-              const isActive = pathname === href || pathname?.startsWith(`${href}/`);
-              return (
-                <Link key={pipeline.key} href={href} className={`app-header-dropdown-link ${isActive ? "app-header-link-active" : ""}`}>
-                  {pipeline.name}
-                </Link>
-              );
-            })}
-          </HeaderMenu>
+          {visibleGames.map((game) => {
+            const pipelines = pipelinesByGameKey[game.key] ?? [];
+            if (pipelines.length === 0) return null;
+            const gameHrefPrefix = `/games/${game.key}`;
+            const thisGameActive = activeGameKeyFromPath === game.key;
+            return (
+              <HeaderMenu
+                key={game.key}
+                label={game.name}
+                summaryClassName={thisGameActive ? "app-header-link-active" : ""}
+                wide
+              >
+                {pipelines.map((pipeline) => {
+                  const href = `${gameHrefPrefix}/pipelines/${pipeline.key}`;
+                  const isActive = pathname === href || pathname?.startsWith(`${href}/`);
+                  return (
+                    <Link
+                      key={pipeline.key}
+                      href={href}
+                      className={`app-header-dropdown-link ${isActive ? "app-header-link-active" : ""}`}
+                    >
+                      {pipeline.name}
+                    </Link>
+                  );
+                })}
+              </HeaderMenu>
+            );
+          })}
 
           <Link
             href="/admin"

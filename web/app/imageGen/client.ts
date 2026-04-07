@@ -80,14 +80,14 @@ export async function generateImagePrompt(conceptPrompt: string): Promise<string
 }
 
 export async function getStyles(): Promise<Style[]> {
-  const response = await fetch(`${API_BASE}/storyboard/styles`);
+  const response = await fetchApi("/storyboard/styles");
   if (!response.ok) return [];
   const data = (await response.json()) as Style[] | unknown;
   return Array.isArray(data) ? data : [];
 }
 
 export async function addStyle(name: string, prompt: string): Promise<Style> {
-  const response = await fetch(`${API_BASE}/storyboard/styles`, {
+  const response = await fetchApi("/storyboard/styles", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: name.trim(), prompt: prompt.trim() }),
@@ -104,7 +104,7 @@ export async function addStyle(name: string, prompt: string): Promise<Style> {
 }
 
 export async function deleteStyle(styleId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/storyboard/styles/${styleId}`, { method: "DELETE" });
+  const response = await fetchApi(`/storyboard/styles/${encodeURIComponent(styleId)}`, { method: "DELETE" });
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { detail?: string };
     throw new Error(body.detail ?? `Delete failed: ${response.status}`);
