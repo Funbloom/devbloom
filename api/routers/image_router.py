@@ -38,6 +38,12 @@ class GenerateCharacterImageRequest(BaseModel):
     outfit: str | None = None
     negative_prompt: str | None = None
     style_id: str | None = None
+    model: str | None = None
+    width: int = 1024
+    height: int = 1024
+    quality: str | None = None
+    style: str | None = None
+    transparent_background: bool | None = None
 
 
 class GenerateImageRequest(BaseModel):
@@ -161,10 +167,20 @@ def generate_character_image_route(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
+        try:
+            model_key = resolve_image_model("character", body.model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         result = generate_image(
             prompt=prompt,
             negative_prompt=(body.negative_prompt or "").strip() or None,
-            model=resolve_image_model("character", None),
+            width=body.width,
+            height=body.height,
+            num_images=1,
+            model=model_key,
+            quality=body.quality,
+            style=body.style,
+            transparent_background=body.transparent_background,
         )
         n = len(result.get("images") or [])
         if n > 0:

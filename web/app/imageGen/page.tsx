@@ -397,6 +397,13 @@ export default function ImageGenPage() {
     setIsGeneratingCharacter(true);
     setStatus("Generating character image...");
     try {
+      const sizeMap: Record<"high" | "medium" | "low", number> = {
+        high: 1024,
+        medium: 512,
+        low: 256,
+      };
+      const effectiveQuality = imageDefaults.quality || qualityPreset;
+      const baseSize = sizeMap[effectiveQuality] ?? 1024;
       const result = await generateCharacterImage({
         role: charRole,
         physical_description: charPhysical,
@@ -404,6 +411,12 @@ export default function ImageGenPage() {
         outfit: charOutfit,
         negative_prompt: charNegative,
         style_id: selectedCharacterStyleId,
+        model: imageModel,
+        width: baseSize,
+        height: baseSize,
+        quality: openAiQuality || undefined,
+        style: openAiStyle || undefined,
+        transparent_background: openAiTransparent,
       });
       const now = new Date().toISOString();
       const newItems: GeneratedImage[] = result.images.map((img, index) => {
@@ -662,6 +675,11 @@ export default function ImageGenPage() {
                     onAgeChange={setCharAge}
                     onOutfitChange={setCharOutfit}
                     onNegativePromptChange={setCharNegative}
+                    model={imageModel}
+                    modelOptions={IMAGE_MODEL_OPTIONS}
+                    onModelChange={setImageModel}
+                    qualityPreset={qualityPreset}
+                    onQualityPresetChange={setQualityPreset}
                     onGenerateCharacter={handleGenerateCharacter}
                     isGenerating={isGeneratingCharacter}
                     status={status}

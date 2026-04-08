@@ -16,6 +16,11 @@ type Props = {
   onAgeChange: (value: string) => void;
   onOutfitChange: (value: string) => void;
   onNegativePromptChange: (value: string) => void;
+  model: string;
+  modelOptions: { value: string; label: string }[];
+  onModelChange: (value: string) => void;
+  qualityPreset: "high" | "medium" | "low";
+  onQualityPresetChange: (value: "high" | "medium" | "low") => void;
   onGenerateCharacter: () => void;
   isGenerating: boolean;
   status: string | null;
@@ -41,6 +46,11 @@ export function CharactersTabPanel({
   onAgeChange,
   onOutfitChange,
   onNegativePromptChange,
+  model,
+  modelOptions,
+  onModelChange,
+  qualityPreset,
+  onQualityPresetChange,
   onGenerateCharacter,
   isGenerating,
   status,
@@ -122,6 +132,36 @@ export function CharactersTabPanel({
             {s.name}
           </option>
         ))}
+      </select>
+
+      <label className="imagegen-label" htmlFor="character-model">
+        Model
+      </label>
+      <select
+        id="character-model"
+        className="imagegen-select"
+        value={model}
+        onChange={(e) => onModelChange(e.target.value)}
+      >
+        {modelOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+
+      <label className="imagegen-label" htmlFor="character-quality">
+        Quality
+      </label>
+      <select
+        id="character-quality"
+        className="imagegen-select"
+        value={qualityPreset}
+        onChange={(e) => onQualityPresetChange(e.target.value as "high" | "medium" | "low")}
+      >
+        <option value="high">High (1024)</option>
+        <option value="medium">Medium (512)</option>
+        <option value="low">Low (256)</option>
       </select>
 
       <button

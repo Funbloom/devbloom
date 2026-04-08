@@ -205,6 +205,14 @@ export type GenerateCharacterImageParams = {
   outfit?: string;
   negative_prompt?: string;
   style_id?: string | null;
+  model?: string;
+  width?: number;
+  height?: number;
+  /** OpenAI image output quality (low / medium / high). */
+  quality?: string;
+  /** OpenAI image style (natural / vivid). */
+  style?: string;
+  transparent_background?: boolean;
 };
 
 export type GenerateCharacterImageResult = {
@@ -224,6 +232,14 @@ export async function generateCharacterImage(
     negative_prompt: params.negative_prompt?.trim() || null,
     style_id: params.style_id?.trim() && params.style_id !== "__none" ? params.style_id.trim() : null,
   };
+  if (params.model?.trim()) body.model = params.model.trim();
+  if (typeof params.width === "number") body.width = params.width;
+  if (typeof params.height === "number") body.height = params.height;
+  if (params.quality?.trim()) body.quality = params.quality.trim();
+  if (params.style?.trim()) body.style = params.style.trim();
+  if (typeof params.transparent_background === "boolean") {
+    body.transparent_background = params.transparent_background;
+  }
   const response = await fetchApi("/tools/generate_character_image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
