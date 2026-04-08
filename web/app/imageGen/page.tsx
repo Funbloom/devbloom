@@ -21,7 +21,7 @@ import { IMAGEGEN_EDIT_CONTEXT_KEY } from "./editKeys";
 import { RunEditImageEffect } from "./RunEditImageEffect";
 import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
-import { DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
+import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
 import { useAuth } from "../contexts/AuthContext";
 import { fetchApi } from "../lib/api";
 import { CharactersTabPanel } from "./CharactersTabPanel";
@@ -187,7 +187,7 @@ function ImageGenPageInner() {
   const [bgBgThreshold, setBgBgThreshold] = useState(BG_DEFAULTS.bgThreshold);
   const [sizePreset, setSizePreset] = useState<"square" | "portrait" | "landscape">("square");
   const [qualityPreset, setQualityPreset] = useState<"high" | "medium" | "low">("medium");
-  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
+  const [imageModel, setImageModel] = useState(IMAGEGEN_DEFAULT_IMAGE_MODEL);
   const [openAiQuality, setOpenAiQuality] = useState("");
   const [openAiStyle, setOpenAiStyle] = useState("");
   const [openAiTransparent, setOpenAiTransparent] = useState(false);
@@ -613,6 +613,18 @@ function ImageGenPageInner() {
 
   const visibleImages = images.filter((img) => img.tab === (activeTab === "styles" ? "image" : activeTab));
 
+  const isImageCreationBusy =
+    isGenerating || isGeneratingCharacter || isEditImageGenerating || isGeneratingPrompt;
+  const imageCreationOverlayText = isEditImageGenerating
+    ? "Editing image (Nano Banana)…"
+    : isGeneratingCharacter
+      ? "Generating character image…"
+      : isGenerating
+        ? "Generating image…"
+        : isGeneratingPrompt
+          ? "Generating prompt…"
+          : "";
+
   return (
     <main>
       <Suspense fallback={null}>
@@ -629,13 +641,13 @@ function ImageGenPageInner() {
         className="imagegen-shell"
         style={{
           position: "relative",
-          ...(isEditImageGenerating ? { minHeight: "min(70vh, 900px)" } : {}),
+          ...(isImageCreationBusy ? { minHeight: "min(70vh, 900px)" } : {}),
         }}
       >
-        {isEditImageGenerating && (
+        {isImageCreationBusy && (
           <div className="generate-overlay" aria-live="polite" aria-busy="true">
             <div className="generate-spinner" />
-            <div className="generate-overlay-text">Editing image (Nano Banana)…</div>
+            <div className="generate-overlay-text">{imageCreationOverlayText}</div>
           </div>
         )}
         <div className="imagegen-left">

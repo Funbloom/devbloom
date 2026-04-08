@@ -9,4 +9,8 @@ export const IMAGE_MODEL_OPTIONS: ImageModelOption[] = [
   { value: "gpt-image-1.5", label: "GPT Image 1.5" },
 ];
 
+/** Default for storyboard tiles and any shared UI that does not override. */
 export const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
+
+/** Default model on the Image Gen page (GPT Image / ChatGPT path). */
+export const IMAGEGEN_DEFAULT_IMAGE_MODEL = "gpt-image-1.5";
