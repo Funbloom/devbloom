@@ -400,6 +400,16 @@ main {
   padding: 24px;
 }
 
+/* Edit image: fill viewport below header without page scroll; content column centered */
+main.imagegen-edit-page {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 10px 14px;
+  overflow: hidden;
+  max-height: 100%;
+}
+
 .chat-shell {
   width: 100%;
   max-width: 100%;

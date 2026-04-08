@@ -10,6 +10,7 @@ type Props = {
   onDeleteImage: (id: string) => void;
   onRemoveBackground: (id: string) => void;
   onToggleLocation: (id: string) => void;
+  onEditImage: (img: GeneratedImage) => void;
   emptyMessage?: string;
 };
 
@@ -22,6 +23,7 @@ export function ResultsPanel({
   onRemoveBackground,
   emptyMessage = "No images yet. Enter a prompt and click Generate.",
   onToggleLocation,
+  onEditImage,
 }: Props) {
   return (
     <div className="imagegen-right">
@@ -90,6 +92,14 @@ export function ResultsPanel({
                   {img.prompt}
                 </div>
                 <div className="imagegen-card-actions">
+                  <button
+                    type="button"
+                    className="imagegen-delete-button imagegen-action-button"
+                    onClick={() => onEditImage(img)}
+                    title="Edit with Nano Banana (reference image)"
+                  >
+                    Edit
+                  </button>
                   <button
                     type="button"
                     className="imagegen-delete-button imagegen-action-button"

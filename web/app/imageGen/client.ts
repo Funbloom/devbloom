@@ -2,6 +2,7 @@
 
 import { fetchApi } from "../lib/api";
 import type { Style } from "../storyboard/types";
+import type { GeneratedImage } from "./types";
 import { API_BASE } from "./config";
 
 export type BackendImageResult = {
@@ -26,6 +27,48 @@ export function normalizeImageUrl(url: string): string {
   return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
+/** Resolve reference for Nano Banana edit API: full HTTPS URL or bare Images/ filename. */
+export function resolveReferenceForEditApi(img: GeneratedImage): string {
+  const u = (img.url || "").trim();
+  if (u.startsWith("http://") || u.startsWith("https://")) return u;
+  if (img.filename?.trim()) return img.filename.trim();
+  try {
+    const parsed = new URL(u, API_BASE);
+    const last = parsed.pathname.split("/").filter(Boolean).pop() || "";
+    if (last && /^[a-zA-Z0-9._-]+$/.test(last)) return last;
+  } catch {
+    // ignore
+  }
+  throw new Error("This image needs a stored filename or full URL to use as an edit reference.");
+}
+
+export async function editImageNanobanana(params: {
+  changes: string;
+  reference: string;
+  project_key?: string;
+  width?: number;
+  height?: number;
+}): Promise<BackendImageResult[]> {
+  const body: Record<string, unknown> = {
+    changes: params.changes.trim(),
+    reference: params.reference.trim(),
+  };
+  if (params.project_key?.trim()) body.project_key = params.project_key.trim();
+  if (typeof params.width === "number") body.width = params.width;
+  if (typeof params.height === "number") body.height = params.height;
+  const response = await fetchApi("/tools/edit_image_nanobanana", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+  const data = (await response.json()) as { images?: BackendImageResult[] };
+  return (data.images ?? []).filter((img) => (img.url || img.filename || "") !== "");
+}
+
 export async function generateImageFromPrompt(
   prompt: string,
   options?: {
@@ -37,9 +80,12 @@ export async function generateImageFromPrompt(
     quality?: string;
     style?: string;
     transparentBackground?: boolean;
+    /** When set, images are saved under this project’s Images/ (same as remove background). */
+    projectKey?: string;
   }
 ): Promise<BackendImageResult[]> {
   const body: Record<string, unknown> = { prompt };
+  if (options?.projectKey?.trim()) body.project_key = options.projectKey.trim();
   if (options?.negativePrompt?.trim()) {
     body.negative_prompt = options.negativePrompt.trim();
   }
@@ -213,6 +259,7 @@ export type GenerateCharacterImageParams = {
   /** OpenAI image style (natural / vivid). */
   style?: string;
   transparent_background?: boolean;
+  project_key?: string;
 };
 
 export type GenerateCharacterImageResult = {
@@ -240,6 +287,7 @@ export async function generateCharacterImage(
   if (typeof params.transparent_background === "boolean") {
     body.transparent_background = params.transparent_background;
   }
+  if (params.project_key?.trim()) body.project_key = params.project_key.trim();
   const response = await fetchApi("/tools/generate_character_image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

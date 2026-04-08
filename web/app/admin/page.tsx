@@ -396,6 +396,7 @@ export default function AdminPage() {
         body: JSON.stringify({
           project_key: projectKeyInput,
           display_name: displayName,
+          ...(localPath ? { project_path: localPath } : {}),
         }),
       });
       if (!response.ok) {
@@ -446,6 +447,7 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           display_name: editProject.display_name.trim(),
+          ...(localPath ? { project_path: localPath } : {}),
         }),
       });
       if (!response.ok) {

@@ -18,7 +18,7 @@ except Exception:
     new_session = None
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from services.rag import require_project_path, resolve_project_path
+from services.rag import resolve_project_path
 from core.local_settings import load_image_defaults
 from core.code_settings import (
     ALLOWED_IMAGE_DIMENSIONS,
@@ -52,10 +52,10 @@ def _shorten_prompt(prompt: str, max_len: int = MAX_PROMPT_LEN) -> str:
 def get_images_dir(project_key: Optional[str] = None) -> Path:
     raw = os.getenv("IMAGES_OUTPUT_DIR")
     if not raw:
-        project_dir = require_project_path(project_key) if project_key else resolve_project_path(project_key)
+        project_dir = resolve_project_path(project_key)
         raw = str(Path(project_dir) / "Images") if project_dir else "./output/images"
     elif not Path(raw).is_absolute():
-        project_dir = require_project_path(project_key) if project_key else resolve_project_path(project_key)
+        project_dir = resolve_project_path(project_key)
         if project_dir:
             raw = str(Path(project_dir) / raw)
     output_dir = Path(os.path.expandvars(raw)).expanduser()

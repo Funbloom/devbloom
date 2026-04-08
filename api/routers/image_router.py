@@ -44,6 +44,7 @@ class GenerateCharacterImageRequest(BaseModel):
     quality: str | None = None
     style: str | None = None
     transparent_background: bool | None = None
+    project_key: str | None = None
 
 
 class GenerateImageRequest(BaseModel):
@@ -68,6 +69,20 @@ class GenerateImageBytesRequest(BaseModel):
     transparent_background: bool | None = None
     model: str | None = None
     project_key: str | None = None
+
+
+class EditImageNanobananaRequest(BaseModel):
+    """Edit via Gemini image generation (internal 'Nano Banana' / gemini-3.1-flash-image-preview) with a reference image."""
+
+    changes: str = Field(min_length=1, max_length=4000)
+    reference: str = Field(
+        min_length=1,
+        max_length=4000,
+        description="HTTPS URL to the image, or bare filename under project Images/",
+    )
+    project_key: str | None = None
+    width: int = 1024
+    height: int = 1024
 
 
 class ResizeImageRequest(BaseModel):
@@ -181,6 +196,7 @@ def generate_character_image_route(
             quality=body.quality,
             style=body.style,
             transparent_background=body.transparent_background,
+            project_key=(body.project_key or "").strip() or None,
         )
         n = len(result.get("images") or [])
         if n > 0:
@@ -190,6 +206,44 @@ def generate_character_image_route(
         if style_name:
             out["style_name"] = style_name
         return out
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@image_router.post("/tools/edit_image_nanobanana")
+def edit_image_nanobanana_route(
+    body: EditImageNanobananaRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Apply text edits to an image using Gemini image (Nano Banana) with the given image as reference."""
+    check_can_generate_images(user.get("id") or "", user.get("is_admin") or False, count=1)
+    changes = (body.changes or "").strip()
+    ref = (body.reference or "").strip()
+    if not ref:
+        raise HTTPException(status_code=400, detail="Reference image URL or filename is required.")
+    prompt = (
+        "You are given a reference image. Apply the following edits. "
+        "Preserve subject identity and overall composition unless the edit requires otherwise.\n\n"
+        f"Requested changes:\n{changes}"
+    )
+    try:
+        # Always use Gemini image path (Nano Banana / gemini-3.1-flash-image-preview in image_tool._generate_image_gemini).
+        model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
+        result = generate_image(
+            prompt=prompt,
+            width=body.width,
+            height=body.height,
+            num_images=1,
+            model=model_key,
+            project_key=body.project_key,
+            reference_image_filenames=[ref],
+        )
+        n = len(result.get("images") or [])
+        if n > 0:
+            increment_usage(user.get("id") or "", n)
+        return result
     except HTTPException:
         raise
     except Exception as exc:

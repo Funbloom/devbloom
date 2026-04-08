@@ -56,7 +56,8 @@ def require_local_project_path(project_key: Optional[str]) -> str:
     path = get_local_project_path(project_key)
     if not path:
         raise ValueError(
-            f"Local project path is not set for '{project_key}'. "
-            "Set it in Admin > Project Config."
+            f"Local project path is not set on the API server for '{project_key}'. "
+            "In Admin → Projects, edit the project, enter your Unity/project root path, and save—"
+            "that path is stored for the server (not only in the browser)."
         )
     return path

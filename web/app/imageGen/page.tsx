@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   addStyle,
@@ -13,8 +14,11 @@ import {
   normalizeImageUrl,
   putImageGenerated,
   removeBackground,
+  resolveReferenceForEditApi,
   uploadImageToCloud,
 } from "./client";
+import { IMAGEGEN_EDIT_CONTEXT_KEY } from "./editKeys";
+import { RunEditImageEffect } from "./RunEditImageEffect";
 import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
 import { DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
@@ -146,7 +150,8 @@ function StylesAddForm({
   );
 }
 
-export default function ImageGenPage() {
+function ImageGenPageInner() {
+  const router = useRouter();
   const { session } = useAuth();
   const BG_DEFAULTS = {
     model: "isnet-general-use",
@@ -162,6 +167,7 @@ export default function ImageGenPage() {
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [imagesPerRow, setImagesPerRow] = useState(3);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isEditImageGenerating, setIsEditImageGenerating] = useState(false);
   const [isGeneratingCharacter, setIsGeneratingCharacter] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -354,6 +360,7 @@ export default function ImageGenPage() {
         quality: openAiQuality || undefined,
         style: openAiStyle || undefined,
         transparentBackground: openAiTransparent,
+        ...(projectKey.trim() ? { projectKey: projectKey.trim() } : {}),
       });
       const now = new Date().toISOString();
       const newItems: GeneratedImage[] = backendImages.map((img, index) => {
@@ -417,6 +424,7 @@ export default function ImageGenPage() {
         quality: openAiQuality || undefined,
         style: openAiStyle || undefined,
         transparent_background: openAiTransparent,
+        ...(projectKey.trim() ? { project_key: projectKey.trim() } : {}),
       });
       const now = new Date().toISOString();
       const newItems: GeneratedImage[] = result.images.map((img, index) => {
@@ -584,11 +592,52 @@ export default function ImageGenPage() {
     [images, projectKey, defaultLocation],
   );
 
+  const handleEditImage = useCallback(
+    (img: GeneratedImage) => {
+      try {
+        resolveReferenceForEditApi(img);
+      } catch (e) {
+        setStatus(e instanceof Error ? e.message : "Cannot edit this image.");
+        return;
+      }
+      try {
+        sessionStorage.setItem(IMAGEGEN_EDIT_CONTEXT_KEY, JSON.stringify(img));
+      } catch {
+        setStatus("Could not store image context.");
+        return;
+      }
+      router.push("/imageGen/edit");
+    },
+    [router],
+  );
+
   const visibleImages = images.filter((img) => img.tab === (activeTab === "styles" ? "image" : activeTab));
 
   return (
     <main>
-      <div className="imagegen-shell">
+      <Suspense fallback={null}>
+        <RunEditImageEffect
+          projectKey={projectKey}
+          defaultLocation={defaultLocation}
+          setImages={setImages}
+          setStatus={setStatus}
+          setIsEditImageGenerating={setIsEditImageGenerating}
+          setActiveTab={setActiveTab}
+        />
+      </Suspense>
+      <div
+        className="imagegen-shell"
+        style={{
+          position: "relative",
+          ...(isEditImageGenerating ? { minHeight: "min(70vh, 900px)" } : {}),
+        }}
+      >
+        {isEditImageGenerating && (
+          <div className="generate-overlay" aria-live="polite" aria-busy="true">
+            <div className="generate-spinner" />
+            <div className="generate-overlay-text">Editing image (Nano Banana)…</div>
+          </div>
+        )}
         <div className="imagegen-left">
           <div className="imagegen-panel">
             <h2 className="imagegen-panel-title">Image Generation</h2>
@@ -848,9 +897,12 @@ export default function ImageGenPage() {
           onDeleteImage={(id) => setImages((prev) => prev.filter((img) => img.id !== id))}
           onToggleLocation={toggleImageLocation}
           onRemoveBackground={handleRemoveBackground}
+          onEditImage={handleEditImage}
           emptyMessage="No images yet. Enter a prompt and click Generate."
         />
       </div>
     </main>
   );
 }
+
+export default ImageGenPageInner;
