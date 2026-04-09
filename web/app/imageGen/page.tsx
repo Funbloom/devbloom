@@ -18,7 +18,7 @@ import {
   resolveReferenceForEditApi,
   uploadImageToCloud,
 } from "./client";
-import { IMAGEGEN_EDIT_CONTEXT_KEY } from "./editKeys";
+import { IMAGEGEN_EDIT_CONTEXT_KEY, IMAGEGEN_EDIT_RETURN_KEY } from "./editKeys";
 import { RunEditImageEffect } from "./RunEditImageEffect";
 import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
@@ -28,6 +28,7 @@ import { fetchApi } from "../lib/api";
 import { CharactersTabPanel } from "./CharactersTabPanel";
 import { ImageTabPanel } from "./ImageTabPanel";
 import { ResultsPanel } from "./ResultsPanel";
+import { parseStoredImages, toPayload } from "./persistence";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
 
 function Tooltip({ text }: { text: string }) {
@@ -41,69 +42,6 @@ function Tooltip({ text }: { text: string }) {
       </span>
     </span>
   );
-}
-
-function parseStoredImages(raw: unknown[]): GeneratedImage[] {
-  return raw
-    .filter(
-      (img) =>
-        img &&
-        typeof (img as Record<string, unknown>).id === "string" &&
-        typeof (img as Record<string, unknown>).url === "string",
-    )
-    .map((img) => {
-      const o = img as Record<string, unknown>;
-      const rawUrl = typeof o.url === "string" ? o.url : "";
-      const url = normalizeImageUrl(rawUrl);
-      const tab: ImageTab = o.tab === "characters" ? "characters" : "image";
-
-      let location: ImageLocation = "local";
-      if (typeof o.location === "string" && (o.location === "local" || o.location === "cloud")) {
-        location = o.location;
-      } else if (url.includes("/images/")) {
-        location = "local";
-      } else {
-        location = "cloud";
-      }
-
-      const filename =
-        typeof o.filename === "string" && o.filename
-          ? o.filename
-          : (() => {
-              try {
-                const u = new URL(url, API_BASE);
-                const pathname = u.pathname || "";
-                const idx = pathname.lastIndexOf("/");
-                return idx >= 0 ? pathname.slice(idx + 1) : "";
-              } catch {
-                return "";
-              }
-            })();
-
-      return {
-        id: String(o.id),
-        url,
-        filename: filename || undefined,
-        prompt: typeof o.prompt === "string" ? o.prompt : "",
-        styleName: typeof o.styleName === "string" ? o.styleName : undefined,
-        createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(0).toISOString(),
-        tab,
-        location,
-      };
-    });
-}
-
-function toPayload(img: GeneratedImage): Record<string, unknown> {
-  return {
-    id: img.id,
-    url: img.url,
-    filename: img.filename,
-    prompt: img.prompt,
-    styleName: img.styleName,
-    createdAt: img.createdAt,
-    tab: img.tab,
-    location: img.location,
-  };
 }
 
 function StylesAddForm({
@@ -652,6 +590,7 @@ function ImageGenPageInner() {
         return;
       }
       try {
+        sessionStorage.removeItem(IMAGEGEN_EDIT_RETURN_KEY);
         sessionStorage.setItem(IMAGEGEN_EDIT_CONTEXT_KEY, JSON.stringify(img));
       } catch {
         setStatus("Could not store image context.");

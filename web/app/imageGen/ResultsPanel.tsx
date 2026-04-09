@@ -12,6 +12,10 @@ type Props = {
   onToggleLocation: (id: string) => void;
   onEditImage: (img: GeneratedImage) => void;
   emptyMessage?: string;
+  /** When true, omit the outer `imagegen-right` wrapper (parent already provides layout). */
+  embedded?: boolean;
+  /** Header next to the images-per-row controls (default: Results). */
+  panelTitle?: string;
 };
 
 export function ResultsPanel({
@@ -24,12 +28,14 @@ export function ResultsPanel({
   emptyMessage = "No images yet. Enter a prompt and click Generate.",
   onToggleLocation,
   onEditImage,
+  embedded = false,
+  panelTitle = "Results",
 }: Props) {
-  return (
-    <div className="imagegen-right">
+  const inner = (
+    <>
       <div className="imagegen-panel">
         <div className="imagegen-results-header">
-          <h2 className="imagegen-panel-title">Results</h2>
+          <h2 className="imagegen-panel-title">{panelTitle}</h2>
           <div className="edit-actions imagegen-images-per-row-row" style={{ alignItems: "center", gap: 8 }}>
             <label style={{ fontSize: 14 }} htmlFor="imagegen-images-per-row">
               Images per row:
@@ -139,6 +145,8 @@ export function ResultsPanel({
           )}
         </div>
       </div>
-    </div>
+    </>
   );
+  if (embedded) return inner;
+  return <div className="imagegen-right">{inner}</div>;
 }

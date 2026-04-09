@@ -1,4 +1,4 @@
-export type ImageTab = "image" | "characters" | "styles";
+export type ImageTab = "image" | "characters" | "styles" | "ui_canvas";
 
 export type ImageLocation = "local" | "cloud";
 

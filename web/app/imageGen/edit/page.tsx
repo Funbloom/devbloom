@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { normalizeImageUrl } from "../client";
-import { IMAGEGEN_EDIT_CONTEXT_KEY, IMAGEGEN_EDIT_JOB_KEY } from "../editKeys";
+import {
+  IMAGEGEN_EDIT_CONTEXT_KEY,
+  IMAGEGEN_EDIT_JOB_KEY,
+  IMAGEGEN_EDIT_RETURN_KEY,
+} from "../editKeys";
 import type { GeneratedImage } from "../types";
 
 export default function ImageGenEditPage() {
@@ -35,11 +39,14 @@ export default function ImageGenEditPage() {
     e.preventDefault();
     if (!source || !changes.trim()) return;
     sessionStorage.removeItem(IMAGEGEN_EDIT_CONTEXT_KEY);
+    const returnTo = sessionStorage.getItem(IMAGEGEN_EDIT_RETURN_KEY);
+    sessionStorage.removeItem(IMAGEGEN_EDIT_RETURN_KEY);
     sessionStorage.setItem(
       IMAGEGEN_EDIT_JOB_KEY,
       JSON.stringify({
         changes: changes.trim(),
         image: source,
+        ...(returnTo?.trim() ? { returnTo: returnTo.trim() } : {}),
       }),
     );
     router.push("/imageGen?runEdit=1");

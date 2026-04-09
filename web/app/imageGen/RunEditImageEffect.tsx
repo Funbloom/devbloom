@@ -39,9 +39,9 @@ export function RunEditImageEffect({
     sessionStorage.removeItem(IMAGEGEN_EDIT_JOB_KEY);
     router.replace("/imageGen");
 
-    let job: { changes: string; image: GeneratedImage };
+    let job: { changes: string; image: GeneratedImage; returnTo?: string };
     try {
-      job = JSON.parse(raw) as { changes: string; image: GeneratedImage };
+      job = JSON.parse(raw) as { changes: string; image: GeneratedImage; returnTo?: string };
     } catch {
       setStatus("Invalid edit job.");
       return;
@@ -94,9 +94,15 @@ export function RunEditImageEffect({
             location: defaultLocation,
           };
         });
-        setActiveTab(job.image.tab === "characters" ? "characters" : "image");
         setImages((prev) => [...newItems, ...prev]);
         setStatus("Image edited.");
+        if (job.returnTo?.trim()) {
+          window.setTimeout(() => {
+            router.replace(job.returnTo!.trim());
+          }, 120);
+        } else {
+          setActiveTab(job.image.tab === "characters" ? "characters" : "image");
+        }
       } catch (err) {
         setStatus(`Edit failed: ${err instanceof Error ? err.message : "Unknown error"}`);
       } finally {
