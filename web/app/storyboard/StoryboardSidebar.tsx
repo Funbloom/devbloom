@@ -393,49 +393,50 @@ export function StoryboardSidebar(props: Props) {
               })}
               {characters.length === 0 && <div className="status">No characters yet.</div>}
             </div>
-            <div
-              className="admin-form"
-              style={{ flexDirection: "column", alignItems: "flex-start", gap: 8, marginTop: 4 }}
-            >
-              <button
-                type="button"
-                onClick={() => void onAddCharacter()}
-                disabled={isSaving || !newCharacterName.trim()}
-              >
-                Add character
-              </button>
-              <input
-                type="text"
-                placeholder="Character name"
-                value={newCharacterName}
-                onChange={(e) => onNewCharacterNameChange(e.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="Image URL (optional)"
-                value={newCharacterImage}
-                onChange={(e) => onNewCharacterImageChange(e.target.value)}
-              />
-              <button
-                type="button"
-                className="admin-link"
-                onClick={() => setPickImageGenOpen(true)}
-                disabled={!projectKey.trim()}
-                title={!projectKey.trim() ? "Set active project in Admin to browse generated characters" : "Pick from Image Gen"}
-              >
-                Pick from Image Gen
-              </button>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  onNewCharacterFileChange(file);
-                  if (file) {
-                    onNewCharacterImageChange(file.name);
-                  }
-                }}
-              />
+            <div className="admin-form storyboard-entity-form">
+              <div className="storyboard-entity-form-row">
+                <button
+                  type="button"
+                  onClick={() => void onAddCharacter()}
+                  disabled={isSaving || !newCharacterName.trim()}
+                >
+                  Add character
+                </button>
+                <input
+                  type="text"
+                  placeholder="Character name"
+                  value={newCharacterName}
+                  onChange={(e) => onNewCharacterNameChange(e.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Image URL (optional)"
+                  value={newCharacterImage}
+                  onChange={(e) => onNewCharacterImageChange(e.target.value)}
+                />
+              </div>
+              <div className="storyboard-entity-form-row">
+                <button
+                  type="button"
+                  className="admin-link"
+                  onClick={() => setPickImageGenOpen(true)}
+                  disabled={!projectKey.trim()}
+                  title={!projectKey.trim() ? "Set active project in Admin to browse generated characters" : "Pick from Image Gen"}
+                >
+                  Pick from Image Gen
+                </button>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    onNewCharacterFileChange(file);
+                    if (file) {
+                      onNewCharacterImageChange(file.name);
+                    }
+                  }}
+                />
+              </div>
             </div>
             {pickImageGenOpen && (
               <div
@@ -552,49 +553,50 @@ export function StoryboardSidebar(props: Props) {
               })}
               {locations.length === 0 && <div className="status">No locations yet.</div>}
             </div>
-            <div
-              className="admin-form"
-              style={{ flexDirection: "column", alignItems: "flex-start", gap: 8, marginTop: 4 }}
-            >
-              <button
-                type="button"
-                onClick={() => void onAddLocation()}
-                disabled={isSaving || !newLocationName.trim()}
-              >
-                Add location
-              </button>
-              <input
-                type="text"
-                placeholder="Location name"
-                value={newLocationName}
-                onChange={(e) => onNewLocationNameChange(e.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="Image URL (optional)"
-                value={newLocationImage}
-                onChange={(e) => onNewLocationImageChange(e.target.value)}
-              />
-              <button
-                type="button"
-                className="admin-link"
-                onClick={() => setPickLocationImageGenOpen(true)}
-                disabled={!projectKey.trim()}
-                title={!projectKey.trim() ? "Set active project in Admin to browse generated images" : "Pick from Image Gen (Image tab)"}
-              >
-                Pick from Image Gen
-              </button>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  onNewLocationFileChange(file);
-                  if (file) {
-                    onNewLocationImageChange(file.name);
-                  }
-                }}
-              />
+            <div className="admin-form storyboard-entity-form">
+              <div className="storyboard-entity-form-row">
+                <button
+                  type="button"
+                  onClick={() => void onAddLocation()}
+                  disabled={isSaving || !newLocationName.trim()}
+                >
+                  Add location
+                </button>
+                <input
+                  type="text"
+                  placeholder="Location name"
+                  value={newLocationName}
+                  onChange={(e) => onNewLocationNameChange(e.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Image URL (optional)"
+                  value={newLocationImage}
+                  onChange={(e) => onNewLocationImageChange(e.target.value)}
+                />
+              </div>
+              <div className="storyboard-entity-form-row">
+                <button
+                  type="button"
+                  className="admin-link"
+                  onClick={() => setPickLocationImageGenOpen(true)}
+                  disabled={!projectKey.trim()}
+                  title={!projectKey.trim() ? "Set active project in Admin to browse generated images" : "Pick from Image Gen (Image tab)"}
+                >
+                  Pick from Image Gen
+                </button>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    onNewLocationFileChange(file);
+                    if (file) {
+                      onNewLocationImageChange(file.name);
+                    }
+                  }}
+                />
+              </div>
             </div>
             {pickLocationImageGenOpen && (
               <div

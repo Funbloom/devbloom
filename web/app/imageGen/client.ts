@@ -111,6 +111,23 @@ export async function generateImageFromPrompt(
   return (data.images ?? []).filter((img) => (img.url || img.filename || "") !== "");
 }
 
+/** Upload a file and save it under the project Images/ folder (same as generated images). */
+export async function importImageFile(file: File, projectKey: string): Promise<BackendImageResult[]> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("project_key", projectKey.trim());
+  const response = await fetchApi("/tools/import_image", {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+  const data = (await response.json()) as { images?: BackendImageResult[] };
+  return (data.images ?? []).filter((img) => (img.url || img.filename || "") !== "");
+}
+
 export async function generateImagePrompt(conceptPrompt: string): Promise<string> {
   const response = await fetchApi("/tools/generate_image_prompt", {
     method: "POST",
@@ -190,7 +207,7 @@ export async function uploadImageToCloud(
   projectKey: string,
   filename: string
 ): Promise<string> {
-  const response = await fetch(`${API_BASE}/tools/image_to_cloud`, {
+  const response = await fetchApi("/tools/image_to_cloud", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ project_key: projectKey, filename }),

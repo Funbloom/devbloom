@@ -39,9 +39,17 @@ def test_list_projects_ok(client):
     supabase_mock.table.assert_called_with("projects")
 
 
-def test_create_project_invalid_key(client):
+def test_create_project_requires_admin(client):
+    r = client.post(
+        "/projects",
+        json={"project_key": "valid_key", "display_name": "Test"},
+    )
+    assert r.status_code == 403
+
+
+def test_create_project_invalid_key(admin_client):
     with patch("routers.projects.get_supabase_client") as m:
-        r = client.post(
+        r = admin_client.post(
             "/projects",
             json={"project_key": "Invalid Key!", "display_name": "x"},
         )

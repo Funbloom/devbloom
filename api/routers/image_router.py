@@ -2,7 +2,7 @@ import mimetypes
 import logging
 import base64
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,7 @@ from services.image_tool import (
     crop_image,
     generate_image,
     get_images_dir,
+    import_uploaded_image,
     remove_background,
     resize_image,
     safe_resolve_path,
@@ -284,6 +285,23 @@ def generate_image_route(
         return result
     except HTTPException:
         raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@image_router.post("/tools/import_image")
+async def import_image_route(
+    file: UploadFile = File(...),
+    project_key: str | None = Form(None),
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Upload an image file and save it under the project Images/ folder (same as generated assets)."""
+    data = await file.read()
+    try:
+        one = import_uploaded_image(data, file.content_type, file.filename, project_key)
+        return {"images": [one]}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

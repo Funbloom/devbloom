@@ -1,6 +1,10 @@
 const LOCAL_AGENT_BASE =
   process.env.NEXT_PUBLIC_LOCAL_AGENT_URL || "http://127.0.0.1:8765";
 
+function normalizedLocalAgentBase(): string {
+  return LOCAL_AGENT_BASE.replace(/\/+$/, "");
+}
+
 const LOCAL_PROJECT_PATHS_KEY = "localProjectPaths";
 
 function extraLocalAgentPageHosts(): Set<string> {
@@ -45,9 +49,27 @@ type ResolveResponse = {
   gift_catalog_json_exists: boolean;
 };
 
+export type FsListDirResponse = {
+  current: string;
+  parent: string | null;
+  entries: Array<{ name: string; is_dir: boolean; full_path: string }>;
+};
+
+/** Native folder/file dialog result from the local agent (AppleScript on macOS, tkinter elsewhere). */
+export type NativePickResult =
+  | { cancelled: true; path?: undefined }
+  | { cancelled: false; path: string };
+
+function localAgentWrongServerHint(status: number): string {
+  if (status !== 404) return "";
+  return (
+    " Set NEXT_PUBLIC_LOCAL_AGENT_URL to the agent (default http://127.0.0.1:8765), not the API (:8000)."
+  );
+}
+
 async function requestLocalAgent<T>(path: string, options: RequestInit = {}): Promise<T> {
   assertLocalAgentContext();
-  const url = `${LOCAL_AGENT_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+  const url = `${normalizedLocalAgentBase()}${path.startsWith("/") ? "" : "/"}${path}`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
@@ -57,10 +79,17 @@ async function requestLocalAgent<T>(path: string, options: RequestInit = {}): Pr
     const text = await res.text();
     let message = text || `Local agent error: ${res.status}`;
     try {
-      const parsed = JSON.parse(text) as { detail?: string };
-      if (parsed.detail) message = parsed.detail;
+      const parsed = JSON.parse(text) as { detail?: string | string[] };
+      if (typeof parsed.detail === "string") message = parsed.detail;
+      else if (Array.isArray(parsed.detail) && parsed.detail[0]?.msg) message = String(parsed.detail[0].msg);
     } catch {
       // keep message
+    }
+    const hint = localAgentWrongServerHint(res.status);
+    if (message === "Not Found" || message.includes("Not Found")) {
+      message = `Not found at ${url}.${hint}`;
+    } else {
+      message = `${message}${hint}`;
     }
     throw new Error(message);
   }
@@ -72,8 +101,10 @@ export const localAgent = {
   async health(): Promise<boolean> {
     if (!isLocalAgentContext()) return false;
     try {
-      const res = await fetch(`${LOCAL_AGENT_BASE}/health`);
-      return res.ok;
+      const res = await fetch(`${normalizedLocalAgentBase()}/health`);
+      if (!res.ok) return false;
+      const data = (await res.json()) as { ok?: boolean; service?: string };
+      return data.ok === true && data.service === "local_agent";
     } catch {
       return false;
     }
@@ -82,6 +113,24 @@ export const localAgent = {
     return requestLocalAgent("/projects/approve", {
       method: "POST",
       body: JSON.stringify({ project_root: projectRoot }),
+    });
+  },
+  /** List any directory on disk (absolute path). Empty string lists the current user home. Localhost-only. */
+  listFsDir(path?: string): Promise<FsListDirResponse> {
+    return requestLocalAgent("/fs/list_dir", {
+      method: "POST",
+      body: JSON.stringify({ path: path ?? "" }),
+    });
+  },
+  /** Opens a native folder dialog on the machine running the agent; returns a full absolute path. */
+  pickDirectory(): Promise<NativePickResult> {
+    return requestLocalAgent("/fs/pick_directory", { method: "POST", body: "{}" });
+  },
+  /** Opens a native file dialog on the machine running the agent; returns a full absolute path. */
+  pickFile(body?: { title?: string; filetypes?: [string, string][] }): Promise<NativePickResult> {
+    return requestLocalAgent("/fs/pick_file", {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
     });
   },
   resolveProjectPaths(projectRoot: string): Promise<ResolveResponse> {
@@ -116,7 +165,7 @@ export const localAgent = {
   },
   async readBinary(projectRoot: string, relativePath: string): Promise<Blob> {
     assertLocalAgentContext();
-    const url = `${LOCAL_AGENT_BASE}/files/binary/read`;
+    const url = `${normalizedLocalAgentBase()}/files/binary/read`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

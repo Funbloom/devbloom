@@ -32,6 +32,7 @@ from routers.rag_routes import rag_router
 from routers.storyboard_routes import storyboard_router
 from routers.settings import settings_router
 from routers.tools import tools_router
+from routers.user_profile_routes import user_profile_router
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True}
+    return {"ok": True, "service": "gamedev-api"}
 
 
 @app.head("/auth/me")
@@ -88,4 +89,5 @@ app.include_router(storyboard_router)
 app.include_router(pdf_router, dependencies=[Depends(get_current_user)])
 app.include_router(image_router)
 app.include_router(settings_router, dependencies=[Depends(get_current_user)])
+app.include_router(user_profile_router)
 app.include_router(tools_router, dependencies=[Depends(get_current_user)])

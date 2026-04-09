@@ -11,7 +11,13 @@ import {
   type ReactNode,
 } from "react";
 import { createClient } from "../lib/supabase";
-import { setApiAccessToken, setOnServerDown, setOnUnauthorized, setOnUnauthorizedMessage } from "../lib/api";
+import {
+  fetchApi,
+  setApiAccessToken,
+  setOnServerDown,
+  setOnUnauthorized,
+  setOnUnauthorizedMessage,
+} from "../lib/api";
 import type { User, Session } from "@supabase/supabase-js";
 
 type AuthUser = { id: string; email: string; is_admin: boolean };
@@ -70,6 +76,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /** Restore active project from DB (overrides stale localStorage when present). */
+  const syncActiveProjectFromProfile = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    try {
+      const res = await fetchApi("/users/me/profile");
+      if (!res.ok) return;
+      const data = (await res.json()) as { current_project_key?: string | null };
+      const key = (data.current_project_key ?? "").trim();
+      if (key) {
+        window.localStorage.setItem("activeProjectKey", key);
+        window.dispatchEvent(new Event("activeProjectChanged"));
+      }
+    } catch {
+      // ignore — offline or profile missing
+    }
+  }, []);
+
   useEffect(() => {
     const supabase = createClient();
 
@@ -82,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setApiAccessToken(s?.access_token ?? null);
       if (s) {
         await refreshAuthUser();
+        await syncActiveProjectFromProfile();
       }
       setLoading(false);
     })();
@@ -92,17 +116,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(s);
       setUser(s?.user ?? null);
       setApiAccessToken(s?.access_token ?? null);
-      if (s) refreshAuthUser();
-      else setAuthUser(null);
+      if (s) {
+        void refreshAuthUser().then(() => void syncActiveProjectFromProfile());
+      } else {
+        setAuthUser(null);
+      }
     });
     return () => subscription.unsubscribe();
-  }, [refreshAuthUser]);
+  }, [refreshAuthUser, syncActiveProjectFromProfile]);
 
   const signOut = useCallback(async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
     setAuthUser(null);
     setApiAccessToken(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("activeProjectKey");
+      window.localStorage.removeItem("activeProjectName");
+      window.dispatchEvent(new Event("activeProjectChanged"));
+    }
     router.push("/login");
   }, [router]);
 

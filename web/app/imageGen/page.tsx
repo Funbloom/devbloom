@@ -10,6 +10,7 @@ import {
   generateImageFromPrompt,
   generateImagePrompt,
   getImageGenerated,
+  importImageFile,
   getStyles,
   normalizeImageUrl,
   putImageGenerated,
@@ -170,7 +171,9 @@ function ImageGenPageInner() {
   const [isEditImageGenerating, setIsEditImageGenerating] = useState(false);
   const [isGeneratingCharacter, setIsGeneratingCharacter] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<ImageTab>("image");
   const [charRole, setCharRole] = useState("");
   const [charPhysical, setCharPhysical] = useState("");
@@ -478,6 +481,54 @@ function ImageGenPageInner() {
     }
   };
 
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!projectKey.trim()) {
+      setStatus("Set an active project in Admin to import images.");
+      return;
+    }
+    setIsImporting(true);
+    setStatus("Importing image...");
+    try {
+      const backendImages = await importImageFile(file, projectKey.trim());
+      const now = new Date().toISOString();
+      const tab: ImageTab = activeTab === "characters" ? "characters" : "image";
+      const newItems: GeneratedImage[] = backendImages.map((img, index) => {
+        const raw = (img.url || img.filename || "") as string;
+        const filename =
+          (img as Record<string, unknown>).filename && typeof (img as Record<string, unknown>).filename === "string"
+            ? String((img as Record<string, unknown>).filename)
+            : (() => {
+                try {
+                  const u = new URL(raw, API_BASE);
+                  const pathname = u.pathname || "";
+                  const idx = pathname.lastIndexOf("/");
+                  return idx >= 0 ? pathname.slice(idx + 1) : "";
+                } catch {
+                  return "";
+                }
+              })();
+        return {
+          id: `${now}-import-${index}-${Math.random().toString(36).slice(2)}`,
+          url: raw.startsWith("http") ? raw : normalizeImageUrl(raw),
+          filename: filename || undefined,
+          prompt: "Imported image",
+          createdAt: now,
+          tab,
+          location: defaultLocation,
+        };
+      });
+      setImages((prev) => [...newItems, ...prev]);
+      setStatus("Image imported.");
+    } catch (err) {
+      setStatus(`Error importing image: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleImagesPerRowChange = (value: string) => {
     const n = parseInt(value, 10);
     if (!Number.isNaN(n) && n >= 1 && n <= 8) setImagesPerRow(n);
@@ -614,19 +665,34 @@ function ImageGenPageInner() {
   const visibleImages = images.filter((img) => img.tab === (activeTab === "styles" ? "image" : activeTab));
 
   const isImageCreationBusy =
-    isGenerating || isGeneratingCharacter || isEditImageGenerating || isGeneratingPrompt;
+    isGenerating ||
+    isGeneratingCharacter ||
+    isEditImageGenerating ||
+    isGeneratingPrompt ||
+    isImporting;
   const imageCreationOverlayText = isEditImageGenerating
     ? "Editing image (Nano Banana)…"
     : isGeneratingCharacter
       ? "Generating character image…"
       : isGenerating
         ? "Generating image…"
-        : isGeneratingPrompt
-          ? "Generating prompt…"
-          : "";
+        : isImporting
+          ? "Importing image…"
+          : isGeneratingPrompt
+            ? "Generating prompt…"
+            : "";
 
   return (
     <main>
+      <input
+        ref={importFileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+        className="imagegen-hidden-file-input"
+        aria-hidden
+        tabIndex={-1}
+        onChange={handleImportFileChange}
+      />
       <Suspense fallback={null}>
         <RunEditImageEffect
           projectKey={projectKey}
@@ -719,6 +785,9 @@ function ImageGenPageInner() {
                     isGenerating={isGenerating}
                     isGeneratingPrompt={isGeneratingPrompt}
                     status={status}
+                    onImportClick={() => importFileInputRef.current?.click()}
+                    isImporting={isImporting}
+                    importDisabled={!projectKey.trim()}
                   />
                 )}
                 {activeTab === "characters" && (
@@ -744,6 +813,9 @@ function ImageGenPageInner() {
                     onGenerateCharacter={handleGenerateCharacter}
                     isGenerating={isGeneratingCharacter}
                     status={status}
+                    onImportClick={() => importFileInputRef.current?.click()}
+                    isImporting={isImporting}
+                    importDisabled={!projectKey.trim()}
                   />
                 )}
                 {activeTab === "styles" && (

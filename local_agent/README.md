@@ -72,10 +72,20 @@ Approved roots are stored in:
 local_agent/.local_agent/approved_roots.json
 ```
 
+## Native folder / file picker (OS dialog)
+
+Admin **Pick folder…** calls the agent so a real OS dialog runs on your machine and returns an absolute path.
+
+- `POST /fs/pick_directory` — body `{}` — `{ "cancelled": true }` or `{ "cancelled": false, "path": "/full/path" }`.
+- `POST /fs/pick_file` — optional `{ "title": "…", "filetypes": [["Images","*.png *.jpg"],["All","*.*"]] }` — same response shape.
+
+Needs a **GUI session**. **macOS**: AppleScript (`osascript`), no tkinter. **Windows/Linux**: tkinter.
+
 ## Health check
 ```
 GET /health
 ```
+Response includes `"service": "local_agent"` so the web app can tell this process from the main API (`gamedev-api`).
 
 ## Mesh Gen / Hunyuan3D-2 (in-process)
 

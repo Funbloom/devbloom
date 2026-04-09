@@ -138,6 +138,47 @@ def build_image_url(filename: str, project_key: Optional[str] = None) -> str:
     return url
 
 
+_IMPORT_MAX_BYTES = 25 * 1024 * 1024
+_IMPORT_CT_TO_EXT: dict[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+
+
+def _guess_import_ext(content_type: Optional[str], filename: Optional[str]) -> Optional[str]:
+    ct = (content_type or "").split(";")[0].strip().lower()
+    if ct in _IMPORT_CT_TO_EXT:
+        return _IMPORT_CT_TO_EXT[ct]
+    fn = (filename or "").lower()
+    for ext in ("png", "jpg", "jpeg", "webp", "gif"):
+        if fn.endswith(f".{ext}"):
+            return "jpg" if ext == "jpeg" else ext
+    return None
+
+
+def import_uploaded_image(
+    data: bytes,
+    content_type: Optional[str],
+    original_filename: Optional[str],
+    project_key: Optional[str],
+) -> dict:
+    """Save an uploaded image to the project Images/ folder with a generated name (same as generated assets)."""
+    pk = (project_key or "").strip() or None
+    if not pk:
+        raise ValueError("project_key is required.")
+    if len(data) > _IMPORT_MAX_BYTES:
+        raise ValueError("File too large (max 25 MB).")
+    ext = _guess_import_ext(content_type, original_filename)
+    if not ext:
+        raise ValueError("Unsupported image type. Use PNG, JPEG, WebP, or GIF.")
+    output_name = build_image_filename("import", ext)
+    save_bytes_to_file(data, output_name, pk)
+    return {"filename": output_name, "url": build_image_url(output_name, pk)}
+
+
 def _clamp_dimension(value: int) -> int:
     return value if value in ALLOWED_DIMENSIONS else 1024
 

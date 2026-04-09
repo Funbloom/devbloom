@@ -24,6 +24,9 @@ type Props = {
   onGenerateCharacter: () => void;
   isGenerating: boolean;
   status: string | null;
+  onImportClick: () => void;
+  isImporting: boolean;
+  importDisabled: boolean;
 };
 
 const canGenerate = (role: string, physical: string, outfit: string, age: string) =>
@@ -54,6 +57,9 @@ export function CharactersTabPanel({
   onGenerateCharacter,
   isGenerating,
   status,
+  onImportClick,
+  isImporting,
+  importDisabled,
 }: Props) {
   return (
     <>
@@ -164,14 +170,29 @@ export function CharactersTabPanel({
         <option value="low">Low (256)</option>
       </select>
 
-      <button
-        type="button"
-        className="imagegen-generate-button"
-        onClick={onGenerateCharacter}
-        disabled={isGenerating || !canGenerate(role, physical, outfit, age)}
-      >
-        {isGenerating ? "Generating Character..." : "Generate Character"}
-      </button>
+      <div className="imagegen-generate-import-row">
+        <button
+          type="button"
+          className="imagegen-generate-button"
+          onClick={onGenerateCharacter}
+          disabled={isGenerating || isImporting || !canGenerate(role, physical, outfit, age)}
+        >
+          {isGenerating ? "Generating Character..." : "Generate Character"}
+        </button>
+        <button
+          type="button"
+          className="imagegen-import-button"
+          onClick={onImportClick}
+          disabled={isGenerating || isImporting || importDisabled}
+          title={
+            importDisabled
+              ? "Set an active project in Admin to import into the project Images folder"
+              : "Import a file from disk (saved like a generated image)"
+          }
+        >
+          {isImporting ? "Importing…" : "Import image…"}
+        </button>
+      </div>
 
       {status && (
         <div className="status" style={{ marginTop: 8 }}>

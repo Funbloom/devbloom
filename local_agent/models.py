@@ -41,6 +41,22 @@ class DirListRequest(BaseModel):
     relative_path: str = Field(min_length=1)
 
 
+class FsListRequest(BaseModel):
+    """List a directory anywhere on disk (localhost only). Empty path lists the current user home directory."""
+
+    path: str = Field(default="", description="Absolute directory path; empty = user home.")
+
+
+class FsPickFileBody(BaseModel):
+    """Optional settings for POST /fs/pick_file (native file dialog)."""
+
+    title: str = Field(default="Choose file")
+    filetypes: list[list[str]] | None = Field(
+        default=None,
+        description='Tkinter filetypes as [["Images","*.png *.jpg"],["All","*.*"]]',
+    )
+
+
 class FileBinaryReadRequest(BaseModel):
     project_root: str = Field(min_length=1)
     relative_path: str = Field(min_length=1)

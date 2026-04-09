@@ -6,9 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from core.auth import require_admin
 from core.project_key import validate_project_key
 from services.rag import get_supabase_client
 from games.pocket_voyager.services.gifts_service import load_gift_catalog
@@ -48,7 +49,7 @@ def list_projects() -> list[dict]:
 
 
 @projects_router.post("/projects")
-def create_project(body: ProjectCreate) -> dict:
+def create_project(body: ProjectCreate, _admin: dict = Depends(require_admin)) -> dict:
     project_key = validate_project_key(body.project_key)
     display_name = body.display_name.strip()
     project_path = body.project_path.strip() if body.project_path else ""

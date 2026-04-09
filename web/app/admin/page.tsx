@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchApi, API_BASE } from "../lib/api";
 import { projectKeyFromDisplayName } from "../lib/projectKey";
 import { localAgent, getLocalProjectPath, setLocalProjectPath, isLocalAgentContext } from "../lib/localAgentClient";
@@ -46,6 +46,10 @@ const AGENTS = [
   { id: "producer", name: "Producer" },
 ];
 
+/** Shown when the agent on :8765 is down or NEXT_PUBLIC_LOCAL_AGENT_URL points at the API (:8000). */
+const LOCAL_AGENT_UNREACHABLE_MSG =
+  "Local agent not reachable. Run it on 127.0.0.1:8765 and set NEXT_PUBLIC_LOCAL_AGENT_URL to that (not the API). Restart the Next dev server after .env changes.";
+
 export default function AdminPage() {
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -72,8 +76,6 @@ export default function AdminPage() {
     display_name: "",
     project_path: "",
   });
-  const projectPathPickerRef = useRef<HTMLInputElement>(null);
-  const editPathPickerRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [testStatus, setTestStatus] = useState<{
@@ -156,6 +158,18 @@ export default function AdminPage() {
       setProjectsLoaded(true);
     }
   };
+
+  const persistCurrentProjectToProfile = useCallback(async (projectKeyValue: string | null) => {
+    try {
+      await fetchApi("/users/me/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_project_key: projectKeyValue }),
+      });
+    } catch {
+      // non-blocking; local selection still works
+    }
+  }, []);
 
   const loadUsers = async () => {
     setUsersLoading(true);
@@ -250,11 +264,21 @@ export default function AdminPage() {
   }, [session]);
 
   useEffect(() => {
+    const syncFromStorage = () => {
+      const stored = window.localStorage.getItem("activeProjectKey") || "";
+      setActiveProjectKey(stored);
+    };
+    window.addEventListener("activeProjectChanged", syncFromStorage);
+    return () => window.removeEventListener("activeProjectChanged", syncFromStorage);
+  }, []);
+
+  useEffect(() => {
     if (!projectsLoaded) return;
     if (projects.length === 0) {
       if (activeProjectKey) {
         setActiveProjectKey("");
         window.localStorage.removeItem("activeProjectKey");
+        void persistCurrentProjectToProfile(null);
       }
       if (scope === "project") {
         setScope("generic");
@@ -265,8 +289,9 @@ export default function AdminPage() {
     if (activeProjectKey && !exists) {
       setActiveProjectKey("");
       window.localStorage.removeItem("activeProjectKey");
+      void persistCurrentProjectToProfile(null);
     }
-  }, [projects, activeProjectKey, scope, projectsLoaded]);
+  }, [projects, activeProjectKey, scope, projectsLoaded, persistCurrentProjectToProfile]);
 
   useEffect(() => {
     if (scope === "project") {
@@ -363,6 +388,40 @@ export default function AdminPage() {
     }
   };
 
+  const pickProjectFolder = useCallback(async (target: "new" | "edit") => {
+    if (!isLocalAgentContext()) {
+      setProjectStatus(
+        "The folder picker runs on your computer through the local agent. Open this app from http://localhost:3000 (or your NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS host). You can still type the path manually.",
+      );
+      return;
+    }
+    const ok = await localAgent.health();
+    if (!ok) {
+      setProjectStatus(LOCAL_AGENT_UNREACHABLE_MSG);
+      return;
+    }
+    setProjectStatus("Choose a folder in the dialog on your computer…");
+    try {
+      const result = await localAgent.pickDirectory();
+      if (result.cancelled) {
+        setProjectStatus(null);
+        return;
+      }
+      if (result.path) {
+        await localAgent.approveProjectRoot(result.path);
+        if (target === "new") {
+          setNewProject((prev) => ({ ...prev, project_path: result.path! }));
+        } else {
+          setEditProject((prev) => ({ ...prev, project_path: result.path! }));
+        }
+        setProjectStatus("Project folder selected.");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Folder picker failed";
+      setProjectStatus(message);
+    }
+  }, []);
+
   const handleProjectSave = async () => {
     setProjectStatus(null);
     const displayName = newProject.display_name.trim();
@@ -383,7 +442,7 @@ export default function AdminPage() {
         if (isLocalAgentContext()) {
           const ok = await localAgent.health();
           if (!ok) {
-            setProjectStatus("Error: Local agent is not running.");
+            setProjectStatus(LOCAL_AGENT_UNREACHABLE_MSG);
             return;
           }
           await localAgent.approveProjectRoot(localPath);
@@ -435,7 +494,7 @@ export default function AdminPage() {
         if (isLocalAgentContext()) {
           const ok = await localAgent.health();
           if (!ok) {
-            setProjectStatus("Error: Local agent is not running.");
+            setProjectStatus(LOCAL_AGENT_UNREACHABLE_MSG);
             return;
           }
           await localAgent.approveProjectRoot(localPath);
@@ -499,6 +558,7 @@ export default function AdminPage() {
       window.localStorage.removeItem("activeProjectName");
     }
     window.dispatchEvent(new Event("activeProjectChanged"));
+    void persistCurrentProjectToProfile(value.trim() || null);
     if (scope === "project") {
       setProjectKey(value);
     }
@@ -771,8 +831,13 @@ export default function AdminPage() {
 
         {activeTab === "projects" && (
         <>
+        {projectStatus && <div className="admin-status">{projectStatus}</div>}
+
         <div className="admin-card">
-          <div className="admin-card-title">Project Config</div>
+          <div className="admin-card-title">Active project</div>
+          <p style={{ margin: "0 0 1rem", fontSize: 14, color: "var(--muted, #94a3b8)" }}>
+            Choose which project the app uses for pipelines, Image Gen, and local paths.
+          </p>
           <div className="admin-project-active">
             <label>
               Active Project
@@ -795,81 +860,10 @@ export default function AdminPage() {
               </span>
             )}
           </div>
-          <div className="admin-project-form">
-            <label className="admin-field">
-              <span>Project name</span>
-              <input
-                type="text"
-                placeholder="Display name"
-                value={newProject.display_name}
-                onChange={(e) => setNewProject((prev) => ({ ...prev, display_name: e.target.value }))}
-              />
-            </label>
-            {newProject.display_name.trim() !== "" && (
-              <div className="admin-field-hint" style={{ marginTop: -4, marginBottom: 4, fontSize: 13, color: "var(--muted, #94a3b8)" }}>
-                Project key: <code>{projectKeyFromDisplayName(newProject.display_name)}</code>
-              </div>
-            )}
-            <label className="admin-field admin-field-path">
-              <span>Project root path</span>
-              <div className="admin-path-input">
-                <input
-                  type="text"
-                  placeholder="Project path"
-                  value={newProject.project_path}
-                  onChange={(e) =>
-                    setNewProject((prev) => ({ ...prev, project_path: e.target.value }))
-                  }
-                />
-                <button
-                  type="button"
-                  className="admin-link"
-                  onClick={async () => {
-                    if ("showDirectoryPicker" in window) {
-                      try {
-                        // @ts-expect-error - showDirectoryPicker not in TS lib yet.
-                        const handle = await window.showDirectoryPicker();
-                        if (handle?.name) {
-                          setNewProject((prev) => ({ ...prev, project_path: handle.name }));
-                          return;
-                        }
-                      } catch {
-                        return;
-                      }
-                    }
-                    projectPathPickerRef.current?.click();
-                  }}
-                >
-                  ...
-                </button>
-              </div>
-              {/* Non-standard directory picker attributes: cast to any to satisfy TS */}
-              <input
-                ref={projectPathPickerRef}
-                type="file"
-                className="admin-hidden-input"
-                {...({
-                  webkitdirectory: "true",
-                  directory: "true",
-                } as any)}
-                onChange={(e) => {
-                  const files = e.target.files;
-                  if (!files || files.length === 0) return;
-                  const first = files[0];
-                  const relative = (first as File).webkitRelativePath || first.name;
-                  const rootFolder = relative.split("/")[0] || "";
-                  if (rootFolder) {
-                    setNewProject((prev) => ({ ...prev, project_path: rootFolder }));
-                  }
-                  e.currentTarget.value = "";
-                }}
-              />
-            </label>
-            <button onClick={() => void handleProjectSave()} disabled={isProjectsLoading}>
-              Add Project
-            </button>
-          </div>
-          {projectStatus && <div className="admin-status">{projectStatus}</div>}
+        </div>
+
+        <div className="admin-card">
+          <div className="admin-card-title">Registered projects</div>
           {isProjectsLoading ? (
             <div className="admin-empty">Loading projects...</div>
           ) : projects.length === 0 ? (
@@ -922,45 +916,11 @@ export default function AdminPage() {
                             <button
                               type="button"
                               className="admin-link"
-                              onClick={async () => {
-                                if ("showDirectoryPicker" in window) {
-                                  try {
-                                    // @ts-expect-error - showDirectoryPicker not in TS lib yet.
-                                    const handle = await window.showDirectoryPicker();
-                                    if (handle?.name) {
-                                      setEditProject((prev) => ({ ...prev, project_path: handle.name }));
-                                      return;
-                                    }
-                                  } catch {
-                                    return;
-                                  }
-                                }
-                                editPathPickerRef.current?.click();
-                              }}
+                              onClick={() => void pickProjectFolder("edit")}
                             >
-                              ...
+                              Pick folder…
                             </button>
                           </div>
-                          <input
-                            ref={editPathPickerRef}
-                            type="file"
-                            className="admin-hidden-input"
-                            {...({
-                              webkitdirectory: "true",
-                              directory: "true",
-                            } as any)}
-                            onChange={(e) => {
-                              const files = e.target.files;
-                              if (!files || files.length === 0) return;
-                              const first = files[0];
-                              const relative = (first as File).webkitRelativePath || first.name;
-                              const rootFolder = relative.split("/")[0] || "";
-                              if (rootFolder) {
-                                setEditProject((prev) => ({ ...prev, project_path: rootFolder }));
-                              }
-                              e.currentTarget.value = "";
-                            }}
-                          />
                         </label>
                         <button onClick={() => void handleProjectUpdate()}>Save</button>
                         <button
@@ -987,6 +947,54 @@ export default function AdminPage() {
             </div>
           )}
         </div>
+
+        {authUser?.is_admin && (
+          <div className="admin-card">
+            <div className="admin-card-title">Create new project</div>
+            <p style={{ margin: "0 0 1rem", fontSize: 14, color: "var(--muted, #94a3b8)" }}>
+              Add a display name and the project root path on the machine running the API (for RAG, Image Gen, and local agent).
+            </p>
+            <div className="admin-project-form">
+              <label className="admin-field">
+                <span>Project name</span>
+                <input
+                  type="text"
+                  placeholder="Display name"
+                  value={newProject.display_name}
+                  onChange={(e) => setNewProject((prev) => ({ ...prev, display_name: e.target.value }))}
+                />
+              </label>
+              {newProject.display_name.trim() !== "" && (
+                <div className="admin-field-hint" style={{ marginTop: -4, marginBottom: 4, fontSize: 13, color: "var(--muted, #94a3b8)" }}>
+                  Project key: <code>{projectKeyFromDisplayName(newProject.display_name)}</code>
+                </div>
+              )}
+              <label className="admin-field admin-field-path">
+                <span>Project root path</span>
+                <div className="admin-path-input">
+                  <input
+                    type="text"
+                    placeholder="Project path"
+                    value={newProject.project_path}
+                    onChange={(e) =>
+                      setNewProject((prev) => ({ ...prev, project_path: e.target.value }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="admin-link"
+                    onClick={() => void pickProjectFolder("new")}
+                  >
+                    Pick folder…
+                  </button>
+                </div>
+              </label>
+              <button onClick={() => void handleProjectSave()} disabled={isProjectsLoading}>
+                Add Project
+              </button>
+            </div>
+          </div>
+        )}
         </>
         )}
 

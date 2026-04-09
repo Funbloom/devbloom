@@ -28,6 +28,9 @@ type Props = {
   isGenerating: boolean;
   isGeneratingPrompt: boolean;
   status: string | null;
+  onImportClick: () => void;
+  isImporting: boolean;
+  importDisabled: boolean;
 };
 
 export function ImageTabPanel({
@@ -56,6 +59,9 @@ export function ImageTabPanel({
   isGenerating,
   isGeneratingPrompt,
   status,
+  onImportClick,
+  isImporting,
+  importDisabled,
 }: Props) {
   return (
     <>
@@ -193,14 +199,29 @@ export function ImageTabPanel({
         <option value="low">Low (256)</option>
       </select>
 
-      <button
-        type="button"
-        className="imagegen-generate-button"
-        onClick={onGenerate}
-        disabled={isGenerating || (!prompt.trim() && !genPrompt.trim())}
-      >
-        {isGenerating ? "Generating..." : "Generate"}
-      </button>
+      <div className="imagegen-generate-import-row">
+        <button
+          type="button"
+          className="imagegen-generate-button"
+          onClick={onGenerate}
+          disabled={isGenerating || isImporting || (!prompt.trim() && !genPrompt.trim())}
+        >
+          {isGenerating ? "Generating..." : "Generate"}
+        </button>
+        <button
+          type="button"
+          className="imagegen-import-button"
+          onClick={onImportClick}
+          disabled={isGenerating || isGeneratingPrompt || isImporting || importDisabled}
+          title={
+            importDisabled
+              ? "Set an active project in Admin to import into the project Images folder"
+              : "Import a file from disk (saved like a generated image)"
+          }
+        >
+          {isImporting ? "Importing…" : "Import image…"}
+        </button>
+      </div>
 
       {status && (
         <div className="status" style={{ marginTop: 8 }}>

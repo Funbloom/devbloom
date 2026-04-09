@@ -14,6 +14,8 @@ from fastapi.responses import Response
 from local_agent.models import (
     ApproveProjectRequest,
     DirListRequest,
+    FsListRequest,
+    FsPickFileBody,
     FileJsonPatchRequest,
     FileJsonReadRequest,
     FileJsonWriteRequest,
@@ -30,6 +32,9 @@ from local_agent.security import (
     standard_project_paths,
 )
 from local_agent.json_patch import apply_json_patch
+from local_agent.fs_picker import pick_directory_native, pick_file_native
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:3000",
@@ -71,7 +76,40 @@ app.add_middleware(
 @app.get("/health")
 def health(request: Request) -> dict[str, Any]:
     ensure_localhost(request)
-    return {"ok": True}
+    return {"ok": True, "service": "local_agent"}
+
+
+@app.post("/fs/pick_directory")
+async def fs_pick_directory(request: Request) -> dict[str, Any]:
+    """Open the native folder dialog on the machine running the agent; return an absolute path."""
+    ensure_localhost(request)
+    try:
+        raw = await asyncio.to_thread(pick_directory_native, "Choose project folder")
+    except Exception as exc:
+        logger.exception("Native folder picker failed")
+        raise HTTPException(status_code=503, detail=f"Folder picker failed: {exc}") from exc
+    if not raw:
+        return {"cancelled": True}
+    return {"cancelled": False, "path": raw}
+
+
+@app.post("/fs/pick_file")
+async def fs_pick_file(request: Request, body: FsPickFileBody = FsPickFileBody()) -> dict[str, Any]:
+    """Open the native file dialog on the machine running the agent; return an absolute path."""
+    ensure_localhost(request)
+    title = body.title
+    fts: list[tuple[str, str]] | None = None
+    if body.filetypes:
+        pairs = [(r[0], r[1]) for r in body.filetypes if len(r) >= 2]
+        fts = pairs or None
+    try:
+        raw = await asyncio.to_thread(pick_file_native, title, fts)
+    except Exception as exc:
+        logger.exception("Native file picker failed")
+        raise HTTPException(status_code=503, detail=f"File picker failed: {exc}") from exc
+    if not raw:
+        return {"cancelled": True}
+    return {"cancelled": False, "path": raw}
 
 
 @app.post("/projects/approve")
@@ -139,6 +177,67 @@ def patch_json_file(request: Request, body: FileJsonPatchRequest) -> dict[str, A
         raise HTTPException(status_code=400, detail=f"Patch failed: {exc}") from exc
     path.write_text(payload, encoding="utf-8")
     return {"ok": True, "path": str(path), "data": patched}
+
+
+@app.post("/fs/list_dir")
+def fs_list_dir(request: Request, body: FsListRequest) -> dict[str, Any]:
+    """Browse the local filesystem for an absolute project path (Admin UI). Does not require a pre-approved root."""
+    ensure_localhost(request)
+    raw = (body.path or "").strip()
+    try:
+        if not raw:
+            base = Path.home()
+        else:
+            p = Path(raw).expanduser()
+            if not p.is_absolute():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Path must be absolute (e.g. /Users/you/MyGame), or leave empty to start from home.",
+                )
+            base = p.resolve()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid path: {exc}") from exc
+
+    if not base.exists():
+        raise HTTPException(status_code=404, detail="Path not found.")
+    if not base.is_dir():
+        raise HTTPException(status_code=400, detail="Not a directory.")
+
+    entries: list[dict[str, Any]] = []
+    try:
+        for item in sorted(base.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+            if item.name.startswith("."):
+                continue
+            try:
+                if not item.exists():
+                    continue
+                resolved = item.resolve()
+                entries.append(
+                    {
+                        "name": item.name,
+                        "is_dir": item.is_dir(),
+                        "full_path": str(resolved),
+                    }
+                )
+            except (OSError, PermissionError):
+                continue
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Permission denied listing directory.") from exc
+
+    base_resolved = base.resolve()
+    parent = base_resolved.parent
+    if parent.resolve() == base_resolved:
+        parent_out: str | None = None
+    else:
+        parent_out = str(parent.resolve())
+
+    return {
+        "current": str(base_resolved),
+        "parent": parent_out,
+        "entries": entries,
+    }
 
 
 @app.post("/dir/list")
