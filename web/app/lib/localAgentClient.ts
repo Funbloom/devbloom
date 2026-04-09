@@ -79,9 +79,12 @@ async function requestLocalAgent<T>(path: string, options: RequestInit = {}): Pr
     const text = await res.text();
     let message = text || `Local agent error: ${res.status}`;
     try {
-      const parsed = JSON.parse(text) as { detail?: string | string[] };
-      if (typeof parsed.detail === "string") message = parsed.detail;
-      else if (Array.isArray(parsed.detail) && parsed.detail[0]?.msg) message = String(parsed.detail[0].msg);
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      const d = parsed.detail;
+      if (typeof d === "string") message = d;
+      else if (Array.isArray(d) && d[0] != null && typeof d[0] === "object" && "msg" in d[0]) {
+        message = String((d[0] as { msg: unknown }).msg);
+      }
     } catch {
       // keep message
     }
