@@ -127,6 +127,10 @@ export async function generateUiCanvasPolish(options: {
   model?: string;
   width?: number;
   height?: number;
+  /** 0–100: wireframe placement vs creative layout (API default 75). */
+  layoutFidelity?: number;
+  /** OpenAI image models: API transparent background. Omitted defaults server-side True. */
+  transparentBackground?: boolean;
 }): Promise<{ images: BackendImageResult[]; styleName?: string | null }> {
   const body: Record<string, unknown> = {
     project_key: options.projectKey.trim(),
@@ -142,6 +146,12 @@ export async function generateUiCanvasPolish(options: {
   if (options.model) body.model = options.model;
   if (typeof options.width === "number") body.width = options.width;
   if (typeof options.height === "number") body.height = options.height;
+  if (typeof options.layoutFidelity === "number") {
+    body.layout_fidelity = Math.max(0, Math.min(100, Math.round(options.layoutFidelity)));
+  }
+  if (typeof options.transparentBackground === "boolean") {
+    body.transparent_background = options.transparentBackground;
+  }
   const response = await fetchApi("/tools/ui_canvas_polish", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -174,7 +184,7 @@ function filenameFromImportUrl(url: string): string {
 export async function importImageFile(
   file: File,
   projectKey: string,
-  options?: { replaceFilename?: string },
+  options?: { replaceFilename?: string; /** Save under project Gen/Images/UI (UI Builder). */ uiCanvas?: boolean },
 ): Promise<BackendImageResult[]> {
   const form = new FormData();
   const uploadName = file.name?.trim() || "upload.jpg";
@@ -182,6 +192,7 @@ export async function importImageFile(
   form.append("project_key", projectKey.trim());
   const rf = options?.replaceFilename?.trim();
   if (rf) form.append("replace_filename", rf);
+  if (options?.uiCanvas) form.append("ui_canvas", "true");
   const response = await fetchApi("/tools/import_image", {
     method: "POST",
     body: form,

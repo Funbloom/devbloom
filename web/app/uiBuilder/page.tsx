@@ -1,6 +1,14 @@
 "use client";
 
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { API_BASE, STORAGE_KEY_PROJECT } from "../imageGen/config";
@@ -20,6 +28,7 @@ import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageM
 import type { Style } from "../storyboard/types";
 import { IMAGEGEN_EDIT_CONTEXT_KEY, IMAGEGEN_EDIT_RETURN_KEY } from "../imageGen/editKeys";
 import { parseStoredImages, toPayload } from "../imageGen/persistence";
+import { ImagegenTooltip } from "../imageGen/ImagegenTooltip";
 import { ResultsPanel } from "../imageGen/ResultsPanel";
 import type { GeneratedImage, ImageLocation } from "../imageGen/types";
 import type { DrawTool } from "./penPalette";
@@ -30,9 +39,36 @@ import { maxUiStyleReferenceImages } from "./uicanvasPrompt";
 type BuilderTab = "generate" | "draw";
 
 const UIBUILDER_IMAGE_MODEL_STORAGE_KEY = "uibuilder_image_model";
+const UIBUILDER_LAYOUT_FIDELITY_STORAGE_KEY = "uibuilder_layout_fidelity";
+const UIBUILDER_TRANSPARENT_BG_STORAGE_KEY = "uibuilder_transparent_bg";
 /** Per-project list of Images/ filenames for style-only references (max 3). */
 const UIBUILDER_STYLE_REFS_STORAGE_PREFIX = "uibuilder_style_ref_filenames:";
 const MAX_STYLE_REFS = maxUiStyleReferenceImages();
+
+const TIP_UIBUILDER_WORKFLOW =
+  "The preview lists drawings only until you select one (then that sketch and its polish results). Use Show all to list every UI Canvas image. Checkboxes choose sketch(es) for Generate polished UI. Optionally add style references. Then set Style, model, fidelity, and generate.";
+
+const TIP_STYLE_REF_IMAGES =
+  "Use for palette, typography, and surface style — not layout or subject matter. Shown to the model after your wireframe sketch.";
+
+const TIP_STYLE_BANK = "Same style bank as Image Gen. Pick a saved look for the polish, or (No style).";
+
+const TIP_IMAGE_MODEL = "Which model generates the polished image. Saved in this browser for UI Builder.";
+
+const TIP_LAYOUT_FIDELITY =
+  "100 = match wireframe placement closely (still polished; style refs inform look only). 0 = same elements and copy, creative layout. Saved in the browser.";
+
+const TIP_TRANSPARENT_BG =
+  "For OpenAI GPT Image models, the API can output a transparent background. Other providers ignore this flag; the polish prompt still requests transparency where appropriate. Saved in the browser.";
+
+const TIP_EXTRA_POLISH =
+  "Optional text appended to the server-built polish prompt. Examples: dark theme, high contrast, large tap targets.";
+
+const TIP_DRAW_PENS =
+  "Label box: drag a rectangle. Text: click to place literal copy. Paste: copy an image, then Ctrl+V (⌘V) on the page.";
+
+const TIP_SHOW_ALL =
+  "Off: Only saved drawings are listed until you select one; then you see that sketch and its polished outputs. On: Every UI Canvas image is listed.";
 
 function readPersistedStyleRefFilenames(projectKey: string): string[] {
   if (typeof window === "undefined" || !projectKey.trim()) return [];
@@ -90,6 +126,18 @@ export default function UIBuilderPage() {
   const [generatingPolish, setGeneratingPolish] = useState(false);
   const [selectedSketchIds, setSelectedSketchIds] = useState<string[]>([]);
   const [extraPolishPrompt, setExtraPolishPrompt] = useState("");
+  /** 0 = creative layout; 100 = match sketch placement closely. */
+  const [layoutFidelity, setLayoutFidelity] = useState(75);
+  /** Same option as Image Gen: OpenAI GPT Image API alpha; default off to match Image Gen. */
+  const [uiCanvasTransparentBg, setUiCanvasTransparentBg] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const raw = window.localStorage.getItem(UIBUILDER_TRANSPARENT_BG_STORAGE_KEY);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return false;
+  });
+  /** When false (default), gallery shows only drawings until one is selected, then that sketch + its polishes. When true, show every UI Canvas image. */
+  const [showAllUiCanvas, setShowAllUiCanvas] = useState(false);
   /** Filenames in project Images/ — used only for visual style (max MAX_STYLE_REFS), passed after the wireframe ref. */
   const [styleReferenceFilenames, setStyleReferenceFilenames] = useState<string[]>([]);
   const [styleRefUploadError, setStyleRefUploadError] = useState<string | null>(null);
@@ -105,13 +153,17 @@ export default function UIBuilderPage() {
   /** Skip one persist write right after hydrating style refs from localStorage (avoids wiping with []). */
   const skipNextStyleRefPersist = useRef(false);
 
-  const setBuilderTab = useCallback(
-    (t: BuilderTab) => {
-      if (tab === "draw" && t === "generate" && sketchEditTarget) {
+  /** True after the user edits the sketch (strokes, paste, text) until save, clear, or successful load. */
+  const [sketchDirty, setSketchDirty] = useState(false);
+  const markSketchDirty = useCallback(() => setSketchDirty(true), []);
+
+  const applyBuilderTab = useCallback(
+    (next: BuilderTab) => {
+      if (tab === "draw" && next === "generate" && sketchEditTarget) {
         setSketchEditTarget(null);
         setPendingSketchRestore(null);
       }
-      setTab(t);
+      setTab(next);
     },
     [tab, sketchEditTarget],
   );
@@ -151,6 +203,24 @@ export default function UIBuilderPage() {
       setImageModel(raw);
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem(UIBUILDER_LAYOUT_FIDELITY_STORAGE_KEY);
+    if (raw == null) return;
+    const n = parseInt(raw, 10);
+    if (!Number.isNaN(n) && n >= 0 && n <= 100) setLayoutFidelity(n);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(UIBUILDER_LAYOUT_FIDELITY_STORAGE_KEY, String(layoutFidelity));
+  }, [layoutFidelity]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(UIBUILDER_TRANSPARENT_BG_STORAGE_KEY, String(uiCanvasTransparentBg));
+  }, [uiCanvasTransparentBg]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -215,7 +285,8 @@ export default function UIBuilderPage() {
     setSelectedSketchIds((prev) => prev.filter((id) => valid.has(id)));
   }, [uiCanvasImages]);
 
-  useEffect(() => {
+  /** useLayoutEffect: run after SketchCanvas has laid out (child layout effects run first) so the canvas has size before load. */
+  useLayoutEffect(() => {
     if (tab !== "draw" || !pendingSketchRestore) return;
     let cancelled = false;
     const run = async () => {
@@ -224,6 +295,7 @@ export default function UIBuilderPage() {
       if (cancelled) return;
       setPendingSketchRestore(null);
       if (!ok) setStatus("Could not load the sketch into the canvas.");
+      else setSketchDirty(false);
     };
     void run();
     return () => {
@@ -245,20 +317,20 @@ export default function UIBuilderPage() {
     return parseStoredImages(raw);
   }, [projectKey, isPrivate]);
 
-  const handleSaveDrawing = async () => {
+  const handleSaveDrawing = useCallback(async (): Promise<boolean> => {
     const name = drawingName.trim();
     if (!name) {
       setStatus("Enter a name for your drawing.");
-      return;
+      return false;
     }
     if (!projectKey) {
       setStatus("Set an active project in Admin first.");
-      return;
+      return false;
     }
     const blob = await sketchRef.current?.getPngBlob();
     if (!blob) {
       setStatus("Could not read the sketch.");
-      return;
+      return false;
     }
     setSaving(true);
     setStatus(null);
@@ -269,11 +341,12 @@ export default function UIBuilderPage() {
       if (sketchEditTarget) {
         const imported = await importImageFile(file, projectKey, {
           replaceFilename: sketchEditTarget.filename,
+          uiCanvas: true,
         });
         const first = imported[0];
         if (!first?.filename) {
           setStatus("Upload did not return a filename.");
-          return;
+          return false;
         }
         let finalUrl = first.url?.startsWith("http") ? first.url : normalizeImageUrl(first.url || "");
         if (sketchEditTarget.location === "cloud") {
@@ -298,16 +371,17 @@ export default function UIBuilderPage() {
         setSketchEditTarget(null);
         setPendingSketchRestore(null);
         setDrawingName("");
-        setTab("generate");
+        setSketchDirty(false);
+        applyBuilderTab("generate");
         setStatus("Drawing saved.");
-        return;
+        return true;
       }
 
-      const imported = await importImageFile(file, projectKey);
+      const imported = await importImageFile(file, projectKey, { uiCanvas: true });
       const first = imported[0];
       if (!first?.filename) {
         setStatus("Upload did not return a filename.");
-        return;
+        return false;
       }
       const now = new Date().toISOString();
       const newItem: GeneratedImage = {
@@ -324,14 +398,46 @@ export default function UIBuilderPage() {
       await persistFullList([...all, newItem]);
       await reloadUiCanvasImages();
       setDrawingName("");
-      setTab("generate");
+      setSketchDirty(false);
+      applyBuilderTab("generate");
       setStatus("Drawing saved.");
+      return true;
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Save failed.");
+      return false;
     } finally {
       setSaving(false);
     }
-  };
+  }, [
+    drawingName,
+    projectKey,
+    sketchEditTarget,
+    loadAllImages,
+    persistFullList,
+    reloadUiCanvasImages,
+    applyBuilderTab,
+  ]);
+
+  const confirmLeaveDrawIfNeeded = useCallback(async (): Promise<boolean> => {
+    if (tab !== "draw" || !sketchDirty) return true;
+    const saveFirst = window.confirm("Do you want to save your drawing before leaving?");
+    if (saveFirst) {
+      return await handleSaveDrawing();
+    }
+    if (!window.confirm("Discard unsaved changes?")) return false;
+    setSketchDirty(false);
+    return true;
+  }, [tab, sketchDirty, handleSaveDrawing]);
+
+  const requestBuilderTab = useCallback(
+    async (next: BuilderTab) => {
+      if (next === tab) return;
+      if (!(await confirmLeaveDrawIfNeeded())) return;
+      if (next === tab) return;
+      applyBuilderTab(next);
+    },
+    [tab, confirmLeaveDrawIfNeeded, applyBuilderTab],
+  );
 
   const handleDeleteImage = async (id: string) => {
     if (!projectKey) return;
@@ -406,6 +512,11 @@ export default function UIBuilderPage() {
       if (location === "cloud") {
         finalUrl = await uploadImageToCloud(projectKey, result.filename || target.filename);
       }
+      /** Same drawing group as wireframe polish: copy link from polish, or use sketch file when removing BG from the saved sketch. */
+      const linkedSketchFn =
+        target.sourceSketchFilename?.trim() ||
+        (target.fromSketch && target.filename?.trim() ? target.filename.trim() : undefined);
+
       const newItem: GeneratedImage = {
         id: `${now}-${Math.random().toString(36).slice(2)}`,
         url: finalUrl,
@@ -415,9 +526,14 @@ export default function UIBuilderPage() {
         createdAt: now,
         tab: target.tab,
         location,
-        ...(target.fromSketch ? { fromSketch: true } : {}),
+        ...(linkedSketchFn ? { sourceSketchFilename: linkedSketchFn } : {}),
       };
-      await persistFullList([newItem, ...all]);
+      const srcIndex = all.findIndex((img) => img.id === imageId);
+      const nextList =
+        srcIndex >= 0
+          ? [...all.slice(0, srcIndex + 1), newItem, ...all.slice(srcIndex + 1)]
+          : [newItem, ...all];
+      await persistFullList(nextList);
       setStatus("Background removed.");
       await reloadUiCanvasImages();
     } catch (e) {
@@ -427,15 +543,21 @@ export default function UIBuilderPage() {
 
   const handleEditImage = (img: GeneratedImage) => {
     if (img.tab === "ui_canvas" && img.fromSketch && img.filename?.trim()) {
-      setSketchEditTarget({
-        id: img.id,
-        filename: img.filename.trim(),
-        location: img.location ?? "local",
-      });
-      setDrawingName(img.prompt || "");
-      setPendingSketchRestore({ url: normalizeImageUrl(img.url) });
-      setTab("draw");
-      setStatus(null);
+      void (async () => {
+        if (tab === "draw" && sketchDirty) {
+          if (!(await confirmLeaveDrawIfNeeded())) return;
+        }
+        setSketchEditTarget({
+          id: img.id,
+          filename: img.filename!.trim(),
+          location: img.location ?? "local",
+        });
+        setDrawingName(img.prompt || "");
+        setSketchDirty(false);
+        setPendingSketchRestore({ url: normalizeImageUrl(img.url) });
+        setTab("draw");
+        setStatus(null);
+      })();
       return;
     }
     try {
@@ -444,14 +566,19 @@ export default function UIBuilderPage() {
       setStatus(e instanceof Error ? e.message : "Cannot edit this image.");
       return;
     }
-    try {
-      sessionStorage.setItem(IMAGEGEN_EDIT_RETURN_KEY, "/uiBuilder");
-      sessionStorage.setItem(IMAGEGEN_EDIT_CONTEXT_KEY, JSON.stringify(img));
-    } catch {
-      setStatus("Could not store image context.");
-      return;
-    }
-    router.push("/imageGen/edit");
+    void (async () => {
+      if (tab === "draw" && sketchDirty) {
+        if (!(await confirmLeaveDrawIfNeeded())) return;
+      }
+      try {
+        sessionStorage.setItem(IMAGEGEN_EDIT_RETURN_KEY, "/uiBuilder");
+        sessionStorage.setItem(IMAGEGEN_EDIT_CONTEXT_KEY, JSON.stringify(img));
+      } catch {
+        setStatus("Could not store image context.");
+        return;
+      }
+      router.push("/imageGen/edit");
+    })();
   };
 
   const removeStyleReferenceAt = useCallback((index: number) => {
@@ -474,7 +601,7 @@ export default function UIBuilderPage() {
         const newFns: string[] = [];
         for (const file of files) {
           if (newFns.length >= MAX_STYLE_REFS) break;
-          const imported = await importImageFile(file, pk);
+          const imported = await importImageFile(file, pk, { uiCanvas: true });
           const fn = imported[0]?.filename?.trim();
           if (!fn) {
             const line = `Could not save "${file.name}" — no filename in the server response.`;
@@ -530,6 +657,42 @@ export default function UIBuilderPage() {
     [uiCanvasImages, selectedSketchIds],
   );
 
+  /**
+   * Show all: full list.
+   * Otherwise: only drawings until exactly one is selected — then that sketch first + polishes from it.
+   * With no selection, only sketch tiles are listed so the user can pick one (polish outputs hidden by default).
+   */
+  const displayedUiCanvasImages = useMemo(() => {
+    if (showAllUiCanvas) return uiCanvasImages;
+    if (selectedSketchIds.length !== 1) {
+      return uiCanvasImages.filter((img) => img.fromSketch);
+    }
+    const sid = selectedSketchIds[0];
+    const sketch = uiCanvasImages.find((img) => img.id === sid && img.fromSketch);
+    if (!sketch?.filename?.trim()) {
+      return uiCanvasImages.filter((img) => img.fromSketch);
+    }
+    const srcFn = sketch.filename.trim();
+    const derived = uiCanvasImages.filter(
+      (img) => img.sourceSketchFilename === srcFn && img.id !== sketch.id,
+    );
+    derived.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    return [sketch, ...derived];
+  }, [uiCanvasImages, selectedSketchIds, showAllUiCanvas]);
+
+  const uiCanvasEmptyMessage = useMemo(() => {
+    if (uiCanvasImages.length === 0) {
+      return "No UI Canvas images yet. Open the Draw tab, name your sketch, and click Save.";
+    }
+    if (showAllUiCanvas) return "No UI Canvas images yet.";
+    if (!uiCanvasImages.some((img) => img.fromSketch)) {
+      return "No saved drawings yet. Save a sketch from the Draw tab first.";
+    }
+    return "Select a drawing below (checkbox), or turn on Show all to see every image.";
+  }, [uiCanvasImages, showAllUiCanvas]);
+
   const handleBatchWireframeGenerate = async () => {
     if (!projectKey?.trim()) {
       setStatus("Set an active project in Admin first.");
@@ -560,6 +723,8 @@ export default function UIBuilderPage() {
           model: imageModel,
           width: 1024,
           height: 1024,
+          layoutFidelity,
+          transparentBackground: uiCanvasTransparentBg,
         });
         const first = results[0];
         if (!first) {
@@ -592,11 +757,16 @@ export default function UIBuilderPage() {
           createdAt: now,
           tab: "ui_canvas",
           location: "local",
+          sourceSketchFilename: fn,
         };
         await persistFullList([newItem, ...all]);
         await reloadUiCanvasImages();
       }
-      setSelectedSketchIds([]);
+      if (selectedSketchesForPolish.length === 1 && selectedSketchesForPolish[0]?.id) {
+        setSelectedSketchIds([selectedSketchesForPolish[0].id]);
+      } else {
+        setSelectedSketchIds([]);
+      }
       setStatus(`Generated ${selectedSketchesForPolish.length} polished image(s).`);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Generate failed.");
@@ -625,7 +795,47 @@ export default function UIBuilderPage() {
   const clearSketchCanvas = () => {
     sketchRef.current?.clear();
     setSketchEditTarget(null);
+    setSketchDirty(false);
   };
+
+  useEffect(() => {
+    if (tab !== "draw" || !sketchDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [tab, sketchDirty]);
+
+  useEffect(() => {
+    if (tab !== "draw" || !sketchDirty) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      const el = (e.target as HTMLElement).closest("a[href]");
+      if (!el) return;
+      const a = el as HTMLAnchorElement;
+      if (a.target === "_blank" || a.download) return;
+      const href = a.getAttribute("href");
+      if (!href || href.startsWith("#")) return;
+      let url: URL;
+      try {
+        url = new URL(href, window.location.href);
+      } catch {
+        return;
+      }
+      if (url.origin !== window.location.origin) return;
+      if (url.pathname === pathname && url.search === window.location.search) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void (async () => {
+        if (!(await confirmLeaveDrawIfNeeded())) return;
+        router.push(url.pathname + url.search + url.hash);
+      })();
+    };
+    document.addEventListener("click", onDocClick, true);
+    return () => document.removeEventListener("click", onDocClick, true);
+  }, [tab, sketchDirty, pathname, router, confirmLeaveDrawIfNeeded]);
 
   return (
     <main>
@@ -652,7 +862,7 @@ export default function UIBuilderPage() {
                   role="tab"
                   aria-selected={tab === "generate"}
                   className={tab === "generate" ? "sidebar-tab active" : "sidebar-tab"}
-                  onClick={() => setBuilderTab("generate")}
+                  onClick={() => void requestBuilderTab("generate")}
                 >
                   Generate
                 </button>
@@ -661,7 +871,7 @@ export default function UIBuilderPage() {
                   role="tab"
                   aria-selected={tab === "draw"}
                   className={tab === "draw" ? "sidebar-tab active" : "sidebar-tab"}
-                  onClick={() => setBuilderTab("draw")}
+                  onClick={() => void requestBuilderTab("draw")}
                 >
                   Draw
                 </button>
@@ -670,12 +880,10 @@ export default function UIBuilderPage() {
               <div className="sidebar-tab-content">
                 {tab === "generate" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                    <p style={{ margin: 0, fontSize: 14, color: "var(--muted, #94a3b8)" }}>
-                      Saved <strong style={{ color: "var(--foreground, #e2e8f0)" }}>UI Canvas</strong> images appear in
-                      the preview. Use the <strong>Select</strong> checkbox on sketch tiles. Optionally add up to{" "}
-                      {MAX_STYLE_REFS} <strong>style reference</strong> images (look only, not content). Then set Style,
-                      Image model, optional extra prompt, and <strong>Generate polished UI</strong>.
-                    </p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 13, color: "var(--foreground, #e2e8f0)" }}>Workflow</span>
+                      <ImagegenTooltip text={TIP_UIBUILDER_WORKFLOW} />
+                    </div>
                     <fieldset
                       style={{
                         margin: 0,
@@ -688,12 +896,11 @@ export default function UIBuilderPage() {
                       }}
                     >
                       <legend style={{ fontSize: 13, color: "var(--foreground, #e2e8f0)", padding: "0 0.25rem" }}>
-                        Style references (max {MAX_STYLE_REFS})
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          Style references (max {MAX_STYLE_REFS})
+                          <ImagegenTooltip text={TIP_STYLE_REF_IMAGES} />
+                        </span>
                       </legend>
-                      <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
-                        Use for palette, typography, and surface style — not layout or subject matter. Shown to the
-                        model after your wireframe sketch.
-                      </p>
                       {styleRefUploadError && (
                         <p style={{ margin: 0, fontSize: 12, color: "#f87171" }} role="alert">
                           {styleRefUploadError}
@@ -887,9 +1094,12 @@ export default function UIBuilderPage() {
                         </select>
                       </div>
                     </fieldset>
-                    <label className="imagegen-label" htmlFor="uibuilder-style">
-                      Style
-                    </label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <label className="imagegen-label" htmlFor="uibuilder-style" style={{ margin: 0 }}>
+                        Style
+                      </label>
+                      <ImagegenTooltip text={TIP_STYLE_BANK} />
+                    </div>
                     <select
                       id="uibuilder-style"
                       className="imagegen-select"
@@ -903,9 +1113,12 @@ export default function UIBuilderPage() {
                         </option>
                       ))}
                     </select>
-                    <label className="imagegen-label" htmlFor="uibuilder-image-model">
-                      Image model
-                    </label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <label className="imagegen-label" htmlFor="uibuilder-image-model" style={{ margin: 0 }}>
+                        Image model
+                      </label>
+                      <ImagegenTooltip text={TIP_IMAGE_MODEL} />
+                    </div>
                     <select
                       id="uibuilder-image-model"
                       className="imagegen-select"
@@ -918,12 +1131,42 @@ export default function UIBuilderPage() {
                         </option>
                       ))}
                     </select>
-                    <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
-                      Same style bank as Image Gen. Image model is saved in the browser for UI Builder.
-                    </p>
-                    <label className="imagegen-label" htmlFor="uibuilder-extra-polish-prompt">
-                      Extra prompt (optional)
-                    </label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <label
+                        style={{ display: "flex", alignItems: "center", gap: "0.5rem", margin: 0, cursor: generatingPolish ? "not-allowed" : "pointer" }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={uiCanvasTransparentBg}
+                          onChange={(e) => setUiCanvasTransparentBg(e.target.checked)}
+                          disabled={generatingPolish}
+                        />
+                        <span>Transparent background (GPT Image)</span>
+                      </label>
+                      <ImagegenTooltip text={TIP_TRANSPARENT_BG} />
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <label className="imagegen-label" htmlFor="uibuilder-layout-fidelity" style={{ margin: 0 }}>
+                        Layout fidelity ({layoutFidelity})
+                      </label>
+                      <ImagegenTooltip text={TIP_LAYOUT_FIDELITY} />
+                    </div>
+                    <input
+                      id="uibuilder-layout-fidelity"
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={layoutFidelity}
+                      onChange={(e) => setLayoutFidelity(Number(e.target.value))}
+                      disabled={generatingPolish}
+                      style={{ width: "100%" }}
+                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <label className="imagegen-label" htmlFor="uibuilder-extra-polish-prompt" style={{ margin: 0 }}>
+                        Extra prompt (optional)
+                      </label>
+                      <ImagegenTooltip text={TIP_EXTRA_POLISH} />
+                    </div>
                     <textarea
                       id="uibuilder-extra-polish-prompt"
                       value={extraPolishPrompt}
@@ -1002,7 +1245,10 @@ export default function UIBuilderPage() {
                       }}
                     >
                       <legend style={{ fontSize: 12, color: "var(--muted, #94a3b8)", padding: "0 0.25rem" }}>
-                        Pens (by UI task)
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          Pens (by UI task)
+                          <ImagegenTooltip text={TIP_DRAW_PENS} />
+                        </span>
                       </legend>
                       {UI_PEN_TASKS.map((p) => (
                         <label
@@ -1050,6 +1296,28 @@ export default function UIBuilderPage() {
                           marginTop: 4,
                           paddingTop: 6,
                           borderTop: "1px solid #2a2f3a",
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="uibuilder-draw-tool"
+                          checked={tool === "text"}
+                          onChange={() => setTool("text")}
+                        />
+                        <span style={{ flex: 1 }}>
+                          <strong style={{ color: "var(--foreground, #e2e8f0)" }}>Text</strong>
+                          <span style={{ color: "var(--muted, #94a3b8)", fontSize: 11, marginLeft: 6 }}>
+                            (place copy)
+                          </span>
+                        </span>
+                      </label>
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          cursor: "pointer",
+                          fontSize: 13,
                         }}
                       >
                         <input
@@ -1105,28 +1373,57 @@ export default function UIBuilderPage() {
                     flexDirection: "column",
                   }}
                 >
-                  <SketchCanvas ref={sketchRef} brushSize={brushSize} tool={tool} />
+                  <SketchCanvas ref={sketchRef} brushSize={brushSize} tool={tool} onContentModified={markSketchDirty} />
                 </div>
               </>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-                <ResultsPanel
-                  embedded
-                  panelTitle="UI Canvas"
-                  images={uiCanvasImages}
-                  imagesPerRow={imagesPerRow}
-                  onImagesPerRowChange={handleImagesPerRowChange}
-                  onImagesPerRowStep={setImagesPerRowClamped}
-                  onDeleteImage={(id) => void handleDeleteImage(id)}
-                  onToggleLocation={(id) => void handleToggleLocation(id)}
-                  onRemoveBackground={(id) => void handleRemoveBackground(id)}
-                  onEditImage={handleEditImage}
-                  showSketchCheckboxes
-                  selectedSketchIds={selectedSketchIds}
-                  onSketchSelectionChange={handleSketchSelectionChange}
-                  sketchSelectionDisabled={generatingPolish}
-                  emptyMessage="No UI Canvas images yet. Open the Draw tab, name your sketch, and click Save."
-                />
+              <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, gap: "0.5rem" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    gap: "0.5rem 1rem",
+                    flexShrink: 0,
+                  }}
+                >
+                  <button
+                    type="button"
+                    aria-pressed={showAllUiCanvas}
+                    onClick={() => setShowAllUiCanvas((v) => !v)}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: `1px solid ${showAllUiCanvas ? "var(--foreground, #e2e8f0)" : "#3d4554"}`,
+                      background: showAllUiCanvas ? "#2a3140" : "#0f1115",
+                      color: "var(--foreground, #e2e8f0)",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Show all
+                  </button>
+                  <ImagegenTooltip text={TIP_SHOW_ALL} />
+                </div>
+                <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                  <ResultsPanel
+                    embedded
+                    panelTitle="UI Canvas"
+                    images={displayedUiCanvasImages}
+                    imagesPerRow={imagesPerRow}
+                    onImagesPerRowChange={handleImagesPerRowChange}
+                    onImagesPerRowStep={setImagesPerRowClamped}
+                    onDeleteImage={(id) => void handleDeleteImage(id)}
+                    onToggleLocation={(id) => void handleToggleLocation(id)}
+                    onRemoveBackground={(id) => void handleRemoveBackground(id)}
+                    onEditImage={handleEditImage}
+                    showSketchCheckboxes
+                    selectedSketchIds={selectedSketchIds}
+                    onSketchSelectionChange={handleSketchSelectionChange}
+                    sketchSelectionDisabled={generatingPolish}
+                    emptyMessage={uiCanvasEmptyMessage}
+                  />
+                </div>
               </div>
             )}
           </div>

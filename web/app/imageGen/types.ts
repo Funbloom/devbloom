@@ -13,4 +13,6 @@ export type GeneratedImage = {
   location?: ImageLocation;
   /** Saved from UI Builder Draw tab; Edit reopens the sketch canvas instead of Image Gen. */
   fromSketch?: boolean;
+  /** UI Builder: sketch Images/ filename this polish was generated from (wireframe ref). */
+  sourceSketchFilename?: string;
 };

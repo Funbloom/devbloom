@@ -63,6 +63,33 @@ def get_images_dir(project_key: Optional[str] = None) -> Path:
     return output_dir
 
 
+def get_ui_canvas_images_dir(project_key: Optional[str] = None) -> Path:
+    """UI Builder / UI Canvas assets: <project>/Gen/Images/UI."""
+    project_dir = resolve_project_path(project_key)
+    if project_dir:
+        out = Path(project_dir).joinpath("Gen", "Images", "UI")
+    else:
+        out = Path("./output/images/Gen/Images/UI")
+    out = Path(os.path.expandvars(str(out))).expanduser().resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def find_image_path(filename: str, project_key: Optional[str] = None) -> Optional[Path]:
+    """Resolve a bare filename to project Images/ or Gen/Images/UI/ if the file exists."""
+    safe_name = validate_image_filename(filename)
+    p1 = safe_resolve_path(safe_name, project_key)
+    if p1.exists():
+        return p1
+    ui_dir = get_ui_canvas_images_dir(project_key).resolve()
+    p2 = (ui_dir / safe_name).resolve()
+    if ui_dir not in p2.parents and p2 != ui_dir:
+        raise ValueError("Invalid filename path.")
+    if p2.exists():
+        return p2
+    return None
+
+
 def sanitize_filename(value: str, default_ext: str = "png") -> str:
     cleaned = value.replace("\\", "_").replace("/", "_").strip()
     cleaned = cleaned.replace("..", "_")
@@ -111,9 +138,18 @@ def build_image_filename(prefix: str = "image", ext: str = "png") -> str:
     return sanitize_filename(f"{safe_prefix}_{timestamp}_{suffix}.{ext}", ext)
 
 
-def save_bytes_to_file(data: bytes, filename: str, project_key: Optional[str] = None) -> Path:
+def save_bytes_to_file(
+    data: bytes,
+    filename: str,
+    project_key: Optional[str] = None,
+    *,
+    base_dir: Optional[Path] = None,
+) -> Path:
     safe_name = sanitize_filename(filename)
-    output_path = safe_resolve_path(safe_name, project_key)
+    output_dir = (base_dir.resolve() if base_dir is not None else get_images_dir(project_key).resolve())
+    output_path = (output_dir / safe_name).resolve()
+    if output_dir not in output_path.parents and output_path != output_dir:
+        raise ValueError("Invalid filename path.")
     output_path.write_bytes(data)
     print(f"[image_tool] Saved image to: {output_path.resolve()}")
     return output_path
@@ -158,7 +194,7 @@ def _guess_import_ext(
     ct = (content_type or "").split(";")[0].strip().lower()
     if ct in _IMPORT_CT_TO_EXT:
         return _IMPORT_CT_TO_EXT[ct]
-    fn = (filename or "").lower()
+    fn = (original_filename or "").lower()
     for ext in ("png", "jpg", "jpeg", "webp", "gif", "jfif", "jpe", "pjp"):
         if fn.endswith(f".{ext}"):
             return "jpg" if ext in ("jpeg", "jfif", "jpe", "pjp") else ext
@@ -180,8 +216,10 @@ def import_uploaded_image(
     original_filename: Optional[str],
     project_key: Optional[str],
     replace_filename: Optional[str] = None,
+    *,
+    save_to_ui_canvas: bool = False,
 ) -> dict:
-    """Save an uploaded image to the project Images/ folder with a generated name (same as generated assets)."""
+    """Save an uploaded image to project Images/ or Gen/Images/UI/ (UI Builder)."""
     pk = (project_key or "").strip() or None
     if not pk:
         raise ValueError("project_key is required.")
@@ -202,7 +240,8 @@ def import_uploaded_image(
             raise ValueError("Uploaded image type must match the file extension being replaced.")
     else:
         output_name = build_image_filename("import", ext)
-    save_bytes_to_file(data, output_name, pk)
+    base_dir = get_ui_canvas_images_dir(pk) if save_to_ui_canvas else None
+    save_bytes_to_file(data, output_name, pk, base_dir=base_dir)
     return {"filename": output_name, "url": build_image_url(output_name, pk)}
 
 
@@ -294,9 +333,9 @@ def _gemini_reference_inline_part(
     else:
         try:
             safe_name = validate_image_filename(s)
-            image_path = safe_resolve_path(safe_name, project_key)
-            if not image_path.exists():
-                print(f"[image_tool] reference file missing: {image_path}")
+            image_path = find_image_path(safe_name, project_key)
+            if not image_path:
+                print(f"[image_tool] reference file missing: {safe_name!r}")
                 return None
             data = image_path.read_bytes()
             mime_type, _ = mimetypes.guess_type(image_path.name)
@@ -334,6 +373,7 @@ def _generate_image_gemini(
     quantity: int,
     project_key: Optional[str],
     reference_image_filenames: Optional[Iterable[str]] = None,
+    images_output_dir: Optional[Path] = None,
 ) -> dict:
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
@@ -429,7 +469,7 @@ def _generate_image_gemini(
     images: list[dict] = []
     for idx, data_bytes in enumerate(images_bytes[:quantity]):
         filename = build_image_filename("gemini", "png")
-        output_path = save_bytes_to_file(data_bytes, filename, project_key)
+        output_path = save_bytes_to_file(data_bytes, filename, project_key, base_dir=images_output_dir)
         images.append(
             {
                 "filename": filename,
@@ -449,6 +489,7 @@ def _generate_image_leonardo(
     negative_prompt: str | None = None,
     seed: int | None = None,
     provider_model: str = "gemini-2.5-flash-image",
+    images_output_dir: Optional[Path] = None,
 ) -> dict:
     width = _clamp_dimension(width)
     height = _clamp_dimension(height)
@@ -458,7 +499,7 @@ def _generate_image_leonardo(
     if not api_key:
         image_bytes = _placeholder_image(width, height, "Leonardo API key missing.")
         filename = build_image_filename("leonardo_stub", "png")
-        output_path = save_bytes_to_file(image_bytes, filename, project_key)
+        output_path = save_bytes_to_file(image_bytes, filename, project_key, base_dir=images_output_dir)
         return {
             "images": [
                 {
@@ -545,7 +586,7 @@ def _generate_image_leonardo(
         image_response = requests.get(url, timeout=60)
         image_response.raise_for_status()
         filename = build_image_filename(f"leonardo_{idx+1}", "png")
-        output_path = save_bytes_to_file(image_response.content, filename, project_key)
+        output_path = save_bytes_to_file(image_response.content, filename, project_key, base_dir=images_output_dir)
         images.append(
             {
                 "filename": filename,
@@ -568,6 +609,7 @@ def _generate_image_openai(
     quality: str | None = None,
     style: str | None = None,
     transparent_background: bool | None = None,
+    images_output_dir: Optional[Path] = None,
 ) -> dict:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -610,7 +652,7 @@ def _generate_image_openai(
             continue
         data_bytes = base64.b64decode(b64)
         filename = build_image_filename(f"gpt_image_{idx+1}", "png")
-        output_path = save_bytes_to_file(data_bytes, filename, project_key)
+        output_path = save_bytes_to_file(data_bytes, filename, project_key, base_dir=images_output_dir)
         images.append(
             {
                 "filename": filename,
@@ -737,6 +779,7 @@ def generate_image(
     transparent_background: bool | None = None,
     project_key: Optional[str] = None,
     reference_image_filenames: Optional[Iterable[str]] = None,  # filenames in project Images/ or https URLs
+    images_output_dir: Optional[Path] = None,
 ) -> dict:
     if not prompt or len(prompt.strip()) == 0:
         raise ValueError("Prompt is required.")
@@ -762,6 +805,7 @@ def generate_image(
             quantity=quantity,
             project_key=project_key,
             reference_image_filenames=reference_image_filenames,
+            images_output_dir=images_output_dir,
         )
 
     if provider == "leonardo":
@@ -774,6 +818,7 @@ def generate_image(
             negative_prompt=negative_prompt,
             seed=seed,
             provider_model=provider_model,
+            images_output_dir=images_output_dir,
         )
 
     if provider == "openai":
@@ -788,6 +833,7 @@ def generate_image(
             quality=quality,
             style=style,
             transparent_background=transparent_background,
+            images_output_dir=images_output_dir,
         )
 
     raise ValueError(f"Unsupported image provider: {provider}")
@@ -802,8 +848,8 @@ def resize_image(
     project_key: Optional[str] = None,
 ) -> dict:
     safe_name = validate_image_filename(input_filename)
-    input_path = safe_resolve_path(safe_name, project_key)
-    if not input_path.exists():
+    input_path = find_image_path(safe_name, project_key)
+    if not input_path:
         raise ValueError("Input image not found.")
 
     width = _clamp_dimension(width)
@@ -824,7 +870,10 @@ def resize_image(
 
     output_name = output_filename or build_image_filename("resize", "png")
     output_name = sanitize_filename(output_name, "png")
-    output_path = safe_resolve_path(output_name, project_key)
+    output_dir = input_path.parent.resolve()
+    output_path = (output_dir / output_name).resolve()
+    if output_dir not in output_path.parents and output_path != output_dir:
+        raise ValueError("Invalid output path.")
     resized.save(output_path, format="PNG")
     return {
         "filename": output_name,
@@ -843,8 +892,8 @@ def crop_image(
     project_key: Optional[str] = None,
 ) -> dict:
     safe_name = validate_image_filename(input_filename)
-    input_path = safe_resolve_path(safe_name, project_key)
-    if not input_path.exists():
+    input_path = find_image_path(safe_name, project_key)
+    if not input_path:
         raise ValueError("Input image not found.")
 
     image = Image.open(input_path)
@@ -860,7 +909,10 @@ def crop_image(
     cropped = image.crop((x, y, right, lower))
     output_name = output_filename or build_image_filename("crop", "png")
     output_name = sanitize_filename(output_name, "png")
-    output_path = safe_resolve_path(output_name, project_key)
+    output_dir = input_path.parent.resolve()
+    output_path = (output_dir / output_name).resolve()
+    if output_dir not in output_path.parents and output_path != output_dir:
+        raise ValueError("Invalid output path.")
     cropped.save(output_path, format="PNG")
     return {
         "filename": output_name,
@@ -877,8 +929,8 @@ def convert_image(
     project_key: Optional[str] = None,
 ) -> dict:
     safe_name = validate_image_filename(input_filename)
-    input_path = safe_resolve_path(safe_name, project_key)
-    if not input_path.exists():
+    input_path = find_image_path(safe_name, project_key)
+    if not input_path:
         raise ValueError("Input image not found.")
 
     target_format = format.lower()
@@ -895,7 +947,10 @@ def convert_image(
     ext = "jpg" if target_format == "jpeg" else target_format
     output_name = output_filename or build_image_filename("convert", ext)
     output_name = sanitize_filename(output_name, ext)
-    output_path = safe_resolve_path(output_name, project_key)
+    output_dir = input_path.parent.resolve()
+    output_path = (output_dir / output_name).resolve()
+    if output_dir not in output_path.parents and output_path != output_dir:
+        raise ValueError("Invalid output path.")
     image.save(output_path, format=target_format.upper(), **save_kwargs)
     return {
         "filename": output_name,
@@ -962,8 +1017,8 @@ def remove_background(
     alpha_matting_background_threshold: int | None = None,
 ) -> dict:
     safe_name = validate_image_filename(input_filename)
-    input_path = safe_resolve_path(safe_name, project_key)
-    if not input_path.exists():
+    input_path = find_image_path(safe_name, project_key)
+    if not input_path:
         raise ValueError("Input image not found.")
     technique = (os.getenv("BKGROMOVALTECH") or "rembg").strip().lower()
 
@@ -992,7 +1047,7 @@ def remove_background(
             )
         except Exception as exc:
             raise ValueError(f"rembg failed: {exc}") from exc
-        output_path = save_bytes_to_file(output_bytes, output_name, project_key)
+        output_path = save_bytes_to_file(output_bytes, output_name, project_key, base_dir=input_path.parent)
     else:
         api_key = os.getenv("CLIPDROP_API_KEY")
         if not api_key:
@@ -1011,7 +1066,7 @@ def remove_background(
             except ValueError:
                 error_payload = response.text
             raise ValueError(f"Clipdrop request failed: {error_payload}")
-        output_path = save_bytes_to_file(response.content, output_name, project_key)
+        output_path = save_bytes_to_file(response.content, output_name, project_key, base_dir=input_path.parent)
     return {
         "filename": output_name,
         "url": build_image_url(output_name, project_key),

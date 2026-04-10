@@ -9,7 +9,9 @@ export type UiPenTaskId =
   | "title"
   | "textContent"
   | "textbox"
-  | "scroll";
+  | "gameLabel"
+  | "scroll"
+  | "label";
 
 export const UI_PEN_TASKS: ReadonlyArray<{
   id: UiPenTaskId;
@@ -55,10 +57,17 @@ export const UI_PEN_TASKS: ReadonlyArray<{
   },
   {
     id: "textbox",
-    label: "Text box",
-    shortLabel: "Field",
-    // Soft lilac — inputs / labels
+    label: "Input field",
+    shortLabel: "Input",
+    // Lilac — editable text inputs, search fields, form fields (not page titles)
     color: "#c9a0dc",
+  },
+  {
+    id: "gameLabel",
+    label: "Game label",
+    shortLabel: "Game",
+    // Rose pink — read-only labels/values the game fills in (list rows, stats; not an input)
+    color: "#df8bbd",
   },
   {
     id: "scroll",
@@ -67,11 +76,20 @@ export const UI_PEN_TASKS: ReadonlyArray<{
     // Warm brown — scrollable regions
     color: "#b07d4a",
   },
+  {
+    id: "label",
+    label: "Label box",
+    shortLabel: "Label",
+    // Coral — drag a rectangle marking where specific copy or micro-labels belong
+    color: "#d06767",
+  },
 ];
 
-export type DrawTool = "eraser" | UiPenTaskId;
+/** Eraser, UI pens, or place literal on-canvas text (not a colored stroke). */
+export type DrawTool = "eraser" | UiPenTaskId | "text";
 
 export function penColorForTool(tool: DrawTool): string | null {
   if (tool === "eraser") return null;
+  if (tool === "text") return "#f1f5f9";
   return UI_PEN_TASKS.find((t) => t.id === tool)?.color ?? "#cbd5e1";
 }

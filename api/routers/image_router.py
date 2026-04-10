@@ -12,12 +12,13 @@ from services.usage import check_can_generate_images, increment_usage
 from services.image_tool import (
     convert_image,
     crop_image,
+    find_image_path,
     generate_image,
     get_images_dir,
+    get_ui_canvas_images_dir,
     import_uploaded_image,
     remove_background,
     resize_image,
-    safe_resolve_path,
     validate_image_filename,
     generate_openai_image_bytes,
 )
@@ -80,6 +81,16 @@ class UiCanvasPolishRequest(BaseModel):
     model: str | None = None
     width: int = 1024
     height: int = 1024
+    layout_fidelity: int = Field(
+        default=75,
+        ge=0,
+        le=100,
+        description="0=creative layout; 100=match wireframe placement; style refs still drive look.",
+    )
+    transparent_background: bool = Field(
+        default=True,
+        description="OpenAI/GPT Image: API background mode. Gemini path ignores; prompt still requests transparency.",
+    )
 
 
 class GenerateImageBytesRequest(BaseModel):
@@ -252,6 +263,15 @@ def edit_image_nanobanana_route(
     try:
         # Always use Gemini image path (Nano Banana / gemini-3.1-flash-image-preview in image_tool._generate_image_gemini).
         model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
+        out_dir = None
+        r = ref.strip()
+        if not (r.startswith("http://") or r.startswith("https://")):
+            try:
+                found = find_image_path(validate_image_filename(r), body.project_key)
+                if found:
+                    out_dir = found.parent
+            except ValueError:
+                pass
         result = generate_image(
             prompt=prompt,
             width=body.width,
@@ -260,6 +280,7 @@ def edit_image_nanobanana_route(
             model=model_key,
             project_key=body.project_key,
             reference_image_filenames=[ref],
+            images_output_dir=out_dir,
         )
         n = len(result.get("images") or [])
         if n > 0:
@@ -365,6 +386,7 @@ def ui_canvas_polish_route(
         style_bank_prompt=style_prompt,
         extra_user_prompt=body.extra_user_prompt,
         style_reference_filenames=refs_in,
+        layout_fidelity=body.layout_fidelity,
     )
 
     ref_list = [sketch_fn] + [x for x in refs_in if x != sketch_fn]
@@ -378,6 +400,7 @@ def ui_canvas_polish_route(
         if reg.get("provider") != "gemini":
             model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
     try:
+        ui_dir = get_ui_canvas_images_dir(body.project_key.strip())
         result = generate_image(
             prompt=prompt,
             width=body.width,
@@ -386,7 +409,8 @@ def ui_canvas_polish_route(
             model=model_key,
             project_key=body.project_key.strip(),
             reference_image_filenames=ref_list or None,
-            transparent_background=True,
+            transparent_background=body.transparent_background,
+            images_output_dir=ui_dir,
         )
         n = len(result.get("images") or [])
         if n > 0:
@@ -405,14 +429,21 @@ async def import_image_route(
     file: UploadFile = File(...),
     project_key: str | None = Form(None),
     replace_filename: str | None = Form(None),
+    ui_canvas: str | None = Form(None),
     _user: dict = Depends(get_current_user),
 ) -> dict:
-    """Upload an image file and save it under the project Images/ folder (same as generated assets)."""
+    """Upload an image file and save under project Images/ or Gen/Images/UI/ when ui_canvas is true."""
     data = await file.read()
     try:
         rf = (replace_filename or "").strip() or None
+        save_ui = (ui_canvas or "").strip().lower() in ("true", "1", "on", "yes")
         one = import_uploaded_image(
-            data, file.content_type, file.filename, project_key, replace_filename=rf
+            data,
+            file.content_type,
+            file.filename,
+            project_key,
+            replace_filename=rf,
+            save_to_ui_canvas=save_ui,
         )
         return {"images": [one]}
     except ValueError as exc:
@@ -528,31 +559,24 @@ def remove_background_route(
 def get_image(filename: str, project_key: str | None = None) -> FileResponse:
     """
     Serve a generated image. Images are stored locally on the API server:
-    - With project_key: <project_local_path>/Images/<filename>
-      (project path is set in Admin > Project Config, stored in .local_data/project_paths.json)
+    - With project_key: <project>/Images/<filename> or <project>/Gen/Images/UI/<filename>
     - Without project_key: default project's Images/ or ./output/images (relative to API cwd)
     """
     print(f"[GET /images] request: filename={filename!r} project_key={project_key!r}")
     try:
         safe_name = validate_image_filename(filename)
-        # Try requested project_key first
         images_dir = get_images_dir(project_key)
-        path = safe_resolve_path(safe_name, project_key)
-        exists = path.exists()
+        path = find_image_path(safe_name, project_key)
+        if not path and project_key:
+            path = find_image_path(safe_name, None)
+        exists = path is not None and path.exists()
         print(f"[GET /images] images_dir={images_dir} path={path} exists={exists}")
-        if not exists and project_key:
-            # Fallback: try default/output location (e.g. when project path not set on this machine)
-            path_fallback = safe_resolve_path(safe_name, None)
-            if path_fallback.exists():
-                path = path_fallback
-                exists = True
-                print(f"[GET /images] fallback path={path} exists=True")
-        if not exists:
+        if not exists or path is None:
             raise HTTPException(
                 status_code=404,
                 detail=(
                     "Image not found. Looked in "
-                    f"{images_dir}. Images are stored locally when generated; ensure the API runs on the same machine "
+                    f"{images_dir} and Gen/Images/UI. Images are stored locally when generated; ensure the API runs on the same machine "
                     "or that project paths match."
                 ),
             )

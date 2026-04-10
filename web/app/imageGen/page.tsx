@@ -28,21 +28,9 @@ import { fetchApi } from "../lib/api";
 import { CharactersTabPanel } from "./CharactersTabPanel";
 import { ImageTabPanel } from "./ImageTabPanel";
 import { ResultsPanel } from "./ResultsPanel";
+import { ImagegenTooltip } from "./ImagegenTooltip";
 import { parseStoredImages, toPayload } from "./persistence";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
-
-function Tooltip({ text }: { text: string }) {
-  return (
-    <span className="imagegen-tooltip">
-      <button type="button" className="imagegen-tooltip-trigger" aria-label={text}>
-        i
-      </button>
-      <span className="imagegen-tooltip-content" role="tooltip">
-        {text}
-      </span>
-    </span>
-  );
-}
 
 function StylesAddForm({
   onAdd,
@@ -826,7 +814,7 @@ function ImageGenPageInner() {
                     <label className="imagegen-label" htmlFor="bg-model">
                       Model
                     </label>
-                    <Tooltip text="Select the segmentation model. General models work for most images; portrait/anime models are specialized." />
+                    <ImagegenTooltip text="Select the segmentation model. General models work for most images; portrait/anime models are specialized." />
                   </div>
                   <select
                     id="bg-model"
@@ -845,7 +833,7 @@ function ImageGenPageInner() {
                     <label className="imagegen-label" htmlFor="bg-alpha-matting">
                       Alpha matting
                     </label>
-                    <Tooltip text="Enable alpha matting to refine soft edges like hair or fur. Can be slower." />
+                    <ImagegenTooltip text="Enable alpha matting to refine soft edges like hair or fur. Can be slower." />
                   </div>
                   <select
                     id="bg-alpha-matting"
@@ -861,7 +849,7 @@ function ImageGenPageInner() {
                     <label className="imagegen-label" htmlFor="bg-fg-threshold">
                       Foreground threshold
                     </label>
-                    <Tooltip text="Higher values keep more pixels as foreground. Lower values make the cutout tighter." />
+                    <ImagegenTooltip text="Higher values keep more pixels as foreground. Lower values make the cutout tighter." />
                   </div>
                   <select
                     id="bg-fg-threshold"
@@ -880,7 +868,7 @@ function ImageGenPageInner() {
                     <label className="imagegen-label" htmlFor="bg-bg-threshold">
                       Background threshold
                     </label>
-                    <Tooltip text="Higher values treat more pixels as background. Lower values preserve more detail." />
+                    <ImagegenTooltip text="Higher values treat more pixels as background. Lower values preserve more detail." />
                   </div>
                   <select
                     id="bg-bg-threshold"

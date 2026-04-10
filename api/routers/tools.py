@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
 from core.local_settings import load_image_generated, save_image_generated
-from services.image_tool import safe_resolve_path, validate_image_filename
+from services.image_tool import find_image_path, validate_image_filename
 from services.xlsx_jobs import enqueue_xlsx_job, get_xlsx_job
 from core.code_settings import IMAGE_PROMPT_MODEL
 
@@ -106,9 +106,8 @@ def image_to_cloud_route(body: ImageToCloudBody) -> dict:
     """Upload a locally stored generated image to cloud storage (Supabase) and return its public URL."""
     try:
         safe_name = validate_image_filename(body.filename)
-        # Resolve local path for this project's image
-        path = safe_resolve_path(safe_name, body.project_key)
-        if not path.exists():
+        path = find_image_path(safe_name, body.project_key)
+        if not path:
             raise HTTPException(status_code=404, detail="Image file not found.")
 
         data = path.read_bytes()

@@ -57,6 +57,10 @@ export function parseStoredImages(raw: unknown[]): GeneratedImage[] {
         tab,
         location,
         fromSketch: o.fromSketch === true,
+        sourceSketchFilename:
+          typeof o.sourceSketchFilename === "string" && o.sourceSketchFilename.trim()
+            ? o.sourceSketchFilename.trim()
+            : undefined,
       };
     });
 }
@@ -73,5 +77,6 @@ export function toPayload(img: GeneratedImage): Record<string, unknown> {
     location: img.location,
   };
   if (img.fromSketch === true) payload.fromSketch = true;
+  if (img.sourceSketchFilename?.trim()) payload.sourceSketchFilename = img.sourceSketchFilename.trim();
   return payload;
 }
