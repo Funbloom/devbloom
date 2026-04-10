@@ -34,6 +34,8 @@ export function RunEditImageEffect({
 
   useEffect(() => {
     if (searchParams.get("runEdit") !== "1") return;
+    /** Capture before router.replace strips query (fallback if job JSON omits returnTo). */
+    const returnToFromUrl = searchParams.get("returnTo")?.trim() || "";
     const raw = sessionStorage.getItem(IMAGEGEN_EDIT_JOB_KEY);
     if (!raw) return;
     sessionStorage.removeItem(IMAGEGEN_EDIT_JOB_KEY);
@@ -46,6 +48,9 @@ export function RunEditImageEffect({
       setStatus("Invalid edit job.");
       return;
     }
+
+    const returnTo =
+      job.returnTo?.trim() || returnToFromUrl || "";
 
     let reference: string;
     try {
@@ -96,9 +101,11 @@ export function RunEditImageEffect({
         });
         setImages((prev) => [...newItems, ...prev]);
         setStatus("Image edited.");
-        if (job.returnTo?.trim()) {
+        const safeReturn =
+          returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "";
+        if (safeReturn) {
           window.setTimeout(() => {
-            router.replace(job.returnTo!.trim());
+            router.replace(safeReturn);
           }, 120);
         } else {
           setActiveTab(job.image.tab === "characters" ? "characters" : "image");

@@ -16,6 +16,12 @@ type Props = {
   embedded?: boolean;
   /** Header next to the images-per-row controls (default: Results). */
   panelTitle?: string;
+  /** UI Builder: multi-select sketches for batch polish (checkbox on sketch tiles). */
+  showSketchCheckboxes?: boolean;
+  selectedSketchIds?: readonly string[];
+  onSketchSelectionChange?: (id: string, selected: boolean) => void;
+  /** While true, sketch checkboxes are disabled (batch generation running). */
+  sketchSelectionDisabled?: boolean;
 };
 
 export function ResultsPanel({
@@ -30,6 +36,10 @@ export function ResultsPanel({
   onEditImage,
   embedded = false,
   panelTitle = "Results",
+  showSketchCheckboxes = false,
+  selectedSketchIds = [],
+  onSketchSelectionChange,
+  sketchSelectionDisabled = false,
 }: Props) {
   const inner = (
     <>
@@ -79,6 +89,33 @@ export function ResultsPanel({
                 <img src={img.url} alt={img.prompt} className="imagegen-card-image" />
               </div>
               <div className="imagegen-card-meta">
+                {showSketchCheckboxes && img.fromSketch && (
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                      fontSize: 13,
+                      cursor: img.filename ? "pointer" : "not-allowed",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSketchIds.includes(img.id)}
+                      disabled={sketchSelectionDisabled || !img.filename}
+                      onChange={(e) => onSketchSelectionChange?.(img.id, e.target.checked)}
+                    />
+                    <span style={{ color: img.filename ? "var(--foreground, #e2e8f0)" : "var(--muted, #64748b)" }}>
+                      Select
+                    </span>
+                  </label>
+                )}
+                {img.fromSketch && (
+                  <div className="imagegen-card-style" style={{ color: "#86efac" }}>
+                    Sketch (drawn)
+                  </div>
+                )}
                 {img.styleName && (
                   <div className="imagegen-card-style">Style: {img.styleName}</div>
                 )}
@@ -102,7 +139,11 @@ export function ResultsPanel({
                     type="button"
                     className="imagegen-delete-button imagegen-action-button"
                     onClick={() => onEditImage(img)}
-                    title="Edit with Nano Banana (reference image)"
+                    title={
+                      img.fromSketch
+                        ? "Open in Draw tab to keep editing the sketch"
+                        : "Edit with Nano Banana (reference image)"
+                    }
                   >
                     Edit
                   </button>

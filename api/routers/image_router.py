@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
+from core.code_settings import IMAGE_MODEL_REGISTRY, resolve_image_model
 from services.usage import check_can_generate_images, increment_usage
 from services.image_tool import (
     convert_image,
@@ -21,7 +22,6 @@ from services.image_tool import (
     generate_openai_image_bytes,
 )
 from services.storyboard import list_styles
-from core.code_settings import resolve_image_model
 
 image_router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -60,6 +60,8 @@ class GenerateImageRequest(BaseModel):
     style: str | None = None
     transparent_background: bool | None = None
     project_key: str | None = None
+    """Filenames in project Images/ or https URLs; passed to Gemini as reference images (wireframe conditioning)."""
+    reference_image_filenames: list[str] | None = None
 
 
 class GenerateImageBytesRequest(BaseModel):
@@ -266,6 +268,11 @@ def generate_image_route(
             model_key = resolve_image_model("imagegen", body.model)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        refs = [str(r).strip() for r in (body.reference_image_filenames or []) if r and str(r).strip()]
+        if refs:
+            reg = IMAGE_MODEL_REGISTRY.get(model_key, {})
+            if reg.get("provider") != "gemini":
+                model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
         result = generate_image(
             prompt=body.prompt,
             negative_prompt=body.negative_prompt,
@@ -278,6 +285,7 @@ def generate_image_route(
             style=body.style,
             transparent_background=body.transparent_background,
             project_key=body.project_key,
+            reference_image_filenames=refs or None,
         )
         n = len(result.get("images") or [])
         if n > 0:
@@ -293,12 +301,16 @@ def generate_image_route(
 async def import_image_route(
     file: UploadFile = File(...),
     project_key: str | None = Form(None),
+    replace_filename: str | None = Form(None),
     _user: dict = Depends(get_current_user),
 ) -> dict:
     """Upload an image file and save it under the project Images/ folder (same as generated assets)."""
     data = await file.read()
     try:
-        one = import_uploaded_image(data, file.content_type, file.filename, project_key)
+        rf = (replace_filename or "").strip() or None
+        one = import_uploaded_image(
+            data, file.content_type, file.filename, project_key, replace_filename=rf
+        )
         return {"images": [one]}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

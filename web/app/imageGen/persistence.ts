@@ -56,12 +56,13 @@ export function parseStoredImages(raw: unknown[]): GeneratedImage[] {
         createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(0).toISOString(),
         tab,
         location,
+        fromSketch: o.fromSketch === true,
       };
     });
 }
 
 export function toPayload(img: GeneratedImage): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     id: img.id,
     url: img.url,
     filename: img.filename,
@@ -71,4 +72,6 @@ export function toPayload(img: GeneratedImage): Record<string, unknown> {
     tab: img.tab,
     location: img.location,
   };
+  if (img.fromSketch === true) payload.fromSketch = true;
+  return payload;
 }

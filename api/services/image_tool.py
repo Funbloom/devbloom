@@ -143,19 +143,34 @@ _IMPORT_CT_TO_EXT: dict[str, str] = {
     "image/png": "png",
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
+    "image/pjpeg": "jpg",
+    "image/jfif": "jpg",
     "image/webp": "webp",
     "image/gif": "gif",
 }
 
 
-def _guess_import_ext(content_type: Optional[str], filename: Optional[str]) -> Optional[str]:
+def _guess_import_ext(
+    content_type: Optional[str],
+    original_filename: Optional[str],
+    data: Optional[bytes] = None,
+) -> Optional[str]:
     ct = (content_type or "").split(";")[0].strip().lower()
     if ct in _IMPORT_CT_TO_EXT:
         return _IMPORT_CT_TO_EXT[ct]
     fn = (filename or "").lower()
-    for ext in ("png", "jpg", "jpeg", "webp", "gif"):
+    for ext in ("png", "jpg", "jpeg", "webp", "gif", "jfif", "jpe", "pjp"):
         if fn.endswith(f".{ext}"):
-            return "jpg" if ext == "jpeg" else ext
+            return "jpg" if ext in ("jpeg", "jfif", "jpe", "pjp") else ext
+    # Some browsers send application/octet-stream; sniff common image signatures.
+    if data and len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if data and len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data and len(data) >= 6 and data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if data and len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
     return None
 
 
@@ -164,6 +179,7 @@ def import_uploaded_image(
     content_type: Optional[str],
     original_filename: Optional[str],
     project_key: Optional[str],
+    replace_filename: Optional[str] = None,
 ) -> dict:
     """Save an uploaded image to the project Images/ folder with a generated name (same as generated assets)."""
     pk = (project_key or "").strip() or None
@@ -171,10 +187,21 @@ def import_uploaded_image(
         raise ValueError("project_key is required.")
     if len(data) > _IMPORT_MAX_BYTES:
         raise ValueError("File too large (max 25 MB).")
-    ext = _guess_import_ext(content_type, original_filename)
+    ext = _guess_import_ext(content_type, original_filename, data=data)
     if not ext:
         raise ValueError("Unsupported image type. Use PNG, JPEG, WebP, or GIF.")
-    output_name = build_image_filename("import", ext)
+    if replace_filename and replace_filename.strip():
+        output_name = validate_image_filename(replace_filename.strip())
+        name_ext = output_name.rsplit(".", 1)[-1].lower()
+        if name_ext == "jpeg":
+            name_ext = "jpg"
+        upload_ext = ext
+        if upload_ext == "jpeg":
+            upload_ext = "jpg"
+        if name_ext != upload_ext:
+            raise ValueError("Uploaded image type must match the file extension being replaced.")
+    else:
+        output_name = build_image_filename("import", ext)
     save_bytes_to_file(data, output_name, pk)
     return {"filename": output_name, "url": build_image_url(output_name, pk)}
 

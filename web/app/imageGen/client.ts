@@ -82,6 +82,8 @@ export async function generateImageFromPrompt(
     transparentBackground?: boolean;
     /** When set, images are saved under this project’s Images/ (same as remove background). */
     projectKey?: string;
+    /** Reference images (project Images/ filenames or URLs); Gemini uses them for conditioning. */
+    referenceImageFilenames?: string[];
   }
 ): Promise<BackendImageResult[]> {
   const body: Record<string, unknown> = { prompt };
@@ -98,6 +100,9 @@ export async function generateImageFromPrompt(
   if (typeof options?.transparentBackground === "boolean") {
     body.transparent_background = options.transparentBackground;
   }
+  if (options?.referenceImageFilenames?.length) {
+    body.reference_image_filenames = options.referenceImageFilenames.filter((s) => String(s).trim());
+  }
   const response = await fetchApi("/tools/generate_image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -112,10 +117,28 @@ export async function generateImageFromPrompt(
 }
 
 /** Upload a file and save it under the project Images/ folder (same as generated images). */
-export async function importImageFile(file: File, projectKey: string): Promise<BackendImageResult[]> {
+function filenameFromImportUrl(url: string): string {
+  try {
+    const u = new URL(url, API_BASE);
+    const parts = u.pathname.split("/").filter(Boolean);
+    const last = parts[parts.length - 1] || "";
+    return decodeURIComponent(last);
+  } catch {
+    return "";
+  }
+}
+
+export async function importImageFile(
+  file: File,
+  projectKey: string,
+  options?: { replaceFilename?: string },
+): Promise<BackendImageResult[]> {
   const form = new FormData();
-  form.append("file", file);
+  const uploadName = file.name?.trim() || "upload.jpg";
+  form.append("file", file, uploadName);
   form.append("project_key", projectKey.trim());
+  const rf = options?.replaceFilename?.trim();
+  if (rf) form.append("replace_filename", rf);
   const response = await fetchApi("/tools/import_image", {
     method: "POST",
     body: form,
@@ -125,7 +148,19 @@ export async function importImageFile(file: File, projectKey: string): Promise<B
     throw new Error(extractErrorMessage(response.status, errBody.detail));
   }
   const data = (await response.json()) as { images?: BackendImageResult[] };
-  return (data.images ?? []).filter((img) => (img.url || img.filename || "") !== "");
+  const raw = (data.images ?? []).map((img) => {
+    const url = typeof img.url === "string" ? img.url : "";
+    let filename = typeof img.filename === "string" ? img.filename.trim() : "";
+    if (!filename && url) {
+      filename = filenameFromImportUrl(url);
+    }
+    return { ...img, url, filename };
+  });
+  const list = raw.filter((img) => (img.url || img.filename || "") !== "");
+  if (list.length === 0) {
+    throw new Error("Import returned no image. Check the file format (PNG, JPEG, WebP, or GIF) and try again.");
+  }
+  return list;
 }
 
 export async function generateImagePrompt(conceptPrompt: string): Promise<string> {

@@ -49,7 +49,11 @@ export default function ImageGenEditPage() {
         ...(returnTo?.trim() ? { returnTo: returnTo.trim() } : {}),
       }),
     );
-    router.push("/imageGen?runEdit=1");
+    const qs = new URLSearchParams();
+    qs.set("runEdit", "1");
+    const rt = returnTo?.trim();
+    if (rt) qs.set("returnTo", rt);
+    router.push(`/imageGen?${qs.toString()}`);
   };
 
   return (
@@ -97,7 +101,14 @@ export default function ImageGenEditPage() {
           <button
             type="button"
             className="imagegen-delete-button"
-            onClick={() => router.push("/imageGen")}
+            onClick={() => {
+              const rt = sessionStorage.getItem(IMAGEGEN_EDIT_RETURN_KEY)?.trim();
+              if (rt?.startsWith("/") && !rt.startsWith("//")) {
+                router.push(rt);
+              } else {
+                router.push("/imageGen");
+              }
+            }}
           >
             Back
           </button>

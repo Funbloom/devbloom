@@ -6,37 +6,48 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
 } from "react";
 
-export type SketchTool = "pen" | "eraser";
+import { API_BASE } from "../imageGen/config";
+import type { DrawTool } from "./penPalette";
+import { penColorForTool } from "./penPalette";
 
 export type SketchCanvasHandle = {
   clear: () => void;
   /** Full canvas bitmap as PNG (device pixels). */
   getPngBlob: () => Promise<Blob | null>;
+  /** Draw an image (scaled to fit, letterboxed) after layout; used when resuming a saved sketch. */
+  loadFromUrl: (url: string) => Promise<boolean>;
 };
 
 type Props = {
   brushSize: number;
-  tool: SketchTool;
+  /** Eraser or a labeled UI pen task (color from palette). */
+  tool: DrawTool;
   className?: string;
-  /** CSS color for pen ink */
-  penColor?: string;
   /** Canvas background (used for clear and initial fill) */
   backgroundColor?: string;
 };
 
 const DEFAULT_BG = "#0f1115";
-const DEFAULT_PEN = "#cbd5e1";
+
+function hexWithAlpha(hex: string, alpha: number): string {
+  const m = hex.replace("#", "").trim();
+  if (m.length !== 6 || !/^[0-9a-fA-F]+$/.test(m)) return hex;
+  const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255);
+  return `#${m}${a.toString(16).padStart(2, "0")}`;
+}
 
 export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function SketchCanvas(
-  { brushSize, tool, className, penColor = DEFAULT_PEN, backgroundColor = DEFAULT_BG },
+  { brushSize, tool, className, backgroundColor = DEFAULT_BG },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
   const lastRef = useRef({ x: 0, y: 0 });
+  const [brushPreview, setBrushPreview] = useState<{ x: number; y: number } | null>(null);
 
   const applyCanvasSize = useCallback(() => {
     const container = containerRef.current;
@@ -93,6 +104,59 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function Sketc
           }
           canvas.toBlob((blob) => resolve(blob), "image/png");
         }),
+      loadFromUrl: (url: string) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return Promise.resolve(false);
+        const fullUrl = url.startsWith("http") ? url : `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          const paint = (attempt: number) => {
+            const c = canvasRef.current;
+            const ctx = c?.getContext("2d");
+            if (!c || !ctx) {
+              resolve(false);
+              return;
+            }
+            const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+            const lw = c.width / dpr;
+            const lh = c.height / dpr;
+            if ((lw < 2 || lh < 2) && attempt < 40) {
+              requestAnimationFrame(() => paint(attempt + 1));
+              return;
+            }
+            if (lw < 1 || lh < 1) {
+              resolve(false);
+              return;
+            }
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.fillStyle = backgroundColor;
+            ctx.fillRect(0, 0, lw, lh);
+            const ir = img.width / img.height;
+            const cr = lw / lh;
+            let dw: number;
+            let dh: number;
+            let ox: number;
+            let oy: number;
+            if (ir > cr) {
+              dw = lw;
+              dh = lw / ir;
+              ox = 0;
+              oy = (lh - dh) / 2;
+            } else {
+              dh = lh;
+              dw = lh * ir;
+              ox = (lw - dw) / 2;
+              oy = 0;
+            }
+            ctx.drawImage(img, ox, oy, dw, dh);
+            resolve(true);
+          };
+          img.onload = () => requestAnimationFrame(() => paint(0));
+          img.onerror = () => resolve(false);
+          img.src = fullUrl;
+        });
+      },
     }),
     [backgroundColor],
   );
@@ -111,6 +175,16 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function Sketc
     window.addEventListener("resize", onWin);
     return () => window.removeEventListener("resize", onWin);
   }, [applyCanvasSize]);
+
+  const updateBrushPreviewFromEvent = (e: React.PointerEvent) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setBrushPreview({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+  };
 
   const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -134,7 +208,7 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function Sketc
       ctx.strokeStyle = "rgba(0,0,0,1)";
     } else {
       ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = penColor;
+      ctx.strokeStyle = penColorForTool(tool) ?? "#cbd5e1";
     }
   };
 
@@ -143,6 +217,7 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function Sketc
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     e.preventDefault();
+    updateBrushPreviewFromEvent(e);
     canvas.setPointerCapture(e.pointerId);
     drawingRef.current = true;
     const p = getPos(e);
@@ -155,6 +230,7 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function Sketc
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    updateBrushPreviewFromEvent(e);
     if (!drawingRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
@@ -182,11 +258,17 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function Sketc
     drawingRef.current = false;
   };
 
+  const penHex = tool !== "eraser" ? penColorForTool(tool) ?? "#cbd5e1" : null;
+  const d = Math.max(1, brushSize);
+
   return (
     <div
       ref={containerRef}
       className={className}
+      onPointerEnter={updateBrushPreviewFromEvent}
+      onPointerLeave={() => setBrushPreview(null)}
       style={{
+        position: "relative",
         width: "100%",
         height: "min(60vh, 640px)",
         minHeight: "min(60vh, 640px)",
@@ -209,9 +291,35 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function Sketc
           display: "block",
           width: "100%",
           height: "100%",
-          cursor: tool === "eraser" ? "cell" : "crosshair",
+          cursor: "none",
         }}
       />
+      {brushPreview && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            left: brushPreview.x,
+            top: brushPreview.y,
+            width: d,
+            height: d,
+            marginLeft: -d / 2,
+            marginTop: -d / 2,
+            borderRadius: "50%",
+            pointerEvents: "none",
+            boxSizing: "border-box",
+            ...(tool === "eraser"
+              ? {
+                  border: "2px dashed rgba(255, 255, 255, 0.55)",
+                  backgroundColor: "rgba(255, 255, 255, 0.06)",
+                }
+              : {
+                  border: `2px solid ${penHex}`,
+                  backgroundColor: penHex ? hexWithAlpha(penHex, 0.14) : "transparent",
+                }),
+          }}
+        />
+      )}
     </div>
   );
 });

@@ -11,4 +11,6 @@ export type GeneratedImage = {
   createdAt: string;
   tab: ImageTab;
   location?: ImageLocation;
+  /** Saved from UI Builder Draw tab; Edit reopens the sketch canvas instead of Image Gen. */
+  fromSketch?: boolean;
 };
