@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { API_BASE, STORAGE_KEY_PROJECT } from "../imageGen/config";
 import {
-  generateImageFromPrompt,
+  generateUiCanvasPolish,
   getImageGenerated,
   getStyles,
   importImageFile,
@@ -25,11 +25,7 @@ import type { GeneratedImage, ImageLocation } from "../imageGen/types";
 import type { DrawTool } from "./penPalette";
 import { UI_PEN_TASKS } from "./penPalette";
 import { SketchCanvas, type SketchCanvasHandle } from "./SketchCanvas";
-import {
-  buildStyleReferencePromptAppend,
-  buildUiCanvasPolishPrompt,
-  maxUiStyleReferenceImages,
-} from "./uicanvasPrompt";
+import { maxUiStyleReferenceImages } from "./uicanvasPrompt";
 
 type BuilderTab = "generate" | "draw";
 
@@ -553,25 +549,17 @@ export default function UIBuilderPage() {
         const img = selectedSketchesForPolish[i];
         const fn = img.filename!.trim();
         setStatus(`Generating ${i + 1} of ${selectedSketchesForPolish.length}…`);
-        let promptBody = buildUiCanvasPolishPrompt(img.prompt || "UI sketch");
-        if (style?.prompt?.trim()) {
-          promptBody = `${style.prompt.trim()}\n\n${promptBody}`;
-        }
-        if (extra) {
-          promptBody = `${promptBody}\n\nAdditional instructions from the user:\n${extra}`;
-        }
         const styleRefs = styleReferenceFilenames.slice(0, MAX_STYLE_REFS);
-        if (styleRefs.length > 0) {
-          promptBody = `${promptBody}\n\n${buildStyleReferencePromptAppend(styleRefs.length)}`;
-        }
-        const refList = [fn, ...styleRefs.filter((s) => s !== fn)];
-        const results = await generateImageFromPrompt(promptBody, {
+        const { images: results, styleName: resolvedStyleName } = await generateUiCanvasPolish({
           projectKey: projectKey.trim(),
+          sketchFilename: fn,
+          sketchTitle: img.prompt || "UI sketch",
+          styleId: selectedStyleId,
+          extraUserPrompt: extra || undefined,
+          styleReferenceFilenames: styleRefs.length ? styleRefs : undefined,
           model: imageModel,
           width: 1024,
           height: 1024,
-          numImages: 1,
-          referenceImageFilenames: refList,
         });
         const first = results[0];
         if (!first) {
@@ -600,7 +588,7 @@ export default function UIBuilderPage() {
           url: rawUrl.startsWith("http") ? rawUrl : normalizeImageUrl(rawUrl),
           filename: filename || undefined,
           prompt: `UI polish from wireframe: "${sketchLabel}"`,
-          styleName: style?.name ?? img.styleName ?? "UI Canvas",
+          styleName: resolvedStyleName ?? style?.name ?? img.styleName ?? "UI Canvas",
           createdAt: now,
           tab: "ui_canvas",
           location: "local",

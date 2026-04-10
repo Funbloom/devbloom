@@ -22,6 +22,10 @@ from services.image_tool import (
     generate_openai_image_bytes,
 )
 from services.storyboard import list_styles
+from services.ui_canvas_prompt import (
+    MAX_UI_STYLE_REFERENCE_IMAGES,
+    build_ui_canvas_full_prompt,
+)
 
 image_router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -62,6 +66,20 @@ class GenerateImageRequest(BaseModel):
     project_key: str | None = None
     """Filenames in project Images/ or https URLs; passed to Gemini as reference images (wireframe conditioning)."""
     reference_image_filenames: list[str] | None = None
+
+
+class UiCanvasPolishRequest(BaseModel):
+    """UI Builder: wireframe sketch + optional style bank / user snippet / style refs — server builds the full prompt."""
+
+    project_key: str = Field(min_length=1)
+    sketch_filename: str = Field(min_length=1)
+    sketch_title: str | None = None
+    style_id: str | None = None
+    extra_user_prompt: str | None = None
+    style_reference_filenames: list[str] | None = None
+    model: str | None = None
+    width: int = 1024
+    height: int = 1024
 
 
 class GenerateImageBytesRequest(BaseModel):
@@ -291,6 +309,91 @@ def generate_image_route(
         if n > 0:
             increment_usage(user.get("id") or "", n)
         return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _resolve_style_bank(style_id: str | None) -> tuple[str | None, str | None]:
+    """Return (style prompt, style name) from the storyboard style bank; (None, None) if no id."""
+    if not style_id or not str(style_id).strip():
+        return None, None
+    sid = str(style_id).strip()
+    styles = list_styles()
+    for s in styles:
+        if str(s.get("id", "")).strip() == sid:
+            p = (s.get("prompt") or "").strip()
+            n = (s.get("name") or "").strip()
+            return (p or None, n or None)
+    raise HTTPException(status_code=404, detail=f"Style not found: {sid}")
+
+
+@image_router.post("/tools/ui_canvas_polish")
+def ui_canvas_polish_route(
+    body: UiCanvasPolishRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Build the UI Canvas polish prompt on the server and run image generation with the sketch (+ optional style refs).
+    """
+    check_can_generate_images(
+        user.get("id") or "",
+        user.get("is_admin") or False,
+        count=1,
+    )
+    try:
+        sketch_fn = validate_image_filename(body.sketch_filename.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    refs_in: list[str] = []
+    for r in (body.style_reference_filenames or [])[:MAX_UI_STYLE_REFERENCE_IMAGES]:
+        rs = str(r).strip()
+        if not rs:
+            continue
+        try:
+            refs_in.append(validate_image_filename(rs))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    style_prompt, style_name = _resolve_style_bank(body.style_id)
+    sketch_title = (body.sketch_title or "").strip() or "UI sketch"
+
+    prompt = build_ui_canvas_full_prompt(
+        sketch_title,
+        style_bank_prompt=style_prompt,
+        extra_user_prompt=body.extra_user_prompt,
+        style_reference_filenames=refs_in,
+    )
+
+    ref_list = [sketch_fn] + [x for x in refs_in if x != sketch_fn]
+
+    try:
+        model_key = resolve_image_model("imagegen", body.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if ref_list:
+        reg = IMAGE_MODEL_REGISTRY.get(model_key, {})
+        if reg.get("provider") != "gemini":
+            model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
+    try:
+        result = generate_image(
+            prompt=prompt,
+            width=body.width,
+            height=body.height,
+            num_images=1,
+            model=model_key,
+            project_key=body.project_key.strip(),
+            reference_image_filenames=ref_list or None,
+            transparent_background=True,
+        )
+        n = len(result.get("images") or [])
+        if n > 0:
+            increment_usage(user.get("id") or "", n)
+        out = dict(result)
+        out["style_name"] = style_name
+        return out
     except HTTPException:
         raise
     except Exception as exc:

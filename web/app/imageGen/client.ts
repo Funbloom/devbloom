@@ -116,6 +116,49 @@ export async function generateImageFromPrompt(
   return (data.images ?? []).filter((img) => (img.url || img.filename || "") !== "");
 }
 
+/** UI Builder wireframe polish: server builds prompt from sketch + optional style id / snippet / ref filenames. */
+export async function generateUiCanvasPolish(options: {
+  projectKey: string;
+  sketchFilename: string;
+  sketchTitle?: string;
+  styleId?: string | null;
+  extraUserPrompt?: string;
+  styleReferenceFilenames?: string[];
+  model?: string;
+  width?: number;
+  height?: number;
+}): Promise<{ images: BackendImageResult[]; styleName?: string | null }> {
+  const body: Record<string, unknown> = {
+    project_key: options.projectKey.trim(),
+    sketch_filename: options.sketchFilename.trim(),
+  };
+  if (options.sketchTitle?.trim()) body.sketch_title = options.sketchTitle.trim();
+  const sid = options.styleId?.trim();
+  if (sid && sid !== "__none") body.style_id = sid;
+  if (options.extraUserPrompt?.trim()) body.extra_user_prompt = options.extraUserPrompt.trim();
+  if (options.styleReferenceFilenames?.length) {
+    body.style_reference_filenames = options.styleReferenceFilenames.map((s) => String(s).trim()).filter(Boolean);
+  }
+  if (options.model) body.model = options.model;
+  if (typeof options.width === "number") body.width = options.width;
+  if (typeof options.height === "number") body.height = options.height;
+  const response = await fetchApi("/tools/ui_canvas_polish", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+  const data = (await response.json()) as {
+    images?: BackendImageResult[];
+    style_name?: string | null;
+  };
+  const images = (data.images ?? []).filter((img) => (img.url || img.filename || "") !== "");
+  return { images, styleName: data.style_name ?? null };
+}
+
 /** Upload a file and save it under the project Images/ folder (same as generated images). */
 function filenameFromImportUrl(url: string): string {
   try {
