@@ -9,7 +9,7 @@ import {
   normalizeImageUrl,
   resolveReferenceForEditApi,
 } from "./client";
-import { IMAGEGEN_EDIT_JOB_KEY } from "./editKeys";
+import { IMAGEGEN_EDIT_JOB_KEY, UIBUILDER_PENDING_BREAKDOWN_EXPORTS_RELOAD_KEY } from "./editKeys";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
 
 type Props = {
@@ -103,6 +103,16 @@ export function RunEditImageEffect({
         setStatus("Image edited.");
         const safeReturn =
           returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "";
+        if (
+          job.image.nestedUiRelativePath?.trim() &&
+          safeReturn.includes("/uiBuilder")
+        ) {
+          try {
+            sessionStorage.setItem(UIBUILDER_PENDING_BREAKDOWN_EXPORTS_RELOAD_KEY, "1");
+          } catch {
+            /* ignore */
+          }
+        }
         if (safeReturn) {
           window.setTimeout(() => {
             router.replace(safeReturn);

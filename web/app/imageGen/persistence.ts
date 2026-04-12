@@ -1,5 +1,5 @@
 import { API_BASE } from "./config";
-import { normalizeImageUrl } from "./client";
+import { normalizeImageUrl, parseNestedUiRelFromUrl } from "./client";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
 
 function parseTab(o: Record<string, unknown>): ImageTab {
@@ -47,6 +47,14 @@ export function parseStoredImages(raw: unknown[]): GeneratedImage[] {
               }
             })();
 
+      let nestedUiRelativePath: string | undefined;
+      if (typeof o.nestedUiRelativePath === "string" && o.nestedUiRelativePath.trim()) {
+        nestedUiRelativePath = o.nestedUiRelativePath.trim();
+      } else if (tab === "ui_canvas") {
+        const fromUrl = parseNestedUiRelFromUrl(url);
+        if (fromUrl) nestedUiRelativePath = fromUrl;
+      }
+
       return {
         id: String(o.id),
         url,
@@ -61,6 +69,7 @@ export function parseStoredImages(raw: unknown[]): GeneratedImage[] {
           typeof o.sourceSketchFilename === "string" && o.sourceSketchFilename.trim()
             ? o.sourceSketchFilename.trim()
             : undefined,
+        ...(nestedUiRelativePath ? { nestedUiRelativePath } : {}),
       };
     });
 }
@@ -78,5 +87,6 @@ export function toPayload(img: GeneratedImage): Record<string, unknown> {
   };
   if (img.fromSketch === true) payload.fromSketch = true;
   if (img.sourceSketchFilename?.trim()) payload.sourceSketchFilename = img.sourceSketchFilename.trim();
+  if (img.nestedUiRelativePath?.trim()) payload.nestedUiRelativePath = img.nestedUiRelativePath.trim();
   return payload;
 }

@@ -1,0 +1,11 @@
+# Optional: UI Breakdown SAM (install into local_agent/.venv — same as Mesh Gen).
+# pip install -r requirements.txt -r requirements-sam.txt
+#
+# See README-SAM.md for checkpoints and SAM_CHECKPOINT_PATH.
+
+torch>=2.1.0
+torchvision>=0.16.0
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+pillow>=10.0.0
+git+https://github.com/facebookresearch/segment-anything.git

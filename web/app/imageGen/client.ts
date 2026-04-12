@@ -27,8 +27,28 @@ export function normalizeImageUrl(url: string): string {
   return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
-/** Resolve reference for Nano Banana edit API: full HTTPS URL or bare Images/ filename. */
+/**
+ * Gen/Images/UI nested assets use `/images/ui_file?...&rel=<encoded>`.
+ * Returns the decoded `rel` (e.g. `MyFolder/screen.png`) or null.
+ */
+export function parseNestedUiRelFromUrl(url: string): string | null {
+  const u = (url || "").trim();
+  if (!u) return null;
+  try {
+    const parsed = new URL(u, API_BASE);
+    if (!parsed.pathname.includes("/ui_file")) return null;
+    const rel = parsed.searchParams.get("rel");
+    if (!rel?.trim()) return null;
+    return rel.replace(/\\/g, "/").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve reference for Nano Banana edit API: full HTTPS URL, bare Images/ filename, or Gen/Images/UI nested path. */
 export function resolveReferenceForEditApi(img: GeneratedImage): string {
+  const nested = img.nestedUiRelativePath?.trim();
+  if (nested) return nested.replace(/\\/g, "/");
   const u = (img.url || "").trim();
   if (u.startsWith("http://") || u.startsWith("https://")) return u;
   if (img.filename?.trim()) return img.filename.trim();
@@ -167,6 +187,154 @@ export async function generateUiCanvasPolish(options: {
   };
   const images = (data.images ?? []).filter((img) => (img.url || img.filename || "") !== "");
   return { images, styleName: data.style_name ?? null };
+}
+
+export type UiBreakdownElement = {
+  id: string;
+  label: string;
+  x_min: number;
+  y_min: number;
+  x_max: number;
+  y_max: number;
+};
+
+/** SAM Automatic Mask Generator params (optional overrides; server merges with defaults). */
+export type UiBreakdownSamParams = {
+  points_per_side?: number;
+  points_per_batch?: number;
+  pred_iou_thresh?: number;
+  stability_score_thresh?: number;
+  crop_n_layers?: number;
+  crop_nms_thresh?: number;
+  crop_overlap_ratio?: number;
+  crop_n_points_downscale_factor?: number;
+  min_mask_region_area?: number;
+  box_nms_thresh?: number;
+};
+
+/** SAM geometry comes from the local agent (`POST /ui_breakdown/sam`); the API only labels regions. */
+export async function detectUiBreakdown(options: {
+  projectKey: string;
+  sourceFilename: string;
+  prefetchedElements: UiBreakdownElement[];
+  /** If true, skip Gemini labeling (keeps generic segment labels from SAM). */
+  skipVlmLabel?: boolean;
+  labelTemperature?: number;
+  /** Gemini model id for labeling (optional; server default). */
+  labelModel?: string;
+}): Promise<{
+  elements: UiBreakdownElement[];
+  /** Canonical pixel size of the source image (after EXIF); optional. */
+  imageWidth?: number;
+  imageHeight?: number;
+}> {
+  const body: Record<string, unknown> = {
+    project_key: options.projectKey.trim(),
+    source_filename: options.sourceFilename.trim(),
+    prefetched_elements: options.prefetchedElements.map((e) => ({
+      id: e.id,
+      label: e.label,
+      x_min: e.x_min,
+      y_min: e.y_min,
+      x_max: e.x_max,
+      y_max: e.y_max,
+    })),
+  };
+  if (options.skipVlmLabel === true) body.skip_vlm_label = true;
+  if (typeof options.labelTemperature === "number") body.label_temperature = options.labelTemperature;
+  if (options.labelModel?.trim()) body.label_model = options.labelModel.trim();
+  const response = await fetchApi("/tools/ui_breakdown_detect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+  const data = (await response.json()) as {
+    elements?: UiBreakdownElement[];
+    image_width?: number;
+    image_height?: number;
+  };
+  return {
+    elements: data.elements ?? [],
+    imageWidth: typeof data.image_width === "number" ? data.image_width : undefined,
+    imageHeight: typeof data.image_height === "number" ? data.image_height : undefined,
+  };
+}
+
+export async function stripTextForBreakdown(options: {
+  projectKey: string;
+  sourceFilename: string;
+  promptSuffix?: string;
+  width?: number;
+  height?: number;
+  model?: string;
+}): Promise<BackendImageResult> {
+  const body: Record<string, unknown> = {
+    project_key: options.projectKey.trim(),
+    source_filename: options.sourceFilename.trim(),
+  };
+  if (options.promptSuffix?.trim()) body.prompt_suffix = options.promptSuffix.trim();
+  if (typeof options.width === "number") body.width = options.width;
+  if (typeof options.height === "number") body.height = options.height;
+  if (options.model) body.model = options.model;
+  const response = await fetchApi("/tools/ui_breakdown_strip_text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+  const data = (await response.json()) as BackendImageResult;
+  return data;
+}
+
+export type UiBreakdownProcessFile = {
+  role: string;
+  filename: string;
+  relative_path?: string;
+  url: string;
+};
+
+export async function processUiBreakdown(options: {
+  projectKey: string;
+  sourceFilename: string;
+  exportFolder: string;
+  elements: UiBreakdownElement[];
+  cropPaddingPx?: number;
+  backgroundPromptSuffix?: string;
+  width?: number;
+  height?: number;
+  regenModel?: string;
+  /** Default true: background plate uses GPT Image `background=transparent` (not Remove text). */
+  transparentBackground?: boolean;
+}): Promise<{ folder: string; files: UiBreakdownProcessFile[] }> {
+  const body: Record<string, unknown> = {
+    project_key: options.projectKey.trim(),
+    source_filename: options.sourceFilename.trim(),
+    export_folder: options.exportFolder.trim(),
+    elements: options.elements,
+    transparent_background: options.transparentBackground !== false,
+  };
+  if (typeof options.cropPaddingPx === "number") body.crop_padding_px = options.cropPaddingPx;
+  if (options.backgroundPromptSuffix?.trim()) body.background_prompt_suffix = options.backgroundPromptSuffix.trim();
+  if (typeof options.width === "number") body.width = options.width;
+  if (typeof options.height === "number") body.height = options.height;
+  if (options.regenModel) body.regen_model = options.regenModel;
+  const response = await fetchApi("/tools/ui_breakdown_process", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+  return (await response.json()) as { folder: string; files: UiBreakdownProcessFile[] };
 }
 
 /** Upload a file and save it under the project Images/ folder (same as generated images). */
@@ -312,6 +480,63 @@ export async function uploadImageToCloud(
   return data.url;
 }
 
+export async function listUiCanvasNestedImages(
+  projectKey: string,
+  options?: { subfolder?: string | null }
+): Promise<Array<{ relative_path: string; url: string }>> {
+  const body: Record<string, unknown> = { project_key: projectKey.trim() };
+  const sub = options?.subfolder?.trim();
+  if (sub) body.subfolder = sub;
+  const response = await fetchApi("/tools/list_ui_canvas_nested_images", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+  const data = (await response.json()) as { files?: Array<{ relative_path: string; url: string }> };
+  return data.files ?? [];
+}
+
+export async function deleteUiCanvasNestedImage(
+  projectKey: string,
+  relativePath: string
+): Promise<void> {
+  const response = await fetchApi("/tools/delete_ui_canvas_nested_image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_key: projectKey.trim(),
+      relative_path: relativePath.trim().replace(/\\/g, "/"),
+    }),
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+}
+
+/** Delete Gen/Images/UI/<subfolder>/ and all files inside (single folder segment). */
+export async function deleteUiCanvasExportFolder(
+  projectKey: string,
+  subfolder: string
+): Promise<void> {
+  const response = await fetchApi("/tools/delete_ui_canvas_export_folder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_key: projectKey.trim(),
+      subfolder: subfolder.trim(),
+    }),
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+}
+
 export async function removeBackground(
   inputFilename: string,
   projectKey: string,
@@ -320,12 +545,19 @@ export async function removeBackground(
     alphaMatting?: boolean;
     alphaMattingForegroundThreshold?: number;
     alphaMattingBackgroundThreshold?: number;
+    /** Gen/Images/UI relative path (e.g. export/widget.png); use instead of bare filename. */
+    inputUiNestedRel?: string;
   }
 ): Promise<BackendImageResult> {
   const body: Record<string, unknown> = {
-    input_filename: inputFilename,
     project_key: projectKey,
   };
+  if (options?.inputUiNestedRel?.trim()) {
+    body.input_ui_nested_rel = options.inputUiNestedRel.trim().replace(/\\/g, "/");
+    body.input_filename = "";
+  } else {
+    body.input_filename = inputFilename;
+  }
   if (options?.model) body.model = options.model;
   if (typeof options?.alphaMatting === "boolean") body.alpha_matting = options.alphaMatting;
   if (typeof options?.alphaMattingForegroundThreshold === "number") {

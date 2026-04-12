@@ -3,6 +3,7 @@ import io
 import mimetypes
 import os
 import re
+import shutil
 import time
 import uuid
 from datetime import datetime
@@ -174,6 +175,60 @@ def build_image_url(filename: str, project_key: Optional[str] = None) -> str:
     return url
 
 
+def resolve_ui_canvas_nested_file(project_key: str, relative: str) -> Path:
+    """
+    Resolve a file under <project>/Gen/Images/UI/ given a relative path (forward slashes).
+    Example: MyExport/background.png
+    """
+    pk = (project_key or "").strip()
+    if not pk:
+        raise ValueError("project_key is required.")
+    rel = (relative or "").strip().replace("\\", "/").lstrip("/")
+    if not rel or ".." in rel:
+        raise ValueError("Invalid path.")
+    parts = [p for p in rel.split("/") if p]
+    if not parts:
+        raise ValueError("Invalid path.")
+    segment_re = re.compile(r"^[a-zA-Z0-9._-]+$")
+    for p in parts:
+        if not segment_re.match(p):
+            raise ValueError("Invalid path segment.")
+    base = get_ui_canvas_images_dir(pk).resolve()
+    candidate = base.joinpath(*parts).resolve()
+    if base not in candidate.parents and candidate != base:
+        raise ValueError("Invalid path.")
+    return candidate
+
+
+def build_ui_canvas_nested_url(relative: str, project_key: str) -> str:
+    """URL for a file under Gen/Images/UI/<relative>."""
+    from urllib.parse import quote
+
+    q = quote(relative, safe="")
+    pk = quote(project_key.strip(), safe="")
+    return f"/images/ui_file?project_key={pk}&rel={q}"
+
+
+def public_url_for_saved_project_image(output_path: Path, project_key: Optional[str]) -> str:
+    """
+    Prefer /images/ui_file?rel=... for files under Gen/Images/UI (nested exports);
+    otherwise /images/<filename> for project Images/.
+    """
+    fn = output_path.name
+    if not project_key or not str(project_key).strip():
+        return build_image_url(fn, project_key)
+    pk = str(project_key).strip()
+    try:
+        ui_root = get_ui_canvas_images_dir(pk).resolve()
+        outp = output_path.resolve()
+        if ui_root in outp.parents or outp.parent == ui_root:
+            rel = outp.relative_to(ui_root).as_posix()
+            return build_ui_canvas_nested_url(rel, pk)
+    except ValueError:
+        pass
+    return build_image_url(fn, project_key)
+
+
 _IMPORT_MAX_BYTES = 25 * 1024 * 1024
 _IMPORT_CT_TO_EXT: dict[str, str] = {
     "image/png": "png",
@@ -305,12 +360,94 @@ def _placeholder_image(width: int, height: int, text: str) -> bytes:
     return output.getvalue()
 
 
+def list_ui_canvas_nested_images(project_key: str, subfolder: str | None = None) -> list[dict[str, str]]:
+    """
+    List image files under Gen/Images/UI in subfolders (e.g. breakdown exports: folder/widget.png).
+    Skips loose files directly under Gen/Images/UI root (polish/strip outputs).
+    If subfolder is set, only files under Gen/Images/UI/<subfolder>/ (that folder only).
+    """
+    pk = (project_key or "").strip()
+    if not pk:
+        raise ValueError("project_key is required.")
+    sub = (subfolder or "").strip().replace("\\", "/").strip("/")
+    if sub:
+        segment_re = re.compile(r"^[a-zA-Z0-9._-]+$")
+        if not segment_re.match(sub):
+            raise ValueError("Invalid subfolder name.")
+    base = get_ui_canvas_images_dir(pk).resolve()
+    if not base.exists():
+        return []
+    out: list[dict[str, str]] = []
+    exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+    for p in base.rglob("*"):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in exts:
+            continue
+        try:
+            rel = p.relative_to(base).as_posix()
+        except ValueError:
+            continue
+        if rel.count("/") < 1:
+            continue
+        if sub:
+            first = rel.split("/")[0]
+            if first != sub:
+                continue
+        out.append(
+            {
+                "relative_path": rel,
+                "url": build_ui_canvas_nested_url(rel, pk),
+            }
+        )
+    out.sort(key=lambda x: x["relative_path"].lower())
+    return out
+
+
+def delete_ui_canvas_nested_file(project_key: str, relative: str) -> None:
+    """Delete a file under Gen/Images/UI (same rules as resolve_ui_canvas_nested_file)."""
+    path = resolve_ui_canvas_nested_file(project_key, relative)
+    if not path.is_file():
+        raise ValueError("File not found.")
+    path.unlink()
+
+
+def delete_ui_canvas_export_folder(project_key: str, subfolder: str) -> None:
+    """
+    Delete Gen/Images/UI/<subfolder>/ and all contents (breakdown export directory).
+    Subfolder must be a single safe path segment (same rules as list_ui_canvas_nested_images subfolder).
+    """
+    pk = (project_key or "").strip()
+    if not pk:
+        raise ValueError("project_key is required.")
+    sub = (subfolder or "").strip().replace("\\", "/").strip("/")
+    if not sub:
+        raise ValueError("subfolder is required.")
+    segment_re = re.compile(r"^[a-zA-Z0-9._-]+$")
+    if not segment_re.match(sub):
+        raise ValueError("Invalid subfolder name.")
+    base = get_ui_canvas_images_dir(pk).resolve()
+    target = (base / sub).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError as exc:
+        raise ValueError("Invalid path.") from exc
+    if target == base:
+        raise ValueError("Cannot delete UI root.")
+    if not target.exists():
+        return
+    if not target.is_dir():
+        raise ValueError("Not a directory.")
+    shutil.rmtree(target)
+
+
 def _gemini_reference_inline_part(
     source: str, project_key: Optional[str] = None
 ) -> Optional[dict]:
     """
     Build one Gemini content part (inline image) from either:
     - https?://... URL (fetched; used for storyboard Supabase URLs), or
+    - relative path under Gen/Images/UI (e.g. MyExport/widget.png) when it contains /, or
     - bare filename under the project Images directory (existing behavior).
     """
     s = str(source or "").strip()
@@ -332,6 +469,26 @@ def _gemini_reference_inline_part(
             return None
     else:
         try:
+            pk = (project_key or "").strip()
+            if pk and ("/" in s or "\\" in s):
+                rel = s.replace("\\", "/").lstrip("/")
+                if ".." not in rel:
+                    try:
+                        nested_path = resolve_ui_canvas_nested_file(pk, rel)
+                        if nested_path.is_file():
+                            data = nested_path.read_bytes()
+                            mime_type, _ = mimetypes.guess_type(nested_path.name)
+                            if not mime_type:
+                                mime_type = "image/png"
+                            b64 = base64.b64encode(data).decode("ascii")
+                            return {
+                                "inline_data": {
+                                    "mime_type": mime_type,
+                                    "data": b64,
+                                }
+                            }
+                    except ValueError:
+                        pass
             safe_name = validate_image_filename(s)
             image_path = find_image_path(safe_name, project_key)
             if not image_path:
@@ -366,6 +523,14 @@ def _extract_error_details(payload: object) -> str:
     return str(payload)
 
 
+_GEMINI_TRANSPARENT_BG_SUFFIX = (
+    "\n\nOutput: PNG with real alpha. Use transparent pixels (not white or gray) for any area "
+    "that should not occlude layers beneath—no solid full-canvas backdrop behind the UI unless "
+    "the reference clearly shows opaque chrome; prefer transparency for empty margins and "
+    "where the design allows layering."
+)
+
+
 def _generate_image_gemini(
     prompt: str,
     width: int,
@@ -374,10 +539,14 @@ def _generate_image_gemini(
     project_key: Optional[str],
     reference_image_filenames: Optional[Iterable[str]] = None,
     images_output_dir: Optional[Path] = None,
+    transparent_background: bool | None = None,
 ) -> dict:
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise ValueError("Gemini API key is missing. Set GEMINI_API_KEY.")
+
+    if transparent_background is True:
+        prompt = f"{prompt.strip()}{_GEMINI_TRANSPARENT_BG_SUFFIX}"
 
     # Basic aspect ratio + size mapping based on requested dimensions.
     if width == height:
@@ -473,7 +642,7 @@ def _generate_image_gemini(
         images.append(
             {
                 "filename": filename,
-                "url": build_image_url(filename, project_key),
+                "url": public_url_for_saved_project_image(output_path, project_key),
                 "path": str(output_path),
             }
         )
@@ -504,7 +673,7 @@ def _generate_image_leonardo(
             "images": [
                 {
                     "filename": filename,
-                    "url": build_image_url(filename, project_key),
+                    "url": public_url_for_saved_project_image(output_path, project_key),
                     "path": str(output_path),
                 }
             ]
@@ -590,7 +759,7 @@ def _generate_image_leonardo(
         images.append(
             {
                 "filename": filename,
-                "url": build_image_url(filename, project_key),
+                "url": public_url_for_saved_project_image(output_path, project_key),
                 "path": str(output_path),
             }
         )
@@ -656,7 +825,7 @@ def _generate_image_openai(
         images.append(
             {
                 "filename": filename,
-                "url": build_image_url(filename, project_key),
+                "url": public_url_for_saved_project_image(output_path, project_key),
                 "path": str(output_path),
             }
         )
@@ -806,6 +975,7 @@ def generate_image(
             project_key=project_key,
             reference_image_filenames=reference_image_filenames,
             images_output_dir=images_output_dir,
+            transparent_background=transparent_background,
         )
 
     if provider == "leonardo":
@@ -1015,11 +1185,22 @@ def remove_background(
     alpha_matting: bool | None = None,
     alpha_matting_foreground_threshold: int | None = None,
     alpha_matting_background_threshold: int | None = None,
+    *,
+    input_ui_nested_rel: str | None = None,
 ) -> dict:
-    safe_name = validate_image_filename(input_filename)
-    input_path = find_image_path(safe_name, project_key)
-    if not input_path:
-        raise ValueError("Input image not found.")
+    nested = (input_ui_nested_rel or "").strip()
+    if nested:
+        pk = (project_key or "").strip()
+        if not pk:
+            raise ValueError("project_key is required for nested UI paths.")
+        input_path = resolve_ui_canvas_nested_file(pk, nested.replace("\\", "/"))
+        if not input_path.exists() or not input_path.is_file():
+            raise ValueError("Input image not found.")
+    else:
+        safe_name = validate_image_filename(input_filename)
+        input_path = find_image_path(safe_name, project_key)
+        if not input_path:
+            raise ValueError("Input image not found.")
     technique = (os.getenv("BKGROMOVALTECH") or "rembg").strip().lower()
 
     output_name = output_filename or build_image_filename("nobg", "png")
@@ -1067,8 +1248,17 @@ def remove_background(
                 error_payload = response.text
             raise ValueError(f"Clipdrop request failed: {error_payload}")
         output_path = save_bytes_to_file(response.content, output_name, project_key, base_dir=input_path.parent)
+    pk_out = (project_key or "").strip()
+    if nested and pk_out:
+        try:
+            rel_out = output_path.resolve().relative_to(get_ui_canvas_images_dir(pk_out).resolve()).as_posix()
+            out_url = build_ui_canvas_nested_url(rel_out, pk_out)
+        except ValueError:
+            out_url = build_image_url(output_name, project_key)
+    else:
+        out_url = build_image_url(output_name, project_key)
     return {
         "filename": output_name,
-        "url": build_image_url(output_name, project_key),
+        "url": out_url,
         "path": str(output_path),
     }

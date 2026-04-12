@@ -1,5 +1,6 @@
 "use client";
 
+import type { KeyboardEvent, MouseEvent } from "react";
 import type { GeneratedImage } from "./types";
 
 type Props = {
@@ -11,16 +12,18 @@ type Props = {
   onRemoveBackground: (id: string) => void;
   onToggleLocation: (id: string) => void;
   onEditImage: (img: GeneratedImage) => void;
+  /** UI Builder: open Breakdown tab for this image. */
+  onBreakdown?: (img: GeneratedImage) => void;
   emptyMessage?: string;
   /** When true, omit the outer `imagegen-right` wrapper (parent already provides layout). */
   embedded?: boolean;
   /** Header next to the images-per-row controls (default: Results). */
   panelTitle?: string;
-  /** UI Builder: multi-select sketches for batch polish (checkbox on sketch tiles). */
+  /** UI Builder: multi-select sketches for batch polish (click sketch image to toggle). */
   showSketchCheckboxes?: boolean;
   selectedSketchIds?: readonly string[];
   onSketchSelectionChange?: (id: string, selected: boolean) => void;
-  /** While true, sketch checkboxes are disabled (batch generation running). */
+  /** While true, sketch image click-selection is disabled (batch generation running). */
   sketchSelectionDisabled?: boolean;
 };
 
@@ -34,6 +37,7 @@ export function ResultsPanel({
   emptyMessage = "No images yet. Enter a prompt and click Generate.",
   onToggleLocation,
   onEditImage,
+  onBreakdown,
   embedded = false,
   panelTitle = "Results",
   showSketchCheckboxes = false,
@@ -83,33 +87,66 @@ export function ResultsPanel({
           className="imagegen-grid"
           style={{ gridTemplateColumns: `repeat(${imagesPerRow}, minmax(0, 1fr))` }}
         >
-          {images.map((img) => (
-            <div key={img.id} className="imagegen-card">
-              <div className="imagegen-card-image-wrap">
-                <img src={img.url} alt={img.prompt} className="imagegen-card-image" />
+          {images.map((img) => {
+            const sketchSelectable =
+              showSketchCheckboxes && img.fromSketch && Boolean(img.filename?.trim());
+            const sketchSelected = selectedSketchIds.includes(img.id);
+            const selectionDisabled = sketchSelectionDisabled || !img.filename?.trim();
+            const toggleSketch = () => {
+              if (!sketchSelectable || selectionDisabled) return;
+              onSketchSelectionChange?.(img.id, !sketchSelected);
+            };
+            return (
+            <div
+              key={img.id}
+              className={
+                sketchSelectable && sketchSelected
+                  ? "imagegen-card imagegen-card-sketch-selected"
+                  : "imagegen-card"
+              }
+            >
+              <div
+                className="imagegen-card-image-wrap"
+                {...(sketchSelectable
+                  ? {
+                      role: "button" as const,
+                      tabIndex: selectionDisabled ? -1 : 0,
+                      "aria-pressed": sketchSelected,
+                      "aria-label": sketchSelected
+                        ? "Deselect drawing for polished UI"
+                        : "Select drawing for polished UI",
+                      onClick: (e: MouseEvent<HTMLDivElement>) => {
+                        e.preventDefault();
+                        toggleSketch();
+                      },
+                      onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          toggleSketch();
+                        }
+                      },
+                      style: {
+                        cursor: selectionDisabled ? "not-allowed" : "pointer",
+                        outline: "none",
+                      },
+                    }
+                  : {})}
+              >
+                <img src={img.url} alt={img.prompt} className="imagegen-card-image" draggable={false} />
               </div>
               <div className="imagegen-card-meta">
                 {showSketchCheckboxes && img.fromSketch && (
-                  <label
+                  <div
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.5rem",
-                      fontSize: 13,
-                      cursor: img.filename ? "pointer" : "not-allowed",
+                      fontSize: 11,
+                      color: img.filename ? "var(--muted, #94a3b8)" : "var(--muted, #64748b)",
                       marginBottom: 4,
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedSketchIds.includes(img.id)}
-                      disabled={sketchSelectionDisabled || !img.filename}
-                      onChange={(e) => onSketchSelectionChange?.(img.id, e.target.checked)}
-                    />
-                    <span style={{ color: img.filename ? "var(--foreground, #e2e8f0)" : "var(--muted, #64748b)" }}>
-                      Select
-                    </span>
-                  </label>
+                    {img.filename?.trim()
+                      ? "Click image to select for polish (multi-select)."
+                      : "Save sketch first to select."}
+                  </div>
                 )}
                 {img.fromSketch && (
                   <div className="imagegen-card-style" style={{ color: "#86efac" }}>
@@ -147,6 +184,17 @@ export function ResultsPanel({
                   >
                     Edit
                   </button>
+                  {onBreakdown && !img.fromSketch && (
+                    <button
+                      type="button"
+                      className="imagegen-delete-button imagegen-action-button"
+                      disabled={!img.filename}
+                      onClick={() => onBreakdown(img)}
+                      title={!img.filename ? "Save image to project first" : "Detect UI regions and export layers"}
+                    >
+                      Breakdown
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="imagegen-delete-button imagegen-action-button"
@@ -178,7 +226,8 @@ export function ResultsPanel({
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
           {images.length === 0 && (
             <div className="status" style={{ gridColumn: "1 / -1" }}>
               {emptyMessage}

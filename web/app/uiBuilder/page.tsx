@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { API_BASE, STORAGE_KEY_PROJECT } from "../imageGen/config";
 import {
@@ -17,7 +17,11 @@ import {
   getImageGenerated,
   getStyles,
   importImageFile,
+  deleteUiCanvasExportFolder,
+  deleteUiCanvasNestedImage,
+  listUiCanvasNestedImages,
   normalizeImageUrl,
+  parseNestedUiRelFromUrl,
   putImageGenerated,
   removeBackground,
   resolveReferenceForEditApi,
@@ -26,7 +30,11 @@ import {
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
 import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
 import type { Style } from "../storyboard/types";
-import { IMAGEGEN_EDIT_CONTEXT_KEY, IMAGEGEN_EDIT_RETURN_KEY } from "../imageGen/editKeys";
+import {
+  IMAGEGEN_EDIT_CONTEXT_KEY,
+  IMAGEGEN_EDIT_RETURN_KEY,
+  UIBUILDER_PENDING_BREAKDOWN_EXPORTS_RELOAD_KEY,
+} from "../imageGen/editKeys";
 import { parseStoredImages, toPayload } from "../imageGen/persistence";
 import { ImagegenTooltip } from "../imageGen/ImagegenTooltip";
 import { ResultsPanel } from "../imageGen/ResultsPanel";
@@ -34,9 +42,17 @@ import type { GeneratedImage, ImageLocation } from "../imageGen/types";
 import type { DrawTool } from "./penPalette";
 import { UI_PEN_TASKS } from "./penPalette";
 import { SketchCanvas, type SketchCanvasHandle } from "./SketchCanvas";
+import { BreakdownExportsSection } from "./BreakdownExportsSection";
+import { BreakdownPanel, defaultExportFolder, type BreakdownActivityUpdate } from "./BreakdownPanel";
+import {
+  getLocalProjectPath,
+  isLocalAgentContext,
+  joinLocalProjectSubpath,
+  localAgent,
+} from "../lib/localAgentClient";
 import { maxUiStyleReferenceImages } from "./uicanvasPrompt";
 
-type BuilderTab = "generate" | "draw";
+type BuilderTab = "generate" | "draw" | "breakdown";
 
 const UIBUILDER_IMAGE_MODEL_STORAGE_KEY = "uibuilder_image_model";
 const UIBUILDER_LAYOUT_FIDELITY_STORAGE_KEY = "uibuilder_layout_fidelity";
@@ -46,7 +62,7 @@ const UIBUILDER_STYLE_REFS_STORAGE_PREFIX = "uibuilder_style_ref_filenames:";
 const MAX_STYLE_REFS = maxUiStyleReferenceImages();
 
 const TIP_UIBUILDER_WORKFLOW =
-  "The preview lists drawings only until you select one (then that sketch and its polish results). Use Show all to list every UI Canvas image. Checkboxes choose sketch(es) for Generate polished UI. Optionally add style references. Then set Style, model, fidelity, and generate.";
+  "The preview lists drawings only until you select one (then that sketch and its polish results). Use Show all to list every UI Canvas image. Click drawing thumbnails to choose sketch(es) for Generate polished UI. Optionally add style references. Then set Style, model, fidelity, and generate.";
 
 const TIP_STYLE_REF_IMAGES =
   "Use for palette, typography, and surface style — not layout or subject matter. Shown to the model after your wireframe sketch.";
@@ -105,19 +121,184 @@ const BG_DEFAULTS = {
   bgThreshold: 10,
 };
 
+/** sessionStorage: per active project, Breakdown source image + optional strip (no-text) filename. */
+const UIBUILDER_BREAKDOWN_BY_PROJECT_KEY = "uibuilder_breakdown_by_project";
+
+type UIBreakdownPersist = {
+  sourceImage?: GeneratedImage;
+  workingFilename?: string | null;
+  /** Top-level folder under Gen/Images/UI — scope Breakdown exports list; kept even when source is cleared. */
+  exportFolderName?: string | null;
+};
+
+/** Parse `Gen/Images/UI/MyFolder` or disk path → `MyFolder`. */
+function parseGenImagesUiSubfolder(relativePath: string): string | null {
+  const r = relativePath.replace(/\\/g, "/").trim();
+  const m = r.match(/Gen\/Images\/UI\/([^/]+)/i);
+  return m?.[1]?.trim() || null;
+}
+
+/** `folder/file.png` → `folder`; root-only path → null. */
+function folderFromNestedUiPath(nested: string | undefined | null): string | null {
+  const t = nested?.replace(/\\/g, "/").trim();
+  if (!t || !t.includes("/")) return null;
+  return t.split("/")[0]?.trim() || null;
+}
+
+function readBreakdownForProject(projectKey: string): UIBreakdownPersist | null {
+  if (typeof window === "undefined" || !projectKey.trim()) return null;
+  try {
+    const raw = sessionStorage.getItem(UIBUILDER_BREAKDOWN_BY_PROJECT_KEY);
+    if (!raw) return null;
+    const all = JSON.parse(raw) as Record<string, UIBreakdownPersist>;
+    return all[projectKey.trim()] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBreakdownForProject(projectKey: string, data: UIBreakdownPersist | null) {
+  if (typeof window === "undefined" || !projectKey.trim()) return;
+  try {
+    const raw = sessionStorage.getItem(UIBUILDER_BREAKDOWN_BY_PROJECT_KEY);
+    const all = (raw ? JSON.parse(raw) : {}) as Record<string, UIBreakdownPersist>;
+    const pk = projectKey.trim();
+    if (data) all[pk] = data;
+    else delete all[pk];
+    sessionStorage.setItem(UIBUILDER_BREAKDOWN_BY_PROJECT_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * UI Builder — studio tool (all projects). Layout mirrors Image Gen: fixed-width left panel + flexible right panel.
  */
 export default function UIBuilderPage() {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<BuilderTab>("generate");
+  /** Image selected for Breakdown tab (from gallery). */
+  const [breakdownImage, setBreakdownImage] = useState<GeneratedImage | null>(null);
+  /** Shown in the Activity box under “Breakdown” (Detect / Remove text / Process). */
+  const [breakdownActivity, setBreakdownActivity] = useState<BreakdownActivityUpdate>(null);
+  /** True while any of the three Breakdown operations is in flight (drives progress UI). */
+  const [breakdownWorking, setBreakdownWorking] = useState(false);
+  /** Images under Gen/Images/UI/... (from API list; breakdown exports). */
+  const [breakdownExportImages, setBreakdownExportImages] = useState<GeneratedImage[]>([]);
+  /** Strip / “no text” working file under Images/ (Remove text); persisted with breakdown source. */
+  const [breakdownWorkingFilename, setBreakdownWorkingFilename] = useState<string | null>(null);
+  /** Scope Breakdown exports to this folder under Gen/Images/UI (from Process or nested source). */
+  const [breakdownExportFolderName, setBreakdownExportFolderName] = useState<string | null>(null);
+  const [breakdownExportDeleteAllBusy, setBreakdownExportDeleteAllBusy] = useState(false);
+
+  const [projectKey, setProjectKey] = useState("");
+
+  /** Restore Breakdown source + strip file before paint so session persist effect doesn’t clear storage. */
+  useLayoutEffect(() => {
+    const pk = projectKey.trim();
+    if (!pk) return;
+    const saved = readBreakdownForProject(pk);
+    if (saved?.sourceImage?.id) {
+      setBreakdownImage(saved.sourceImage);
+      setBreakdownWorkingFilename(saved.workingFilename ?? null);
+      setBreakdownExportFolderName(
+        saved.exportFolderName ??
+          folderFromNestedUiPath(
+            saved.sourceImage.nestedUiRelativePath ??
+              parseNestedUiRelFromUrl(saved.sourceImage.url) ??
+              undefined,
+          ),
+      );
+    } else {
+      setBreakdownImage(null);
+      setBreakdownWorkingFilename(null);
+      setBreakdownExportFolderName(saved?.exportFolderName?.trim() ?? null);
+    }
+  }, [projectKey]);
+
+  useEffect(() => {
+    const pk = projectKey.trim();
+    if (!pk) return;
+    if (breakdownImage) {
+      writeBreakdownForProject(pk, {
+        sourceImage: breakdownImage,
+        workingFilename: breakdownWorkingFilename,
+        exportFolderName: breakdownExportFolderName,
+      });
+    } else if (breakdownExportFolderName?.trim()) {
+      writeBreakdownForProject(pk, {
+        exportFolderName: breakdownExportFolderName,
+        workingFilename: null,
+      });
+    } else {
+      writeBreakdownForProject(pk, null);
+    }
+  }, [projectKey, breakdownImage, breakdownWorkingFilename, breakdownExportFolderName]);
+
+  /**
+   * After Process, remember export folder when the source is not under a Gen/Images/UI subfolder
+   * (otherwise the list/path follow the source image directory).
+   */
+  useEffect(() => {
+    const fr = breakdownActivity?.folderReveal;
+    if (fr && !breakdownActivity?.isError) {
+      const folder = parseGenImagesUiSubfolder(fr.relativePath);
+      if (!folder) return;
+      const nestedRel =
+        breakdownImage?.nestedUiRelativePath?.trim() ||
+        parseNestedUiRelFromUrl(breakdownImage?.url || "");
+      if (folderFromNestedUiPath(nestedRel)) return;
+      setBreakdownExportFolderName(folder);
+    }
+  }, [breakdownActivity, breakdownImage]);
+
+  /** Seed or reset export folder when the breakdown source changes (keep session/restored folder on first bind only). */
+  const prevBreakdownImageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = breakdownImage?.id ?? null;
+    if (!id) {
+      prevBreakdownImageIdRef.current = null;
+      return;
+    }
+    const prev = prevBreakdownImageIdRef.current;
+    prevBreakdownImageIdRef.current = id;
+    if (prev === null) {
+      setBreakdownExportFolderName((f) => (f?.trim() ? f : defaultExportFolder(breakdownImage)));
+      return;
+    }
+    if (prev !== id) {
+      setBreakdownExportFolderName(defaultExportFolder(breakdownImage));
+    }
+  }, [breakdownImage]);
+
+  /** Default export folder when opening the Breakdown tab (or first paint on that tab) if still empty. */
+  const prevTabForExportFolderRef = useRef<BuilderTab | null>(null);
+  useEffect(() => {
+    const prev = prevTabForExportFolderRef.current;
+    prevTabForExportFolderRef.current = tab;
+    if (tab !== "breakdown" || !breakdownImage) return;
+    const enteredFromOtherTab = prev !== null && prev !== "breakdown";
+    const firstMountOnBreakdown = prev === null && tab === "breakdown";
+    if (!enteredFromOtherTab && !firstMountOnBreakdown) return;
+    setBreakdownExportFolderName((f) => (f?.trim() ? f : defaultExportFolder(breakdownImage)));
+  }, [tab, breakdownImage]);
+
+  /** After Image Gen edit (Nano Banana), return URL can be `/uiBuilder?tab=breakdown` — apply once then strip query. */
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "breakdown" || t === "draw" || t === "generate") {
+      setTab(t);
+      router.replace(pathname, { scroll: false });
+    }
+  }, [searchParams, pathname, router]);
+
   const [brushSize, setBrushSize] = useState(4);
   const [tool, setTool] = useState<DrawTool>("background");
   const [drawingName, setDrawingName] = useState("");
   const sketchRef = useRef<SketchCanvasHandle>(null);
 
-  const [projectKey, setProjectKey] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [uiCanvasImages, setUiCanvasImages] = useState<GeneratedImage[]>([]);
   const [imagesPerRow, setImagesPerRow] = useState(3);
@@ -156,6 +337,18 @@ export default function UIBuilderPage() {
   /** True after the user edits the sketch (strokes, paste, text) until save, clear, or successful load. */
   const [sketchDirty, setSketchDirty] = useState(false);
   const markSketchDirty = useCallback(() => setSketchDirty(true), []);
+
+  const handleRevealBreakdownFolder = useCallback(async () => {
+    const fr = breakdownActivity?.folderReveal;
+    if (!fr || breakdownActivity?.isError) return;
+    if (!isLocalAgentContext()) return;
+    try {
+      await localAgent.approveProjectRoot(fr.projectRoot);
+      await localAgent.revealFolder(fr.projectRoot, fr.relativePath);
+    } catch {
+      // Path is still visible for manual open
+    }
+  }, [breakdownActivity?.folderReveal, breakdownActivity?.isError]);
 
   const applyBuilderTab = useCallback(
     (next: BuilderTab) => {
@@ -277,6 +470,105 @@ export default function UIBuilderPage() {
   useEffect(() => {
     void reloadUiCanvasImages();
   }, [reloadUiCanvasImages, pathname]);
+
+  /** Prefer gallery row for the breakdown source so nested path/url match persisted JSON after parseStoredImages. */
+  const resolvedBreakdownSource = useMemo(() => {
+    if (!breakdownImage?.id) return breakdownImage;
+    const match = uiCanvasImages.find((img) => img.id === breakdownImage.id);
+    return match ?? breakdownImage;
+  }, [breakdownImage, uiCanvasImages]);
+
+  /** Folder for Breakdown exports list + path: source UI subfolder if any, else Process/persisted folder (survives without source). */
+  const effectiveBreakdownExportFolder = useMemo(() => {
+    if (resolvedBreakdownSource) {
+      const nestedRel =
+        resolvedBreakdownSource.nestedUiRelativePath?.trim() ||
+        parseNestedUiRelFromUrl(resolvedBreakdownSource.url || "");
+      const fromSource = folderFromNestedUiPath(nestedRel);
+      if (fromSource) return fromSource;
+    }
+    return breakdownExportFolderName?.trim() || null;
+  }, [resolvedBreakdownSource, breakdownExportFolderName]);
+
+  const reloadBreakdownExports = useCallback(async () => {
+    const pk = projectKey.trim();
+    if (!pk) {
+      setBreakdownExportImages([]);
+      return;
+    }
+    const sub = effectiveBreakdownExportFolder?.trim();
+    if (!sub) {
+      setBreakdownExportImages([]);
+      return;
+    }
+    try {
+      const files = await listUiCanvasNestedImages(pk, { subfolder: sub });
+      const now = new Date().toISOString();
+      setBreakdownExportImages(
+        files.map((f) => ({
+          id: `breakdown-export-${f.relative_path.replace(/[^a-zA-Z0-9._-]+/g, "_")}`,
+          url: f.url.startsWith("http") ? f.url : normalizeImageUrl(f.url),
+          filename: f.relative_path.split("/").pop() || f.relative_path,
+          nestedUiRelativePath: f.relative_path,
+          prompt: f.relative_path,
+          createdAt: now,
+          tab: "ui_canvas" as const,
+          location: "local" as const,
+        }))
+      );
+    } catch {
+      setBreakdownExportImages([]);
+    }
+  }, [projectKey, effectiveBreakdownExportFolder]);
+
+  useEffect(() => {
+    if (tab !== "breakdown") return;
+    void reloadBreakdownExports();
+  }, [tab, projectKey, pathname, reloadBreakdownExports]);
+
+  /** After editing a breakdown export (Nano Banana), Image Gen sets a flag — reload nested file list. */
+  useEffect(() => {
+    if (tab !== "breakdown" || !projectKey.trim()) return;
+    try {
+      if (sessionStorage.getItem(UIBUILDER_PENDING_BREAKDOWN_EXPORTS_RELOAD_KEY) === "1") {
+        sessionStorage.removeItem(UIBUILDER_PENDING_BREAKDOWN_EXPORTS_RELOAD_KEY);
+        void reloadBreakdownExports();
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [tab, projectKey, reloadBreakdownExports]);
+
+  /** Full disk path + reveal — same folder as Breakdown exports (source UI subfolder or Process output). */
+  const breakdownExportsFolderReveal = useMemo(() => {
+    const pk = projectKey.trim();
+    const folder = effectiveBreakdownExportFolder?.trim();
+    if (!pk || !folder) return null;
+    const root = getLocalProjectPath(pk);
+    if (!root) return null;
+    const relativePath = `Gen/Images/UI/${folder}`.replace(/\\/g, "/");
+    const fullPath = joinLocalProjectSubpath(root, "Gen", "Images", "UI", folder);
+    return { fullPath, projectRoot: root.trim(), relativePath };
+  }, [projectKey, effectiveBreakdownExportFolder]);
+
+  const breakdownExportsRelativeHint = useMemo(() => {
+    if (breakdownExportsFolderReveal) return null;
+    const folder = effectiveBreakdownExportFolder?.trim();
+    if (!folder) return null;
+    return `Gen/Images/UI/${folder}/`;
+  }, [breakdownExportsFolderReveal, effectiveBreakdownExportFolder]);
+
+  const handleRevealBreakdownExportsFolder = useCallback(async () => {
+    const fr = breakdownExportsFolderReveal;
+    if (!fr) return;
+    if (!isLocalAgentContext()) return;
+    try {
+      await localAgent.approveProjectRoot(fr.projectRoot);
+      await localAgent.revealFolder(fr.projectRoot, fr.relativePath);
+    } catch {
+      // Path still visible for manual open
+    }
+  }, [breakdownExportsFolderReveal]);
 
   useEffect(() => {
     const valid = new Set(
@@ -485,6 +777,79 @@ export default function UIBuilderPage() {
     }
   };
 
+  const handleBreakdownExportRemoveBackground = async (img: GeneratedImage) => {
+    if (!projectKey.trim() || !img.nestedUiRelativePath?.trim()) {
+      setStatus("Missing project or export path.");
+      return;
+    }
+    setStatus("Removing background...");
+    try {
+      await removeBackground("", projectKey.trim(), {
+        model: BG_DEFAULTS.model,
+        alphaMatting: BG_DEFAULTS.alphaMatting,
+        alphaMattingForegroundThreshold: BG_DEFAULTS.fgThreshold,
+        alphaMattingBackgroundThreshold: BG_DEFAULTS.bgThreshold,
+        inputUiNestedRel: img.nestedUiRelativePath,
+      });
+      setStatus("Background removed.");
+      await reloadBreakdownExports();
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Remove background failed.");
+    }
+  };
+
+  const handleBreakdownExportDelete = async (img: GeneratedImage) => {
+    const pk = projectKey.trim();
+    const rel = img.nestedUiRelativePath?.trim();
+    if (!pk || !rel) {
+      setStatus("Missing project or export path.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete this file from disk?\n\n${rel}\n\nThis cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setStatus("Deleting file...");
+    try {
+      await deleteUiCanvasNestedImage(pk, rel);
+      setStatus("File deleted.");
+      await reloadBreakdownExports();
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Delete failed.");
+    }
+  };
+
+  const handleBreakdownExportDeleteAll = async () => {
+    const pk = projectKey.trim();
+    const sub = effectiveBreakdownExportFolder?.trim();
+    if (!pk || !sub) {
+      setStatus("Choose or set an export folder first.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete this entire folder from disk (all files inside)?\n\nGen/Images/UI/${sub}/\n\nThis cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBreakdownExportDeleteAllBusy(true);
+    setStatus("Deleting export folder...");
+    try {
+      await deleteUiCanvasExportFolder(pk, sub);
+      setStatus("Export folder deleted.");
+      setBreakdownExportImages([]);
+      await reloadBreakdownExports();
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Delete folder failed.");
+    } finally {
+      setBreakdownExportDeleteAllBusy(false);
+    }
+  };
+
   const handleRemoveBackground = async (imageId: string) => {
     if (!projectKey) {
       setStatus("Set an active project in Admin.");
@@ -571,8 +936,21 @@ export default function UIBuilderPage() {
         if (!(await confirmLeaveDrawIfNeeded())) return;
       }
       try {
-        sessionStorage.setItem(IMAGEGEN_EDIT_RETURN_KEY, "/uiBuilder");
+        const returnToBreakdown =
+          Boolean(img.nestedUiRelativePath?.trim()) || tab === "breakdown";
+        sessionStorage.setItem(
+          IMAGEGEN_EDIT_RETURN_KEY,
+          returnToBreakdown ? "/uiBuilder?tab=breakdown" : "/uiBuilder",
+        );
         sessionStorage.setItem(IMAGEGEN_EDIT_CONTEXT_KEY, JSON.stringify(img));
+        const pk = projectKey.trim();
+        if (pk && breakdownImage) {
+          writeBreakdownForProject(pk, {
+            sourceImage: breakdownImage,
+            workingFilename: breakdownWorkingFilename,
+            exportFolderName: breakdownExportFolderName,
+          });
+        }
       } catch {
         setStatus("Could not store image context.");
         return;
@@ -690,7 +1068,7 @@ export default function UIBuilderPage() {
     if (!uiCanvasImages.some((img) => img.fromSketch)) {
       return "No saved drawings yet. Save a sketch from the Draw tab first.";
     }
-    return "Select a drawing below (checkbox), or turn on Show all to see every image.";
+    return "Select a drawing below (click its image), or turn on Show all to see every image.";
   }, [uiCanvasImages, showAllUiCanvas]);
 
   const handleBatchWireframeGenerate = async () => {
@@ -875,9 +1253,24 @@ export default function UIBuilderPage() {
                 >
                   Draw
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === "breakdown"}
+                  className={tab === "breakdown" ? "sidebar-tab active" : "sidebar-tab"}
+                  onClick={() => void requestBuilderTab("breakdown")}
+                >
+                  Breakdown
+                </button>
               </div>
 
               <div className="sidebar-tab-content">
+                {tab === "breakdown" && (
+                  <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                    Pick a UI Canvas image in the gallery (right), then use <strong>Breakdown</strong> on a card. Controls
+                    and preview fill the main panel.
+                  </p>
+                )}
                 {tab === "generate" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1376,6 +1769,152 @@ export default function UIBuilderPage() {
                   <SketchCanvas ref={sketchRef} brushSize={brushSize} tool={tool} onContentModified={markSketchDirty} />
                 </div>
               </>
+            ) : tab === "breakdown" ? (
+              <>
+                <h2 className="imagegen-panel-title">Breakdown</h2>
+                <div
+                  style={{
+                    flexShrink: 0,
+                    marginBottom: "0.5rem",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #2a2f3a",
+                    background: "#0f1115",
+                  }}
+                  aria-live="polite"
+                  aria-busy={breakdownWorking}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      marginBottom: 6,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.06em",
+                        textTransform: "uppercase",
+                        color: "#94a3b8",
+                      }}
+                    >
+                      Activity
+                    </div>
+                    {breakdownWorking && (
+                      <span style={{ fontSize: 11, color: "#22d3ee", fontWeight: 600 }}>Working…</span>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      lineHeight: 1.45,
+                      color: !breakdownImage
+                        ? "#94a3b8"
+                        : breakdownActivity?.isError
+                          ? "#f87171"
+                          : breakdownActivity
+                            ? "var(--foreground, #e2e8f0)"
+                            : "#94a3b8",
+                    }}
+                  >
+                    {!breakdownImage
+                      ? "Pick a UI Canvas image from the gallery, then use Breakdown on a card."
+                      : breakdownActivity === null
+                        ? "Ready — Detect or Remove text runs here."
+                        : breakdownActivity.message}
+                  </div>
+                  {breakdownActivity?.folderReveal && !breakdownActivity.isError && (
+                    <div style={{ marginTop: 10 }}>
+                      {isLocalAgentContext() ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleRevealBreakdownFolder()}
+                            title="Open in File Explorer (local agent)"
+                            style={{
+                              display: "block",
+                              width: "100%",
+                              textAlign: "left",
+                              background: "transparent",
+                              border: "none",
+                              padding: 0,
+                              color: "#38bdf8",
+                              textDecoration: "underline",
+                              cursor: "pointer",
+                              fontSize: 12,
+                              fontFamily: "ui-monospace, monospace",
+                              wordBreak: "break-all",
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            {breakdownActivity.folderReveal.fullPath}
+                          </button>
+                          <span style={{ fontSize: 11, color: "#64748b", display: "block", marginTop: 4 }}>
+                            Click path to open folder (requires local agent)
+                          </span>
+                        </>
+                      ) : (
+                        <code
+                          style={{
+                            display: "block",
+                            fontSize: 12,
+                            color: "var(--foreground, #e2e8f0)",
+                            wordBreak: "break-all",
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {breakdownActivity.folderReveal.fullPath}
+                        </code>
+                      )}
+                    </div>
+                  )}
+                  {breakdownWorking && (
+                    <div className="breakdown-progress-track" role="progressbar" aria-valuetext="In progress">
+                      <div className="breakdown-progress-bar" />
+                    </div>
+                  )}
+                </div>
+                <div
+                  className="imagegen-panel-body"
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div style={{ flex: "1 1 0%", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                    <BreakdownPanel
+                      projectKey={projectKey}
+                      sourceImage={breakdownImage}
+                      workingFilename={breakdownWorkingFilename}
+                      onWorkingFilenameChange={setBreakdownWorkingFilename}
+                      onActivityUpdate={setBreakdownActivity}
+                      onWorkingChange={setBreakdownWorking}
+                      onProcessComplete={() => void reloadBreakdownExports()}
+                      exportFolderName={breakdownExportFolderName ?? ""}
+                      onExportFolderChange={(name) => setBreakdownExportFolderName(name.trim() || null)}
+                    />
+                  </div>
+                  <BreakdownExportsSection
+                    images={breakdownExportImages}
+                    exportFolderReveal={breakdownExportsFolderReveal}
+                    exportRelativeHint={breakdownExportsRelativeHint}
+                    onRevealExportFolder={() => void handleRevealBreakdownExportsFolder()}
+                    onRemoveBackground={(img) => void handleBreakdownExportRemoveBackground(img)}
+                    onEditImage={handleEditImage}
+                    onDeleteImage={(img) => void handleBreakdownExportDelete(img)}
+                    canDeleteAllExportFolder={Boolean(effectiveBreakdownExportFolder?.trim())}
+                    deleteAllBusy={breakdownExportDeleteAllBusy}
+                    onDeleteAllExportFolder={() => void handleBreakdownExportDeleteAll()}
+                  />
+                </div>
+              </>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, gap: "0.5rem" }}>
                 <div
@@ -1417,6 +1956,18 @@ export default function UIBuilderPage() {
                     onToggleLocation={(id) => void handleToggleLocation(id)}
                     onRemoveBackground={(id) => void handleRemoveBackground(id)}
                     onEditImage={handleEditImage}
+                    onBreakdown={(img) => {
+                      setBreakdownImage(img);
+                      setBreakdownWorkingFilename(null);
+                      setBreakdownExportFolderName(
+                        folderFromNestedUiPath(
+                          img.nestedUiRelativePath ?? parseNestedUiRelFromUrl(img.url) ?? undefined,
+                        ),
+                      );
+                      setBreakdownActivity(null);
+                      setBreakdownWorking(false);
+                      void requestBuilderTab("breakdown");
+                    }}
                     showSketchCheckboxes
                     selectedSketchIds={selectedSketchIds}
                     onSketchSelectionChange={handleSketchSelectionChange}

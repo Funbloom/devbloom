@@ -15,4 +15,6 @@ export type GeneratedImage = {
   fromSketch?: boolean;
   /** UI Builder: sketch Images/ filename this polish was generated from (wireframe ref). */
   sourceSketchFilename?: string;
+  /** Gen/Images/UI relative path (e.g. subfolder/widget.png) for breakdown exports; not persisted in image JSON. */
+  nestedUiRelativePath?: string;
 };

@@ -211,7 +211,52 @@ export const localAgent = {
       body: JSON.stringify(body),
     });
   },
+  /** Open a folder under an approved project in Explorer / Finder / xdg-open. */
+  revealFolder(projectRoot: string, relativePath: string): Promise<{ ok: boolean; path: string }> {
+    const norm = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+    return requestLocalAgent("/fs/reveal_folder", {
+      method: "POST",
+      body: JSON.stringify({ project_root: projectRoot, relative_path: norm }),
+    });
+  },
+  /** Segment Anything (local venv). Requires SAM_CHECKPOINT_PATH; see local_agent/README-SAM.md */
+  uiBreakdownSam(body: {
+    project_root: string;
+    filename: string;
+    max_elements: number;
+    min_box_fraction: number;
+    sam?: Record<string, number>;
+  }): Promise<{
+    elements: Array<{
+      id: string;
+      label: string;
+      x_min: number;
+      y_min: number;
+      x_max: number;
+      y_max: number;
+    }>;
+    image_width: number;
+    image_height: number;
+  }> {
+    return requestLocalAgent("/ui_breakdown/sam", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
 };
+
+/** Build a display path under a local project root using the same separator style as the root (e.g. Windows backslashes). */
+export function joinLocalProjectSubpath(projectRoot: string, ...segments: string[]): string {
+  const root = projectRoot.trim().replace(/[/\\]+$/, "");
+  if (!root) return segments.filter(Boolean).join("/");
+  const preferBackslash = root.includes("\\");
+  const sep = preferBackslash ? "\\" : "/";
+  const tail = segments
+    .flatMap((s) => s.split(/[/\\]+/))
+    .filter(Boolean)
+    .join(sep);
+  return `${root}${sep}${tail}`;
+}
 
 export function getLocalProjectPath(projectKey: string): string | null {
   if (!projectKey) return null;

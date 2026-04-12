@@ -6,7 +6,9 @@ Local-only FastAPI service for reading/writing project files on the developer ma
 - Reads/writes JSON files under an approved project root.
 - Reads/writes binary files (e.g., images) under an approved root.
 - Lists directories under an approved root.
+- **`POST /fs/reveal_folder`** opens a subfolder of an approved project in the system file manager (Explorer / Finder / `xdg-open`).
 - **Mesh Gen (optional):** `POST /meshgen/generate` runs [Hunyuan3D-2](https://github.com/Tencent-Hunyuan/Hunyuan3D-2) **in-process** (image → GLB/OBJ) and writes under the approved project, e.g. `gen/3dmesh/`. Requires the same venv to have PyTorch (CUDA), `hy3dgen` from the Hunyuan repo (`pip install -e .` per upstream README), and optional texture build steps if you use texturing.
+- **UI Breakdown SAM (optional):** `POST /ui_breakdown/sam` runs [Segment Anything](https://github.com/facebookresearch/segment-anything) in-process for UI box geometry. Install `requirements-sam.txt` into the same venv and set `SAM_CHECKPOINT_PATH`. See [README-SAM.md](README-SAM.md).
 - Enforces localhost-only access and path traversal protection.
 
 ## Requirements
@@ -21,12 +23,47 @@ python -m venv .venv
 pip install -r local_agent\requirements.txt
 ```
 
+Optional **UI Breakdown SAM:** copy `local_agent\.env.example` to `local_agent\.env` and set `SAM_CHECKPOINT_PATH` (see [README-SAM.md](README-SAM.md)). The agent loads `.env` on startup.
+
 ## Install (macOS)
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r local_agent/requirements.txt
 ```
+
+Optional **UI Breakdown SAM:** copy `local_agent/.env.example` to `local_agent/.env` and set `SAM_CHECKPOINT_PATH` (see [README-SAM.md](README-SAM.md)).
+
+### UI Breakdown SAM: download the ViT-B checkpoint
+
+The default model is **ViT-B** (`SAM_MODEL_TYPE=vit_b`), which uses Meta’s file **`sam_vit_b_01ec64.pth`**.
+
+1. Create a **`models`** folder under **`local_agent`** (for example `local_agent/models/`) if it does not exist.
+2. Download the checkpoint into that folder. Official links are listed in the [segment-anything README (Model checkpoints)](https://github.com/facebookresearch/segment-anything#model-checkpoints). Direct URL for ViT-B:
+
+   `https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth`
+
+   From the **repo root**, examples:
+
+   ```powershell
+   New-Item -ItemType Directory -Force -Path local_agent\models | Out-Null
+   Invoke-WebRequest -Uri "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth" -OutFile "local_agent\models\sam_vit_b_01ec64.pth"
+   ```
+
+   ```bash
+   mkdir -p local_agent/models
+   curl -L -o local_agent/models/sam_vit_b_01ec64.pth \
+     https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
+   ```
+
+3. In **`local_agent/.env`**, set the **full path** to that file (the agent reads `.env` on startup):
+
+   ```
+   SAM_CHECKPOINT_PATH=D:/path/to/repo/local_agent/models/sam_vit_b_01ec64.pth
+   SAM_MODEL_TYPE=vit_b
+   ```
+
+   Adjust `D:/path/to/repo` to your machine; forward slashes are fine on Windows inside `.env`. Restart the agent after changing `.env`.
 
 ## Run (Windows / PC)
 ```powershell

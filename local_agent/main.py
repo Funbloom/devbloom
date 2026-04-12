@@ -4,8 +4,16 @@ import asyncio
 import base64
 import logging
 import os
+import platform
+import subprocess
 from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
+
+# Load local_agent/.env before SAM/mesh code reads os.environ
+_agent_dir = Path(__file__).resolve().parent
+load_dotenv(_agent_dir / ".env")
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +22,7 @@ from fastapi.responses import Response
 from local_agent.models import (
     ApproveProjectRequest,
     DirListRequest,
+    FsRevealFolderRequest,
     FsListRequest,
     FsPickFileBody,
     FileJsonPatchRequest,
@@ -23,6 +32,7 @@ from local_agent.models import (
     FileBinaryWriteRequest,
     MeshGenGenerateRequest,
     ProjectResolveRequest,
+    UiBreakdownSamRequest,
 )
 from local_agent.security import (
     approve_root,
@@ -35,6 +45,18 @@ from local_agent.json_patch import apply_json_patch
 from local_agent.fs_picker import pick_directory_native, pick_file_native
 
 logger = logging.getLogger(__name__)
+
+
+def _open_folder_in_os(path: Path) -> None:
+    """Open a directory in the OS file manager (Windows Explorer, macOS Finder, Linux xdg-open)."""
+    p = str(path.resolve())
+    system = platform.system()
+    if system == "Windows":
+        os.startfile(p)  # type: ignore[attr-defined]
+    elif system == "Darwin":
+        subprocess.run(["open", p], check=False)
+    else:
+        subprocess.run(["xdg-open", p], check=False)
 
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:3000",
@@ -255,6 +277,25 @@ def list_dir(request: Request, body: DirListRequest) -> dict[str, Any]:
     return {"path": str(path), "entries": entries}
 
 
+@app.post("/fs/reveal_folder")
+def fs_reveal_folder(request: Request, body: FsRevealFolderRequest) -> dict[str, Any]:
+    """Open a project subfolder in the system file manager (Explorer / Finder / xdg-open)."""
+    ensure_localhost(request)
+    root = ensure_root_approved(body.project_root)
+    rel = body.relative_path.strip().replace("\\", "/").lstrip("/")
+    path = resolve_under_root(root, rel)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Path not found.")
+    if not path.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory.")
+    try:
+        _open_folder_in_os(path)
+    except Exception as exc:
+        logger.exception("fs_reveal_folder failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"ok": True, "path": str(path.resolve())}
+
+
 @app.post("/files/binary/read")
 def read_binary_file(request: Request, body: FileBinaryReadRequest) -> Response:
     ensure_localhost(request)
@@ -265,6 +306,30 @@ def read_binary_file(request: Request, body: FileBinaryReadRequest) -> Response:
     data = path.read_bytes()
     media_type = guess_media_type(path)
     return Response(content=data, media_type=media_type)
+
+
+@app.post("/ui_breakdown/sam")
+async def ui_breakdown_sam(request: Request, body: UiBreakdownSamRequest) -> dict[str, Any]:
+    """Run Segment Anything in-process (same venv as this agent). Requires SAM checkpoint + torch."""
+    ensure_localhost(request)
+    root = ensure_root_approved(body.project_root)
+    try:
+        from local_agent.ui_breakdown_sam import run_sam_segmentation_for_project_file
+
+        out = await asyncio.to_thread(
+            run_sam_segmentation_for_project_file,
+            root,
+            body.filename.strip(),
+            max_elements=body.max_elements,
+            min_box_fraction=body.min_box_fraction,
+            sam_params=body.sam or {},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("UI Breakdown SAM failed")
+        raise HTTPException(status_code=503, detail=f"SAM failed: {exc}") from exc
+    return out
 
 
 @app.post("/meshgen/generate")
