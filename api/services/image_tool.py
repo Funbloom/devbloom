@@ -441,20 +441,37 @@ def delete_ui_canvas_export_folder(project_key: str, subfolder: str) -> None:
     shutil.rmtree(target)
 
 
-def _gemini_reference_inline_part(
+def _ensure_openai_reference_filename(name_hint: str, mime_type: str) -> str:
+    """Filename with an extension accepted by OpenAI image edit (png, jpg, webp)."""
+    n = (name_hint or "ref").strip() or "ref"
+    lower = n.lower()
+    if lower.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        return n
+    mt = (mime_type or "").lower()
+    if "jpeg" in mt or mt.endswith("/jpg"):
+        stem = n.rsplit(".", 1)[0] if "." in n else n
+        return f"{stem}.jpg"
+    if "webp" in mt:
+        stem = n.rsplit(".", 1)[0] if "." in n else n
+        return f"{stem}.webp"
+    stem = n.rsplit(".", 1)[0] if "." in n else n
+    return f"{stem}.png"
+
+
+def _load_reference_image_bytes(
     source: str, project_key: Optional[str] = None
-) -> Optional[dict]:
+) -> Optional[tuple[str, bytes, str]]:
     """
-    Build one Gemini content part (inline image) from either:
-    - https?://... URL (fetched; used for storyboard Supabase URLs), or
-    - relative path under Gen/Images/UI (e.g. MyExport/widget.png) when it contains /, or
-    - bare filename under the project Images directory (existing behavior).
+    Load reference image bytes from a URL or project path.
+    Returns (upload_filename, raw_bytes, mime_type) for Gemini/OpenAI.
     """
     s = str(source or "").strip()
     if not s:
         return None
     data: bytes
     mime_type: str
+    name_hint: str
+
     if s.startswith("http://") or s.startswith("https://"):
         try:
             resp = requests.get(s, timeout=60)
@@ -464,6 +481,8 @@ def _gemini_reference_inline_part(
             mime_type = ct if ct.startswith("image/") else (
                 mimetypes.guess_type(s.split("?", 1)[0])[0] or "image/png"
             )
+            path_part = s.split("?", 1)[0].rstrip("/")
+            name_hint = path_part.rsplit("/", 1)[-1] or "ref"
         except Exception as exc:
             print(f"[image_tool] reference URL fetch failed ({s[:96]}…): {exc}")
             return None
@@ -480,13 +499,9 @@ def _gemini_reference_inline_part(
                             mime_type, _ = mimetypes.guess_type(nested_path.name)
                             if not mime_type:
                                 mime_type = "image/png"
-                            b64 = base64.b64encode(data).decode("ascii")
-                            return {
-                                "inline_data": {
-                                    "mime_type": mime_type,
-                                    "data": b64,
-                                }
-                            }
+                            name_hint = nested_path.name
+                            fname = _ensure_openai_reference_filename(name_hint, mime_type)
+                            return (fname, data, mime_type)
                     except ValueError:
                         pass
             safe_name = validate_image_filename(s)
@@ -498,9 +513,30 @@ def _gemini_reference_inline_part(
             mime_type, _ = mimetypes.guess_type(image_path.name)
             if not mime_type:
                 mime_type = "image/png"
+            name_hint = image_path.name
         except Exception as exc:
             print(f"[image_tool] reference local load failed ({s[:80]}): {exc}")
             return None
+        fname = _ensure_openai_reference_filename(name_hint, mime_type)
+        return (fname, data, mime_type)
+
+    fname = _ensure_openai_reference_filename(name_hint, mime_type)
+    return (fname, data, mime_type)
+
+
+def _gemini_reference_inline_part(
+    source: str, project_key: Optional[str] = None
+) -> Optional[dict]:
+    """
+    Build one Gemini content part (inline image) from either:
+    - https?://... URL (fetched; used for storyboard Supabase URLs), or
+    - relative path under Gen/Images/UI (e.g. MyExport/widget.png) when it contains /, or
+    - bare filename under the project Images directory (existing behavior).
+    """
+    loaded = _load_reference_image_bytes(source, project_key)
+    if not loaded:
+        return None
+    _fname, data, mime_type = loaded
     b64 = base64.b64encode(data).decode("ascii")
     return {
         "inline_data": {
@@ -779,6 +815,7 @@ def _generate_image_openai(
     style: str | None = None,
     transparent_background: bool | None = None,
     images_output_dir: Optional[Path] = None,
+    reference_image_filenames: Optional[Iterable[str]] = None,
 ) -> dict:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -810,7 +847,30 @@ def _generate_image_openai(
     elif transparent_background is False:
         params["background"] = "opaque"
 
-    response = client.images.generate(**params)
+    # images.generate does not accept reference inputs; GPT Image models accept up to 16
+    # images on images.edit with input_fidelity (storyboard character/location refs).
+    ref_files: list[tuple[str, bytes]] = []
+    for src in list(reference_image_filenames or [])[:16]:
+        loaded = _load_reference_image_bytes(src, project_key)
+        if loaded:
+            fname, data, _mime = loaded
+            ref_files.append((fname, data))
+    if list(reference_image_filenames or []) and not ref_files:
+        print(
+            "[image_tool] OpenAI: reference images were requested but none could be loaded; "
+            "falling back to text-only generation."
+        )
+
+    if ref_files:
+        params["image"] = ref_files
+        if model_name in ("gpt-image-1", "gpt-image-1.5"):
+            params["input_fidelity"] = "high"
+        # images.edit does not support quality="hd" (images.generate does).
+        if params.get("quality") == "hd":
+            params["quality"] = "high"
+        response = client.images.edit(**params)
+    else:
+        response = client.images.generate(**params)
 
     images: list[dict] = []
     for idx, item in enumerate(response.data or []):
@@ -1004,6 +1064,7 @@ def generate_image(
             style=style,
             transparent_background=transparent_background,
             images_output_dir=images_output_dir,
+            reference_image_filenames=reference_image_filenames,
         )
 
     raise ValueError(f"Unsupported image provider: {provider}")
