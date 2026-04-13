@@ -32,6 +32,79 @@ import { ImagegenTooltip } from "./ImagegenTooltip";
 import { parseStoredImages, toPayload } from "./persistence";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
 
+/** Same pattern as UI Builder → Breakdown Activity (status + indeterminate progress). */
+type ImageGenGenerateActivity = { message: string; isError: boolean } | null;
+
+function ImageGenGenerateActivityBox({
+  activity,
+  working,
+}: {
+  activity: ImageGenGenerateActivity;
+  working: boolean;
+}) {
+  return (
+    <div
+      style={{
+        flexShrink: 0,
+        marginBottom: "0.75rem",
+        padding: "10px 12px",
+        borderRadius: 8,
+        border: "1px solid #2a2f3a",
+        background: "#0f1115",
+      }}
+      aria-live="polite"
+      aria-busy={working}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          marginBottom: 6,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: "#94a3b8",
+          }}
+        >
+          Activity
+        </div>
+        {working && (
+          <span style={{ fontSize: 11, color: "#22d3ee", fontWeight: 600 }}>Working…</span>
+        )}
+      </div>
+      <div
+        style={{
+          fontSize: 13,
+          lineHeight: 1.45,
+          color: activity?.isError
+            ? "#f87171"
+            : activity
+              ? "var(--foreground, #e2e8f0)"
+              : "#94a3b8",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        }}
+      >
+        {activity === null
+          ? "Ready — enter a prompt and click Generate."
+          : activity.message}
+      </div>
+      {working && (
+        <div className="breakdown-progress-track" role="progressbar" aria-valuetext="In progress" style={{ marginTop: 10 }}>
+          <div className="breakdown-progress-bar" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StylesAddForm({
   onAdd,
   disabled,
@@ -124,6 +197,8 @@ function ImageGenPageInner() {
     num_images: 2,
     quality: "medium" as "high" | "medium" | "low",
   });
+  /** Image tab: generation status / errors (matches UI Builder Breakdown Activity). */
+  const [generateActivity, setGenerateActivity] = useState<ImageGenGenerateActivity>(null);
 
   /** Only persist after initial load for this project has completed; avoids overwriting saved data with [] on mount. */
   const loadCompletedForProjectRef = useRef<string | null>(null);
@@ -260,7 +335,8 @@ function ImageGenPageInner() {
     const base = genPrompt.trim() || prompt.trim();
     if (!base) return;
     setIsGenerating(true);
-    setStatus("Generating image...");
+    setStatus(null);
+    setGenerateActivity({ message: "Preparing request (model, size, quality, style)…", isError: false });
     try {
       const style = selectedStyleId !== "__none" ? styles.find((s) => s.id === selectedStyleId) ?? null : null;
       let fullPrompt = base;
@@ -281,6 +357,10 @@ function ImageGenPageInner() {
         width = Math.max(1, Math.round((baseSize * 9) / 16));
         height = baseSize;
       }
+      setGenerateActivity({
+        message: `Calling image API (${imageModel}) at ${width}×${height}, ${imageDefaults.num_images} image(s) — this may take a while…`,
+        isError: false,
+      });
       const backendImages = await generateImageFromPrompt(fullPrompt, {
         width,
         height,
@@ -319,9 +399,16 @@ function ImageGenPageInner() {
         };
       });
       setImages((prev) => [...newItems, ...prev]);
-      setStatus("Image generated.");
+      setGenerateActivity({
+        message: `Finished — added ${newItems.length} image(s) to results.`,
+        isError: false,
+      });
     } catch (err) {
-      setStatus(`Error generating image: ${err instanceof Error ? err.message : "Unknown error"}`);
+      const detail = err instanceof Error ? err.message : "Unknown error";
+      setGenerateActivity({
+        message: detail,
+        isError: true,
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -592,7 +679,6 @@ function ImageGenPageInner() {
   const visibleImages = images.filter((img) => img.tab === (activeTab === "styles" ? "image" : activeTab));
 
   const isImageCreationBusy =
-    isGenerating ||
     isGeneratingCharacter ||
     isEditImageGenerating ||
     isGeneratingPrompt ||
@@ -601,13 +687,11 @@ function ImageGenPageInner() {
     ? "Editing image (Nano Banana)…"
     : isGeneratingCharacter
       ? "Generating character image…"
-      : isGenerating
-        ? "Generating image…"
-        : isImporting
-          ? "Importing image…"
-          : isGeneratingPrompt
-            ? "Generating prompt…"
-            : "";
+      : isImporting
+        ? "Importing image…"
+        : isGeneratingPrompt
+          ? "Generating prompt…"
+          : "";
 
   return (
     <main>
@@ -634,7 +718,7 @@ function ImageGenPageInner() {
         className="imagegen-shell"
         style={{
           position: "relative",
-          ...(isImageCreationBusy ? { minHeight: "min(70vh, 900px)" } : {}),
+          ...(isImageCreationBusy || isGenerating ? { minHeight: "min(70vh, 900px)" } : {}),
         }}
       >
         {isImageCreationBusy && (
@@ -711,7 +795,7 @@ function ImageGenPageInner() {
                     onGenerate={handleGenerate}
                     isGenerating={isGenerating}
                     isGeneratingPrompt={isGeneratingPrompt}
-                    status={status}
+                    status={isGenerating ? null : status}
                     onImportClick={() => importFileInputRef.current?.click()}
                     isImporting={isImporting}
                     importDisabled={!projectKey.trim()}
@@ -900,17 +984,34 @@ function ImageGenPageInner() {
           </div>
         </div>
 
-        <ResultsPanel
-          images={visibleImages}
-          imagesPerRow={imagesPerRow}
-          onImagesPerRowChange={handleImagesPerRowChange}
-          onImagesPerRowStep={setImagesPerRowClamped}
-          onDeleteImage={(id) => setImages((prev) => prev.filter((img) => img.id !== id))}
-          onToggleLocation={toggleImageLocation}
-          onRemoveBackground={handleRemoveBackground}
-          onEditImage={handleEditImage}
-          emptyMessage="No images yet. Enter a prompt and click Generate."
-        />
+        <div
+          className="imagegen-right"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: "min(70vh, 900px)",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {(activeTab === "image" || isGenerating) && (
+            <ImageGenGenerateActivityBox activity={generateActivity} working={isGenerating} />
+          )}
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <ResultsPanel
+              embedded
+              images={visibleImages}
+              imagesPerRow={imagesPerRow}
+              onImagesPerRowChange={handleImagesPerRowChange}
+              onImagesPerRowStep={setImagesPerRowClamped}
+              onDeleteImage={(id) => setImages((prev) => prev.filter((img) => img.id !== id))}
+              onToggleLocation={toggleImageLocation}
+              onRemoveBackground={handleRemoveBackground}
+              onEditImage={handleEditImage}
+              emptyMessage="No images yet. Enter a prompt and click Generate."
+            />
+          </div>
+        </div>
       </div>
     </main>
   );
