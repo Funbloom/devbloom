@@ -172,6 +172,13 @@ async def chat_stream_generator(body: ChatRequest, client: OpenAI) -> AsyncGener
                         "Spreadsheet (xlsx) output directory for the current project: "
                         f"{gen_dir.resolve()}"
                     )
+                except ValueError as exc:
+                    # Missing entry in api/.local_data/project_paths.json — user may only have path in the browser.
+                    logger.warning(
+                        "Omitting XLSX output directory from tool instruction (local project path not set on API): %s",
+                        exc,
+                        extra={"project_key": tool_project_key},
+                    )
                 except Exception:
                     logger.exception(
                         "Failed to resolve XLSX output directory for tool instruction.",

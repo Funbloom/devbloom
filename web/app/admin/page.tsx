@@ -150,6 +150,13 @@ export default function AdminPage() {
       }
       const data = (await response.json()) as ProjectItem[];
       setProjects(data);
+      /** API stores paths in api/.local_data/project_paths.json; keep browser cache aligned when the server has a path. */
+      for (const project of data) {
+        const serverPath = project.project_path?.trim();
+        if (serverPath) {
+          setLocalProjectPath(project.project_key, serverPath);
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setProjectStatus(`Error: ${message}`);
@@ -477,7 +484,8 @@ export default function AdminPage() {
     setEditProjectKey(project.project_key);
     setEditProject({
       display_name: project.display_name,
-      project_path: getLocalProjectPath(project.project_key) || "",
+      project_path:
+        project.project_path?.trim() || getLocalProjectPath(project.project_key) || "",
     });
   };
 
@@ -872,18 +880,23 @@ export default function AdminPage() {
             <div className="admin-project-table">
               {projects.map((project) => {
                 const isEditing = editProjectKey === project.project_key;
-                const localPath = getLocalProjectPath(project.project_key) || "";
+                const serverPath = project.project_path?.trim() || "";
+                const browserOnlyPath = getLocalProjectPath(project.project_key)?.trim() || "";
+                const displayPath = serverPath || browserOnlyPath;
+                const pathOnlyInBrowser = !serverPath && !!browserOnlyPath;
                 return (
                   <div className="admin-project-row" key={project.project_key}>
                     <div className="admin-project-main">
                       <div className="admin-project-title">{project.display_name}</div>
                       <div className="admin-project-meta">
                         <span className="admin-project-key">{project.project_key}</span> ·{" "}
-                        {localPath || "Local path not set"}
-                        {!localPath && (
+                        {displayPath ? displayPath : "Local path not set"}
+                        {pathOnlyInBrowser && (
                           <>
                             {" · "}
-                            <span className="admin-path-missing">Path not set</span>
+                            <span className="admin-path-missing" title="Open Edit → Save so the API server stores this path (needed for chat tools and server-side exports).">
+                              Browser only — save to sync to server
+                            </span>
                           </>
                         )}
                       </div>
