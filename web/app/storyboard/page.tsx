@@ -6,6 +6,7 @@ import type { Character, Location, Storyboard, StoryboardDetailResponse, Style, 
 import { StoryboardSidebar } from "./StoryboardSidebar";
 import { TilesPanel } from "./TilesPanel";
 import { fetchApi, API_BASE } from "../lib/api";
+import { confirmGeminiImageIfNeeded, isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
 const STORAGE_KEY_PROJECT = "activeProjectKey";
 const STORAGE_KEY_STORYBOARD = "storyboardSelectedId";
@@ -489,6 +490,7 @@ export default function StoryboardPage() {
     setIsSaving(true);
     setStatus("Generating tile image...");
     try {
+      confirmGeminiImageIfNeeded({ modelId: tileModel });
       const response = await fetchApi(`/storyboard/tiles/${tile.id}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -505,8 +507,12 @@ export default function StoryboardPage() {
       }
       setStatus("Tile image generated.");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setStatus(`Error generating tile: ${message}`);
+      if (isGeminiImageConfirmCancelled(err)) {
+        setStatus(null);
+      } else {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setStatus(`Error generating tile: ${message}`);
+      }
     } finally {
       setIsSaving(false);
       setGeneratingTileId(null);

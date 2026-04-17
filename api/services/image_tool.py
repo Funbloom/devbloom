@@ -1002,7 +1002,7 @@ def generate_image(
     height: int = 1024,
     num_images: int = 1,
     seed: int | None = None,
-    model: str = "gemini-2.5-flash-image",
+    model: str = "gpt-image-1.5",
     quality: str | None = None,
     style: str | None = None,
     transparent_background: bool | None = None,
@@ -1204,7 +1204,7 @@ def run_generate_image_tool(args: dict) -> dict:
         height=int(args.get("height", defaults.get("height", 1024))),
         num_images=int(args.get("num_images", defaults.get("num_images", 1))),
         seed=args.get("seed"),
-        model=args.get("model", "gemini-image-2"),
+        model=args.get("model", "gpt-image-1.5"),
         project_key=str(args.get("project_key", "")).strip() or None,
     )
 

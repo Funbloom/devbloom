@@ -42,9 +42,9 @@ IMAGE_MODEL_REGISTRY: dict[str, dict[str, str]] = {
 }
 
 IMAGE_MODEL_DEFAULTS: dict[str, str] = {
-    "imagegen": "gemini-2.5-flash-image",
-    "character": "gemini-2.5-flash-image",
-    "storyboard": "gemini-2.5-flash-image",
+    "imagegen": "gpt-image-1.5",
+    "character": "gpt-image-1.5",
+    "storyboard": "gpt-image-1.5",
 }
 
 
@@ -55,5 +55,5 @@ def resolve_image_model(feature: str, requested: str | None) -> str:
         return requested
     fallback = IMAGE_MODEL_DEFAULTS.get(feature)
     if not fallback:
-        fallback = IMAGE_MODEL_DEFAULTS.get("imagegen", "gemini-2.5-flash-image")
+        fallback = IMAGE_MODEL_DEFAULTS.get("imagegen", "gpt-image-1.5")
     return fallback

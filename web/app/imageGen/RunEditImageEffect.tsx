@@ -10,6 +10,7 @@ import {
   resolveReferenceForEditApi,
 } from "./client";
 import { IMAGEGEN_EDIT_JOB_KEY, UIBUILDER_PENDING_BREAKDOWN_EXPORTS_RELOAD_KEY } from "./editKeys";
+import { isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { clearEditDraft } from "./imagegenPanelSnapshot";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
 
@@ -158,12 +159,17 @@ export function RunEditImageEffect({
           setActiveTab(job.image.tab === "characters" ? "characters" : "image");
         }
       } catch (err) {
-        const detail = err instanceof Error ? err.message : "Unknown error";
-        setGenerateActivity({
-          message: detail,
-          isError: true,
-        });
-        setStatus(`Edit failed: ${detail}`);
+        if (isGeminiImageConfirmCancelled(err)) {
+          setGenerateActivity({ message: "Cancelled.", isError: false });
+          setStatus(null);
+        } else {
+          const detail = err instanceof Error ? err.message : "Unknown error";
+          setGenerateActivity({
+            message: detail,
+            isError: true,
+          });
+          setStatus(`Edit failed: ${detail}`);
+        }
       } finally {
         setIsEditImageGenerating(false);
       }

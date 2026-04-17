@@ -127,7 +127,7 @@ class EditImageNanobananaRequest(BaseModel):
     height: int = 1024
     model: str | None = Field(
         default=None,
-        description="Image model id (same as /tools/generate_image); defaults to gemini-2.5-flash-image.",
+        description="Image model id (same as /tools/generate_image); defaults to gpt-image-1.5.",
     )
 
 
@@ -343,7 +343,7 @@ def edit_image_nanobanana_route(
     )
     try:
         try:
-            model_key = resolve_image_model("imagegen", (body.model or "").strip() or "gemini-2.5-flash-image")
+            model_key = resolve_image_model("imagegen", (body.model or "").strip() or "gpt-image-1.5")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         # Reference conditioning uses Gemini in this codebase; match /tools/generate_image behavior.
@@ -401,10 +401,6 @@ def generate_image_route(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         refs = [str(r).strip() for r in (body.reference_image_filenames or []) if r and str(r).strip()]
-        if refs:
-            reg = IMAGE_MODEL_REGISTRY.get(model_key, {})
-            if reg.get("provider") != "gemini":
-                model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
         result = generate_image(
             prompt=body.prompt,
             negative_prompt=body.negative_prompt,
@@ -491,10 +487,7 @@ def ui_canvas_polish_route(
         requested_model = model_key
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if ref_list:
-        reg = IMAGE_MODEL_REGISTRY.get(model_key, {})
-        if reg.get("provider") != "gemini":
-            model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
+    # Respect selected model: GPT Image uses images.edit with sketch/style refs (see _generate_image_openai).
     logger.info(
         "ui_canvas_polish: requested_model=%s resolved_model=%s sketch=%s style_refs=%d "
         "ref_filenames=%s prompt_chars_in=%d max_prompt_chars=%d extra_user_non_empty=%s",

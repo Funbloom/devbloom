@@ -23,6 +23,7 @@ import { capturePanelSnapshot, getPanelSnapshot } from "./imagegenPanelSnapshot"
 import { RunEditImageEffect } from "./RunEditImageEffect";
 import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
+import { isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
 import { useAuth } from "../contexts/AuthContext";
 import { fetchApi } from "../lib/api";
@@ -431,11 +432,15 @@ function ImageGenPageInner() {
         isError: false,
       });
     } catch (err) {
-      const detail = err instanceof Error ? err.message : "Unknown error";
-      setGenerateActivity({
-        message: detail,
-        isError: true,
-      });
+      if (isGeminiImageConfirmCancelled(err)) {
+        setGenerateActivity({ message: "Cancelled.", isError: false });
+      } else {
+        const detail = err instanceof Error ? err.message : "Unknown error";
+        setGenerateActivity({
+          message: detail,
+          isError: true,
+        });
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -499,7 +504,11 @@ function ImageGenPageInner() {
       setImages((prev) => [...newItems, ...prev]);
       setStatus("Character image generated.");
     } catch (err) {
-      setStatus(`Error generating character image: ${err instanceof Error ? err.message : "Unknown error"}`);
+      if (isGeminiImageConfirmCancelled(err)) {
+        setStatus(null);
+      } else {
+        setStatus(`Error generating character image: ${err instanceof Error ? err.message : "Unknown error"}`);
+      }
     } finally {
       setIsGeneratingCharacter(false);
     }

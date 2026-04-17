@@ -16,6 +16,7 @@ import {
   joinLocalProjectSubpath,
   localAgent,
 } from "../lib/localAgentClient";
+import { isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { ImagegenTooltip } from "../imageGen/ImagegenTooltip";
 import { IMAGE_MODEL_OPTIONS, IMAGEGEN_DEFAULT_IMAGE_MODEL } from "../lib/imageModels";
 import type { GeneratedImage } from "../imageGen/types";
@@ -777,7 +778,11 @@ export function BreakdownPanel({
         onActivityUpdate({ message: "Strip finished but no filename was returned.", isError: true });
       }
     } catch (e) {
-      onActivityUpdate({ message: e instanceof Error ? e.message : "Remove text failed.", isError: true });
+      if (isGeminiImageConfirmCancelled(e)) {
+        onActivityUpdate({ message: "Cancelled.", isError: false });
+      } else {
+        onActivityUpdate({ message: e instanceof Error ? e.message : "Remove text failed.", isError: true });
+      }
     } finally {
       setStripping(false);
     }
@@ -842,7 +847,11 @@ export function BreakdownPanel({
       });
       onProcessComplete?.();
     } catch (e) {
-      onActivityUpdate({ message: e instanceof Error ? e.message : "Process failed.", isError: true });
+      if (isGeminiImageConfirmCancelled(e)) {
+        onActivityUpdate({ message: "Cancelled.", isError: false });
+      } else {
+        onActivityUpdate({ message: e instanceof Error ? e.message : "Process failed.", isError: true });
+      }
     } finally {
       setProcessing(false);
     }

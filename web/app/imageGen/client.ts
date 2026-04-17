@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmGeminiImageIfNeeded } from "../lib/confirmGeminiImage";
 import { fetchApi } from "../lib/api";
 import type { Style } from "../storyboard/types";
 import type { GeneratedImage } from "./types";
@@ -71,6 +72,7 @@ export async function editImageNanobanana(params: {
   /** Same model ids as Image Gen left tab / generate_image. */
   model?: string;
 }): Promise<BackendImageResult[]> {
+  confirmGeminiImageIfNeeded({ forceGemini: true });
   const body: Record<string, unknown> = {
     changes: params.changes.trim(),
     reference: params.reference.trim(),
@@ -109,6 +111,10 @@ export async function generateImageFromPrompt(
     referenceImageFilenames?: string[];
   }
 ): Promise<BackendImageResult[]> {
+  confirmGeminiImageIfNeeded({
+    modelId: options?.model,
+    referenceImageFilenames: options?.referenceImageFilenames,
+  });
   const body: Record<string, unknown> = { prompt };
   if (options?.projectKey?.trim()) body.project_key = options.projectKey.trim();
   if (options?.negativePrompt?.trim()) {
@@ -154,7 +160,12 @@ export async function generateUiCanvasPolish(options: {
   layoutFidelity?: number;
   /** OpenAI image models: API transparent background. Omitted defaults server-side True. */
   transparentBackground?: boolean;
+  /** When true, caller already confirmed the expensive Gemini image step (e.g. batch polish). */
+  skipGeminiConfirm?: boolean;
 }): Promise<{ images: BackendImageResult[]; styleName?: string | null }> {
+  if (!options.skipGeminiConfirm) {
+    confirmGeminiImageIfNeeded({ modelId: options.model });
+  }
   const body: Record<string, unknown> = {
     project_key: options.projectKey.trim(),
     sketch_filename: options.sketchFilename.trim(),
@@ -284,6 +295,7 @@ export async function stripTextForBreakdown(options: {
   height?: number;
   model?: string;
 }): Promise<BackendImageResult> {
+  confirmGeminiImageIfNeeded({ forceGemini: true });
   const body: Record<string, unknown> = {
     project_key: options.projectKey.trim(),
     source_filename: options.sourceFilename.trim(),
@@ -327,6 +339,9 @@ export async function processUiBreakdown(options: {
   /** If set, only this region’s widget PNG is written; background.png is not generated. */
   onlyElementId?: string | null;
 }): Promise<{ folder: string; files: UiBreakdownProcessFile[] }> {
+  if (!options.onlyElementId?.trim()) {
+    confirmGeminiImageIfNeeded({ forceGemini: true });
+  }
   const body: Record<string, unknown> = {
     project_key: options.projectKey.trim(),
     source_filename: options.sourceFilename.trim(),
@@ -624,6 +639,7 @@ export type GenerateCharacterImageResult = {
 export async function generateCharacterImage(
   params: GenerateCharacterImageParams
 ): Promise<GenerateCharacterImageResult> {
+  confirmGeminiImageIfNeeded({ modelId: params.model });
   const body: Record<string, unknown> = {
     role: params.role?.trim() || null,
     physical_description: params.physical_description?.trim() || null,

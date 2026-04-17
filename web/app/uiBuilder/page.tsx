@@ -28,6 +28,7 @@ import {
   resolveReferenceForEditApi,
   uploadImageToCloud,
 } from "../imageGen/client";
+import { confirmGeminiImageIfNeeded, isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
 import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
 import { capturePanelSnapshot } from "../imageGen/imagegenPanelSnapshot";
@@ -749,7 +750,11 @@ export default function UIBuilderPage() {
         clearEditDraft(job.image.id);
         setStatus("Image edited.");
       } catch (err) {
-        setStatus(err instanceof Error ? `Edit failed: ${err.message}` : "Edit failed.");
+        if (isGeminiImageConfirmCancelled(err)) {
+          setStatus(null);
+        } else {
+          setStatus(err instanceof Error ? `Edit failed: ${err.message}` : "Edit failed.");
+        }
       } finally {
         setEditingUiCanvas(false);
       }
@@ -1260,6 +1265,7 @@ export default function UIBuilderPage() {
       selectedStyleId !== "__none" ? styles.find((s) => s.id === selectedStyleId) ?? null : null;
     const extra = extraPolishPrompt.trim();
     try {
+      confirmGeminiImageIfNeeded({ modelId: imageModel });
       for (let i = 0; i < selectedSketchesForPolish.length; i++) {
         const img = selectedSketchesForPolish[i];
         const fn = img.filename!.trim();
@@ -1277,6 +1283,7 @@ export default function UIBuilderPage() {
           height: 1024,
           layoutFidelity,
           transparentBackground: uiCanvasTransparentBg,
+          skipGeminiConfirm: true,
         });
         const first = results[0];
         if (!first) {
@@ -1321,7 +1328,11 @@ export default function UIBuilderPage() {
       }
       setStatus(`Generated ${selectedSketchesForPolish.length} polished image(s).`);
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : "Generate failed.");
+      if (isGeminiImageConfirmCancelled(e)) {
+        setStatus(null);
+      } else {
+        setStatus(e instanceof Error ? e.message : "Generate failed.");
+      }
     } finally {
       setGeneratingPolish(false);
     }
