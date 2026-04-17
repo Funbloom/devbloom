@@ -824,11 +824,26 @@ main.imagegen-edit-page {
   padding: 8px;
 }
 
+/* UI Builder Generate: keep sketch previews compact and uniform (portrait doesn't grow taller). */
+.imagegen-card-image-wrap-sketch {
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .imagegen-card-image {
   width: 100%;
   height: auto;
   border-radius: 8px;
   display: block;
+}
+
+.imagegen-card-image-sketch {
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+  object-fit: contain;
 }
 
 .imagegen-card-meta {

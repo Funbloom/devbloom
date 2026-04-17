@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageOps
 
 from core.code_settings import IMAGE_MODEL_REGISTRY, resolve_image_model
 from services.image_tool import (
@@ -37,6 +37,41 @@ For each region id listed in the user message, provide a short English label (2â
 def _pil_canonical_rgba(path: Path) -> Image.Image:
     """Apply EXIF orientation so pixel coordinates match browser display and vision output."""
     return ImageOps.exif_transpose(Image.open(path)).convert("RGBA")
+
+
+def _decode_full_image_mask_l(el: dict[str, Any]) -> Image.Image | None:
+    """SAM mask PNG from local agent: full-image grayscale, white = inside segment."""
+    raw_b64 = el.get("mask_png_base64") or el.get("maskPngBase64")
+    if not raw_b64:
+        return None
+    s = str(raw_b64).strip()
+    if not s:
+        return None
+    try:
+        data = base64.standard_b64decode(s)
+        return Image.open(io.BytesIO(data)).convert("L")
+    except Exception:
+        return None
+
+
+def _apply_mask_alpha_to_crop(
+    crop_rgba: Image.Image,
+    mask_full_l: Image.Image,
+    *,
+    iw: int,
+    ih: int,
+    crop_box: tuple[int, int, int, int],
+) -> Image.Image:
+    """Multiply SAM mask into the crop alpha so non-rectangular shapes export with transparency."""
+    x0, y0, x1, y1 = crop_box
+    if mask_full_l.size != (iw, ih):
+        mask_full_l = mask_full_l.resize((iw, ih), Image.Resampling.NEAREST)
+    m = mask_full_l.crop((x0, y0, x1, y1))
+    if m.size != crop_rgba.size:
+        m = m.resize(crop_rgba.size, Image.Resampling.NEAREST)
+    r, g, b, a = crop_rgba.split()
+    new_a = ImageChops.multiply(m, a)
+    return Image.merge("RGBA", (r, g, b, new_a))
 
 
 def _encode_png_for_vision(img: Image.Image) -> tuple[bytes, str]:
@@ -357,6 +392,7 @@ def process_ui_breakdown(
     height: int = 1024,
     regen_model: str | None = None,
     transparent_background: bool = True,
+    only_element_id: str | None = None,
 ) -> dict[str, Any]:
     safe = validate_image_filename(source_filename)
     path = find_image_path(safe, project_key)
@@ -393,6 +429,15 @@ def process_ui_breakdown(
         sorted_elements.append(el)
     sorted_elements.sort(key=lambda e: (float(e["y_min"]), float(e["x_min"])))
 
+    oid = (only_element_id or "").strip()
+    if oid:
+        filtered = [e for e in sorted_elements if str(e.get("id") or "") == oid]
+        if not filtered:
+            raise ValueError(
+                f"No region matches id {oid!r}. Select a region in the preview or list before exporting selection only."
+            )
+        sorted_elements = filtered
+
     for i, el in enumerate(sorted_elements):
         try:
             x_min = float(el["x_min"])
@@ -410,6 +455,15 @@ def process_ui_breakdown(
         x1 = max(x0 + 1, min(iw, x1))
         y1 = max(y0 + 1, min(ih, y1))
         crop = img.crop((x0, y0, x1, y1))
+        mask_full = _decode_full_image_mask_l(el)
+        if mask_full is not None:
+            crop = _apply_mask_alpha_to_crop(
+                crop,
+                mask_full,
+                iw=iw,
+                ih=ih,
+                crop_box=(x0, y0, x1, y1),
+            )
         eid = str(el.get("id") or f"w{i+1}")
         lbl = _safe_label_fragment(str(el.get("label") or "widget"))
         wname = sanitize_widget_filename(f"widget_{eid}_{lbl}")
@@ -424,6 +478,12 @@ def process_ui_breakdown(
                 "url": build_ui_canvas_nested_url(rel, project_key),
             }
         )
+
+    if oid:
+        return {
+            "folder": folder_safe,
+            "files": files_out,
+        }
 
     bg_prompt = (
         "Recreate the same window frame and main panel surfaces as the reference UI image. "

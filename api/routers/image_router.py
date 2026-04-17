@@ -8,7 +8,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
-from core.code_settings import IMAGE_MODEL_REGISTRY, resolve_image_model
+from core.code_settings import (
+    IMAGE_MODEL_REGISTRY,
+    UI_CANVAS_POLISH_MAX_PROMPT_LEN,
+    resolve_image_model,
+)
 from services.usage import check_can_generate_images, increment_usage
 from services.image_tool import (
     convert_image,
@@ -110,7 +114,7 @@ class GenerateImageBytesRequest(BaseModel):
 
 
 class EditImageNanobananaRequest(BaseModel):
-    """Edit via Gemini image generation (internal 'Nano Banana' / gemini-3.1-flash-image-preview) with a reference image."""
+    """Edit with a reference image (Gemini / OpenAI per model registry; refs require Gemini path)."""
 
     changes: str = Field(min_length=1, max_length=4000)
     reference: str = Field(
@@ -121,6 +125,10 @@ class EditImageNanobananaRequest(BaseModel):
     project_key: str | None = None
     width: int = 1024
     height: int = 1024
+    model: str | None = Field(
+        default=None,
+        description="Image model id (same as /tools/generate_image); defaults to gemini-2.5-flash-image.",
+    )
 
 
 class ResizeImageRequest(BaseModel):
@@ -220,6 +228,10 @@ class UiBreakdownProcessRequest(BaseModel):
         default=True,
         description="When true, background plate uses GPT Image with background=transparent (requires OPENAI_API_KEY). "
         "When false, uses Gemini + reference image (opaque).",
+    )
+    only_element_id: str | None = Field(
+        default=None,
+        description="If set, export only this region's widget PNG and skip background.png generation.",
     )
 
 
@@ -330,8 +342,14 @@ def edit_image_nanobanana_route(
         f"Requested changes:\n{changes}"
     )
     try:
-        # Always use Gemini image path (Nano Banana / gemini-3.1-flash-image-preview in image_tool._generate_image_gemini).
-        model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
+        try:
+            model_key = resolve_image_model("imagegen", (body.model or "").strip() or "gemini-2.5-flash-image")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # Reference conditioning uses Gemini in this codebase; match /tools/generate_image behavior.
+        reg = IMAGE_MODEL_REGISTRY.get(model_key, {})
+        if reg.get("provider") != "gemini":
+            model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
         out_dir = None
         r = ref.strip()
         if not (r.startswith("http://") or r.startswith("https://")):
@@ -463,17 +481,33 @@ def ui_canvas_polish_route(
         style_reference_filenames=refs_in,
         layout_fidelity=body.layout_fidelity,
     )
+    prompt_in_len = len(prompt)
 
     ref_list = [sketch_fn] + [x for x in refs_in if x != sketch_fn]
 
+    requested_model = None
     try:
         model_key = resolve_image_model("imagegen", body.model)
+        requested_model = model_key
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if ref_list:
         reg = IMAGE_MODEL_REGISTRY.get(model_key, {})
         if reg.get("provider") != "gemini":
             model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
+    logger.info(
+        "ui_canvas_polish: requested_model=%s resolved_model=%s sketch=%s style_refs=%d "
+        "ref_filenames=%s prompt_chars_in=%d max_prompt_chars=%d extra_user_non_empty=%s",
+        requested_model or body.model,
+        model_key,
+        sketch_fn,
+        len(refs_in),
+        ref_list,
+        prompt_in_len,
+        UI_CANVAS_POLISH_MAX_PROMPT_LEN,
+        bool((body.extra_user_prompt or "").strip()),
+    )
+    logger.debug("ui_canvas_polish full prompt (%d chars):\n%s", prompt_in_len, prompt)
     try:
         ui_dir = get_ui_canvas_images_dir(body.project_key.strip())
         result = generate_image(
@@ -486,6 +520,7 @@ def ui_canvas_polish_route(
             reference_image_filenames=ref_list or None,
             transparent_background=body.transparent_background,
             images_output_dir=ui_dir,
+            max_prompt_chars=UI_CANVAS_POLISH_MAX_PROMPT_LEN,
         )
         n = len(result.get("images") or [])
         if n > 0:
@@ -576,6 +611,7 @@ def ui_breakdown_process_route(
             height=body.height,
             regen_model=body.regen_model,
             transparent_background=body.transparent_background,
+            only_element_id=(body.only_element_id or "").strip() or None,
         )
         increment_usage(user.get("id") or "", 1)
         return out

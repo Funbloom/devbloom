@@ -13,6 +13,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { API_BASE, STORAGE_KEY_PROJECT } from "../imageGen/config";
 import {
+  editImageNanobanana,
   generateUiCanvasPolish,
   getImageGenerated,
   getStyles,
@@ -29,12 +30,15 @@ import {
 } from "../imageGen/client";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
 import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
+import { capturePanelSnapshot } from "../imageGen/imagegenPanelSnapshot";
 import type { Style } from "../storyboard/types";
 import {
   IMAGEGEN_EDIT_CONTEXT_KEY,
+  IMAGEGEN_EDIT_JOB_KEY,
   IMAGEGEN_EDIT_RETURN_KEY,
   UIBUILDER_PENDING_BREAKDOWN_EXPORTS_RELOAD_KEY,
 } from "../imageGen/editKeys";
+import { clearEditDraft } from "../imageGen/imagegenPanelSnapshot";
 import { parseStoredImages, toPayload } from "../imageGen/persistence";
 import { ImagegenTooltip } from "../imageGen/ImagegenTooltip";
 import { ResultsPanel } from "../imageGen/ResultsPanel";
@@ -57,6 +61,7 @@ type BuilderTab = "generate" | "draw" | "breakdown";
 const UIBUILDER_IMAGE_MODEL_STORAGE_KEY = "uibuilder_image_model";
 const UIBUILDER_LAYOUT_FIDELITY_STORAGE_KEY = "uibuilder_layout_fidelity";
 const UIBUILDER_TRANSPARENT_BG_STORAGE_KEY = "uibuilder_transparent_bg";
+const UIBUILDER_DRAW_ORIENTATION_STORAGE_KEY = "uibuilder_draw_orientation";
 /** Per-project list of Images/ filenames for style-only references (max 3). */
 const UIBUILDER_STYLE_REFS_STORAGE_PREFIX = "uibuilder_style_ref_filenames:";
 const MAX_STYLE_REFS = maxUiStyleReferenceImages();
@@ -82,6 +87,8 @@ const TIP_EXTRA_POLISH =
 
 const TIP_DRAW_PENS =
   "Label box: drag a rectangle. Text: click to place literal copy. Paste: copy an image, then Ctrl+V (⌘V) on the page.";
+const TIP_DRAW_ORIENTATION =
+  "Sets the sketch canvas aspect ratio and output PNG orientation used for polish generation.";
 
 const TIP_SHOW_ALL =
   "Off: Only saved drawings are listed until you select one; then you see that sketch and its polished outputs. On: Every UI Canvas image is listed.";
@@ -294,8 +301,10 @@ export default function UIBuilderPage() {
     }
   }, [searchParams, pathname, router]);
 
+
   const [brushSize, setBrushSize] = useState(4);
   const [tool, setTool] = useState<DrawTool>("background");
+  const [drawOrientation, setDrawOrientation] = useState<"landscape" | "portrait">("landscape");
   const [drawingName, setDrawingName] = useState("");
   const sketchRef = useRef<SketchCanvasHandle>(null);
 
@@ -305,6 +314,7 @@ export default function UIBuilderPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [generatingPolish, setGeneratingPolish] = useState(false);
+  const [editingUiCanvas, setEditingUiCanvas] = useState(false);
   const [selectedSketchIds, setSelectedSketchIds] = useState<string[]>([]);
   const [extraPolishPrompt, setExtraPolishPrompt] = useState("");
   /** 0 = creative layout; 100 = match sketch placement closely. */
@@ -407,6 +417,14 @@ export default function UIBuilderPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem(UIBUILDER_DRAW_ORIENTATION_STORAGE_KEY);
+    if (raw === "portrait" || raw === "landscape") {
+      setDrawOrientation(raw);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     window.localStorage.setItem(UIBUILDER_LAYOUT_FIDELITY_STORAGE_KEY, String(layoutFidelity));
   }, [layoutFidelity]);
 
@@ -419,6 +437,11 @@ export default function UIBuilderPage() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(UIBUILDER_IMAGE_MODEL_STORAGE_KEY, imageModel);
   }, [imageModel]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(UIBUILDER_DRAW_ORIENTATION_STORAGE_KEY, drawOrientation);
+  }, [drawOrientation]);
 
   useEffect(() => {
     const key = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY_PROJECT) : null;
@@ -609,6 +632,139 @@ export default function UIBuilderPage() {
     return parseStoredImages(raw);
   }, [projectKey, isPrivate]);
 
+  /** Run edit jobs from /imageGen/edit when return target is UI Builder, so progress stays visible here. */
+  useEffect(() => {
+    if (searchParams.get("runEdit") !== "1") return;
+    if (!projectKey.trim()) return;
+    const raw = sessionStorage.getItem(IMAGEGEN_EDIT_JOB_KEY);
+    if (!raw) return;
+    sessionStorage.removeItem(IMAGEGEN_EDIT_JOB_KEY);
+    const t = searchParams.get("tab");
+    const qs = new URLSearchParams();
+    if (t === "breakdown" || t === "draw" || t === "generate") {
+      qs.set("tab", t);
+    }
+    router.replace(qs.toString() ? `${pathname}?${qs.toString()}` : pathname, { scroll: false });
+
+    let job: {
+      changes: string;
+      image: GeneratedImage;
+      returnTo?: string;
+      width?: number;
+      height?: number;
+      model?: string;
+    };
+    try {
+      job = JSON.parse(raw) as {
+        changes: string;
+        image: GeneratedImage;
+        returnTo?: string;
+        width?: number;
+        height?: number;
+        model?: string;
+      };
+    } catch {
+      setStatus("Invalid edit job.");
+      return;
+    }
+    if (!projectKey.trim()) {
+      setStatus("Set an active project in Admin.");
+      return;
+    }
+    let reference: string;
+    try {
+      reference = resolveReferenceForEditApi(job.image);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Cannot resolve reference image.");
+      return;
+    }
+
+    const editW =
+      typeof job.width === "number" && Number.isFinite(job.width) && job.width > 0 ? Math.round(job.width) : 1024;
+    const editH =
+      typeof job.height === "number" && Number.isFinite(job.height) && job.height > 0 ? Math.round(job.height) : 1024;
+    const editModel = job.model?.trim() || imageModel;
+
+    if (!job.image.nestedUiRelativePath?.trim()) {
+      setTab("generate");
+    }
+    setEditingUiCanvas(true);
+    setStatus(`Editing image (${editModel}) at ${editW}×${editH}…`);
+
+    void (async () => {
+      try {
+        const results = await editImageNanobanana({
+          changes: job.changes,
+          reference,
+          project_key: projectKey.trim(),
+          width: editW,
+          height: editH,
+          model: editModel,
+        });
+        if (!results.length) {
+          setStatus("Edit finished but returned no image.");
+          return;
+        }
+        const all = await loadAllImages();
+        const now = new Date().toISOString();
+        const basePrompt = String(job.image.prompt || "").trim();
+        const promptLabel = `Edit: ${job.changes}\n\n(From: ${basePrompt.slice(0, 200)}${
+          basePrompt.length > 200 ? "…" : ""
+        })`;
+        const linkedSketchFn =
+          job.image.sourceSketchFilename?.trim() ||
+          (job.image.fromSketch && job.image.filename?.trim() ? job.image.filename.trim() : undefined);
+        const srcIndex = all.findIndex((img) => img.id === job.image.id);
+        const inserted: GeneratedImage[] = [];
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          let url = String(r.url || r.filename || "");
+          if (url && !url.startsWith("http")) {
+            url = normalizeImageUrl(url);
+          }
+          const filename = typeof r.filename === "string" ? r.filename.trim() : "";
+          let location: ImageLocation = job.image.location ?? "local";
+          let finalUrl = url;
+          if (location === "cloud" && filename) {
+            finalUrl = await uploadImageToCloud(projectKey.trim(), filename);
+          }
+          inserted.push({
+            id: `${now}-${i}-${Math.random().toString(36).slice(2)}`,
+            url: finalUrl,
+            filename: filename || undefined,
+            prompt: promptLabel,
+            styleName: job.image.styleName,
+            createdAt: now,
+            tab: job.image.tab,
+            location,
+            ...(linkedSketchFn ? { sourceSketchFilename: linkedSketchFn } : {}),
+          });
+        }
+        const nextList =
+          srcIndex >= 0
+            ? [...all.slice(0, srcIndex + 1), ...inserted, ...all.slice(srcIndex + 1)]
+            : [...inserted, ...all];
+        await persistFullList(nextList);
+        await reloadUiCanvasImages();
+        clearEditDraft(job.image.id);
+        setStatus("Image edited.");
+      } catch (err) {
+        setStatus(err instanceof Error ? `Edit failed: ${err.message}` : "Edit failed.");
+      } finally {
+        setEditingUiCanvas(false);
+      }
+    })();
+  }, [
+    searchParams,
+    pathname,
+    router,
+    projectKey,
+    imageModel,
+    loadAllImages,
+    persistFullList,
+    reloadUiCanvasImages,
+  ]);
+
   const handleSaveDrawing = useCallback(async (): Promise<boolean> => {
     const name = drawingName.trim();
     if (!name) {
@@ -735,6 +891,15 @@ export default function UIBuilderPage() {
     if (!projectKey) return;
     try {
       const all = await loadAllImages();
+      const target = all.find((img) => img.id === id);
+      const kind = target?.fromSketch ? "drawing" : "image";
+      if (
+        !window.confirm(
+          `Delete this ${kind} from UI Canvas?\n\nIt will be removed from this project’s image list.`,
+        )
+      ) {
+        return;
+      }
       await persistFullList(all.filter((img) => img.id !== id));
       if (sketchEditTarget?.id === id) setSketchEditTarget(null);
       await reloadUiCanvasImages();
@@ -936,6 +1101,15 @@ export default function UIBuilderPage() {
         if (!(await confirmLeaveDrawIfNeeded())) return;
       }
       try {
+        capturePanelSnapshot({
+          sizePreset: "square",
+          qualityPreset: "high",
+          imageDefaultsQuality: "high",
+          imageModel,
+          openAiQuality: "",
+          openAiStyle: "",
+          openAiTransparent: false,
+        });
         const returnToBreakdown =
           Boolean(img.nestedUiRelativePath?.trim()) || tab === "breakdown";
         sessionStorage.setItem(
@@ -1167,6 +1341,7 @@ export default function UIBuilderPage() {
 
   const polishGenerateDisabled =
     generatingPolish ||
+    editingUiCanvas ||
     !projectKey?.trim() ||
     selectedSketchesForPolish.length === 0;
 
@@ -1616,6 +1791,26 @@ export default function UIBuilderPage() {
                     </label>
 
                     <label style={{ display: "grid", gap: "0.35rem", fontSize: 13 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        Drawing orientation
+                        <ImagegenTooltip text={TIP_DRAW_ORIENTATION} />
+                      </span>
+                      <select
+                        className="imagegen-select"
+                        value={drawOrientation}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "portrait" || v === "landscape") {
+                            setDrawOrientation(v);
+                          }
+                        }}
+                      >
+                        <option value="landscape">Landscape</option>
+                        <option value="portrait">Portrait</option>
+                      </select>
+                    </label>
+
+                    <label style={{ display: "grid", gap: "0.35rem", fontSize: 13 }}>
                       <span>Brush size ({brushSize}px)</span>
                       <input
                         type="range"
@@ -1735,9 +1930,16 @@ export default function UIBuilderPage() {
                 )}
               </div>
               {status && (
-                <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }} role="status">
-                  {status}
-                </p>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }} role="status">
+                    {status}
+                  </p>
+                  {editingUiCanvas && (
+                    <div className="breakdown-progress-track" role="progressbar" aria-valuetext="In progress">
+                      <div className="breakdown-progress-bar" />
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1766,7 +1968,13 @@ export default function UIBuilderPage() {
                     flexDirection: "column",
                   }}
                 >
-                  <SketchCanvas ref={sketchRef} brushSize={brushSize} tool={tool} onContentModified={markSketchDirty} />
+                  <SketchCanvas
+                    ref={sketchRef}
+                    brushSize={brushSize}
+                    tool={tool}
+                    orientation={drawOrientation}
+                    onContentModified={markSketchDirty}
+                  />
                 </div>
               </>
             ) : tab === "breakdown" ? (
@@ -1971,7 +2179,7 @@ export default function UIBuilderPage() {
                     showSketchCheckboxes
                     selectedSketchIds={selectedSketchIds}
                     onSketchSelectionChange={handleSketchSelectionChange}
-                    sketchSelectionDisabled={generatingPolish}
+                    sketchSelectionDisabled={generatingPolish || editingUiCanvas}
                     emptyMessage={uiCanvasEmptyMessage}
                   />
                 </div>

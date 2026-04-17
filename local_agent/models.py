@@ -83,7 +83,7 @@ class UiBreakdownSamRequest(BaseModel):
 
     project_root: str = Field(min_length=1)
     filename: str = Field(min_length=1, description="Bare filename e.g. wireframe.png")
-    max_elements: int = Field(default=10, ge=1, le=80)
+    max_elements: int = Field(default=64, ge=1, le=256)
     min_box_fraction: float = Field(default=0.008, ge=0.0, le=0.5)
     sam: dict[str, Any] | None = Field(
         default=None,

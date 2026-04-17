@@ -2,7 +2,15 @@
 
 from pathlib import Path
 
-from local_agent.ui_breakdown_sam import bbox_coco_xywh_to_normalized, resolve_ui_image_under_project
+import numpy as np
+
+from local_agent.ui_breakdown_sam import (
+    _ensure_hw_for_png,
+    _normalize_mask_hw,
+    _refine_mask_morph,
+    bbox_coco_xywh_to_normalized,
+    resolve_ui_image_under_project,
+)
 
 
 def test_bbox_coco_xywh_to_normalized_basic():
@@ -23,6 +31,33 @@ def test_bbox_clamps_to_unit_square():
     assert y_min == 0.0
     assert x_max == 1.0
     assert y_max == 1.0
+
+
+def test_normalize_mask_hw_transposes_wxh_to_hxw():
+    ih, iw = 4, 6
+    wrong = np.zeros((iw, ih), dtype=bool)
+    wrong[2, 1] = True
+    out = _normalize_mask_hw(wrong, ih, iw)
+    assert out is not None
+    assert out.shape == (ih, iw)
+    assert out[1, 2]
+
+
+def test_refine_mask_morph_noop_when_zero():
+    m = np.ones((4, 5), dtype=bool)
+    out = _refine_mask_morph(m, 0, 0)
+    assert out.shape == m.shape
+    assert bool(out[0, 0]) is True
+
+
+def test_ensure_hw_for_png_transposes():
+    ih, iw = 3, 5
+    wrong = np.zeros((iw, ih), dtype=bool)
+    wrong[2, 1] = True
+    out = _ensure_hw_for_png(wrong, ih, iw)
+    assert out is not None
+    assert out.shape == (ih, iw)
+    assert out[1, 2]
 
 
 def test_resolve_ui_image_prefers_images_then_ui(tmp_path: Path):

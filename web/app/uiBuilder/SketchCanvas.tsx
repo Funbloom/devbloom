@@ -30,6 +30,8 @@ type Props = {
   className?: string;
   /** Canvas background (used for clear and initial fill) */
   backgroundColor?: string;
+  /** Draw surface orientation. */
+  orientation?: "landscape" | "portrait";
   /** Called when the user draws, pastes, or places text/labels (not on resize-only). */
   onContentModified?: () => void;
 };
@@ -44,9 +46,11 @@ function hexWithAlpha(hex: string, alpha: number): string {
 }
 
 export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function SketchCanvas(
-  { brushSize, tool, className, backgroundColor = DEFAULT_BG, onContentModified },
+  { brushSize, tool, className, backgroundColor = DEFAULT_BG, orientation = "landscape", onContentModified },
   ref,
 ) {
+  const aspectRatio = orientation === "portrait" ? "9 / 16" : "16 / 9";
+  const frameHeight = orientation === "portrait" ? "min(100%, calc(100vh - 250px))" : "100%";
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
@@ -490,11 +494,15 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function Sketc
       onPointerLeave={() => setBrushPreview(null)}
       style={{
         position: "relative",
-        width: "100%",
-        height: "min(60vh, 640px)",
-        minHeight: "min(60vh, 640px)",
+        width: "auto",
+        maxWidth: "100%",
+        height: frameHeight,
+        maxHeight: frameHeight,
+        minHeight: 0,
+        aspectRatio,
         flex: 1,
         minWidth: 0,
+        alignSelf: "center",
         borderRadius: 8,
         overflow: "hidden",
         border: "1px solid #2a2f3a",

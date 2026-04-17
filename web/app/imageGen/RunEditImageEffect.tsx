@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type Dispatch, type SetStateAction } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { API_BASE } from "./config";
@@ -10,23 +10,30 @@ import {
   resolveReferenceForEditApi,
 } from "./client";
 import { IMAGEGEN_EDIT_JOB_KEY, UIBUILDER_PENDING_BREAKDOWN_EXPORTS_RELOAD_KEY } from "./editKeys";
+import { clearEditDraft } from "./imagegenPanelSnapshot";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
+
+type GenerateActivity = { message: string; isError: boolean } | null;
 
 type Props = {
   projectKey: string;
   defaultLocation: ImageLocation;
+  imageModel: string;
   setImages: React.Dispatch<React.SetStateAction<GeneratedImage[]>>;
   setStatus: (s: string | null) => void;
   setIsEditImageGenerating: (v: boolean) => void;
+  setGenerateActivity: Dispatch<SetStateAction<GenerateActivity>>;
   setActiveTab: (tab: ImageTab) => void;
 };
 
 export function RunEditImageEffect({
   projectKey,
   defaultLocation,
+  imageModel,
   setImages,
   setStatus,
   setIsEditImageGenerating,
+  setGenerateActivity,
   setActiveTab,
 }: Props) {
   const searchParams = useSearchParams();
@@ -41,9 +48,23 @@ export function RunEditImageEffect({
     sessionStorage.removeItem(IMAGEGEN_EDIT_JOB_KEY);
     router.replace("/imageGen");
 
-    let job: { changes: string; image: GeneratedImage; returnTo?: string };
+    let job: {
+      changes: string;
+      image: GeneratedImage;
+      returnTo?: string;
+      width?: number;
+      height?: number;
+      model?: string;
+    };
     try {
-      job = JSON.parse(raw) as { changes: string; image: GeneratedImage; returnTo?: string };
+      job = JSON.parse(raw) as {
+        changes: string;
+        image: GeneratedImage;
+        returnTo?: string;
+        width?: number;
+        height?: number;
+        model?: string;
+      };
     } catch {
       setStatus("Invalid edit job.");
       return;
@@ -60,15 +81,26 @@ export function RunEditImageEffect({
       return;
     }
 
+    const editW =
+      typeof job.width === "number" && Number.isFinite(job.width) && job.width > 0 ? Math.round(job.width) : 1024;
+    const editH =
+      typeof job.height === "number" && Number.isFinite(job.height) && job.height > 0 ? Math.round(job.height) : 1024;
+    const editModel = job.model?.trim() || imageModel;
+
     setIsEditImageGenerating(true);
+    setGenerateActivity({
+      message: `Editing image (${editModel}) at ${editW}×${editH} — this may take a while…`,
+      isError: false,
+    });
     void (async () => {
       try {
         const results = await editImageNanobanana({
           changes: job.changes,
           reference,
           project_key: projectKey || undefined,
-          width: 1024,
-          height: 1024,
+          width: editW,
+          height: editH,
+          model: editModel,
         });
         const now = new Date().toISOString();
         const promptLabel = `Edit: ${job.changes}\n\n(From: ${job.image.prompt.slice(0, 200)}${
@@ -100,6 +132,11 @@ export function RunEditImageEffect({
           };
         });
         setImages((prev) => [...newItems, ...prev]);
+        clearEditDraft(job.image.id);
+        setGenerateActivity({
+          message: "Finished — edited image added to results.",
+          isError: false,
+        });
         setStatus("Image edited.");
         const safeReturn =
           returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "";
@@ -121,7 +158,12 @@ export function RunEditImageEffect({
           setActiveTab(job.image.tab === "characters" ? "characters" : "image");
         }
       } catch (err) {
-        setStatus(`Edit failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        const detail = err instanceof Error ? err.message : "Unknown error";
+        setGenerateActivity({
+          message: detail,
+          isError: true,
+        });
+        setStatus(`Edit failed: ${detail}`);
       } finally {
         setIsEditImageGenerating(false);
       }
@@ -130,9 +172,11 @@ export function RunEditImageEffect({
     searchParams,
     projectKey,
     defaultLocation,
+    imageModel,
     setImages,
     setStatus,
     setIsEditImageGenerating,
+    setGenerateActivity,
     router,
     setActiveTab,
   ]);

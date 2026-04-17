@@ -19,6 +19,7 @@ import {
   uploadImageToCloud,
 } from "./client";
 import { IMAGEGEN_EDIT_CONTEXT_KEY, IMAGEGEN_EDIT_RETURN_KEY } from "./editKeys";
+import { capturePanelSnapshot, getPanelSnapshot } from "./imagegenPanelSnapshot";
 import { RunEditImageEffect } from "./RunEditImageEffect";
 import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
@@ -187,16 +188,22 @@ function ImageGenPageInner() {
   const [bgAlphaMatting, setBgAlphaMatting] = useState(BG_DEFAULTS.alphaMatting);
   const [bgFgThreshold, setBgFgThreshold] = useState(BG_DEFAULTS.fgThreshold);
   const [bgBgThreshold, setBgBgThreshold] = useState(BG_DEFAULTS.bgThreshold);
-  const [sizePreset, setSizePreset] = useState<"square" | "portrait" | "landscape">("square");
-  const [qualityPreset, setQualityPreset] = useState<"high" | "medium" | "low">("medium");
-  const [imageModel, setImageModel] = useState(IMAGEGEN_DEFAULT_IMAGE_MODEL);
-  const [openAiQuality, setOpenAiQuality] = useState("");
-  const [openAiStyle, setOpenAiStyle] = useState("");
-  const [openAiTransparent, setOpenAiTransparent] = useState(false);
-  const [imageDefaults, setImageDefaults] = useState({
-    num_images: 2,
-    quality: "medium" as "high" | "medium" | "low",
+  const [sizePreset, setSizePreset] = useState<"square" | "portrait" | "landscape">(() => {
+    const s = getPanelSnapshot();
+    return s?.sizePreset ?? "square";
   });
+  const [qualityPreset, setQualityPreset] = useState<"high" | "medium" | "low">(() => {
+    const s = getPanelSnapshot();
+    return s?.qualityPreset ?? "medium";
+  });
+  const [imageModel, setImageModel] = useState(() => getPanelSnapshot()?.imageModel ?? IMAGEGEN_DEFAULT_IMAGE_MODEL);
+  const [openAiQuality, setOpenAiQuality] = useState(() => getPanelSnapshot()?.openAiQuality ?? "");
+  const [openAiStyle, setOpenAiStyle] = useState(() => getPanelSnapshot()?.openAiStyle ?? "");
+  const [openAiTransparent, setOpenAiTransparent] = useState(() => getPanelSnapshot()?.openAiTransparent ?? false);
+  const [imageDefaults, setImageDefaults] = useState(() => ({
+    num_images: 2,
+    quality: (getPanelSnapshot()?.imageDefaultsQuality ?? "medium") as "high" | "medium" | "low",
+  }));
   /** Image tab: generation status / errors (matches UI Builder Breakdown Activity). */
   const [generateActivity, setGenerateActivity] = useState<ImageGenGenerateActivity>(null);
 
@@ -277,6 +284,26 @@ function ImageGenPageInner() {
       });
     return () => { cancelled = true; };
   }, [projectKey, isPrivate]);
+
+  useEffect(() => {
+    capturePanelSnapshot({
+      sizePreset,
+      qualityPreset,
+      imageDefaultsQuality: imageDefaults.quality,
+      imageModel,
+      openAiQuality,
+      openAiStyle,
+      openAiTransparent,
+    });
+  }, [
+    sizePreset,
+    qualityPreset,
+    imageDefaults.quality,
+    imageModel,
+    openAiQuality,
+    openAiStyle,
+    openAiTransparent,
+  ]);
 
   const persistImages = useCallback(
     async (list: GeneratedImage[]) => {
@@ -665,6 +692,15 @@ function ImageGenPageInner() {
         return;
       }
       try {
+        capturePanelSnapshot({
+          sizePreset,
+          qualityPreset,
+          imageDefaultsQuality: imageDefaults.quality,
+          imageModel,
+          openAiQuality,
+          openAiStyle,
+          openAiTransparent,
+        });
         sessionStorage.removeItem(IMAGEGEN_EDIT_RETURN_KEY);
         sessionStorage.setItem(IMAGEGEN_EDIT_CONTEXT_KEY, JSON.stringify(img));
       } catch {
@@ -673,25 +709,19 @@ function ImageGenPageInner() {
       }
       router.push("/imageGen/edit");
     },
-    [router],
+    [
+      router,
+      sizePreset,
+      qualityPreset,
+      imageDefaults.quality,
+      imageModel,
+      openAiQuality,
+      openAiStyle,
+      openAiTransparent,
+    ],
   );
 
   const visibleImages = images.filter((img) => img.tab === (activeTab === "styles" ? "image" : activeTab));
-
-  const isImageCreationBusy =
-    isGeneratingCharacter ||
-    isEditImageGenerating ||
-    isGeneratingPrompt ||
-    isImporting;
-  const imageCreationOverlayText = isEditImageGenerating
-    ? "Editing image (Nano Banana)…"
-    : isGeneratingCharacter
-      ? "Generating character image…"
-      : isImporting
-        ? "Importing image…"
-        : isGeneratingPrompt
-          ? "Generating prompt…"
-          : "";
 
   return (
     <main>
@@ -708,25 +738,15 @@ function ImageGenPageInner() {
         <RunEditImageEffect
           projectKey={projectKey}
           defaultLocation={defaultLocation}
+          imageModel={imageModel}
           setImages={setImages}
           setStatus={setStatus}
           setIsEditImageGenerating={setIsEditImageGenerating}
+          setGenerateActivity={setGenerateActivity}
           setActiveTab={setActiveTab}
         />
       </Suspense>
-      <div
-        className="imagegen-shell"
-        style={{
-          position: "relative",
-          ...(isImageCreationBusy || isGenerating ? { minHeight: "min(70vh, 900px)" } : {}),
-        }}
-      >
-        {isImageCreationBusy && (
-          <div className="generate-overlay" aria-live="polite" aria-busy="true">
-            <div className="generate-spinner" />
-            <div className="generate-overlay-text">{imageCreationOverlayText}</div>
-          </div>
-        )}
+      <div className="imagegen-shell" style={{ position: "relative" }}>
         <div className="imagegen-left">
           <div className="imagegen-panel">
             <h2 className="imagegen-panel-title">Image Generation</h2>
@@ -994,8 +1014,14 @@ function ImageGenPageInner() {
             flexDirection: "column",
           }}
         >
-          {(activeTab === "image" || isGenerating) && (
-            <ImageGenGenerateActivityBox activity={generateActivity} working={isGenerating} />
+          {(activeTab === "image" ||
+            activeTab === "characters" ||
+            isGenerating ||
+            isEditImageGenerating) && (
+            <ImageGenGenerateActivityBox
+              activity={generateActivity}
+              working={isGenerating || isEditImageGenerating}
+            />
           )}
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <ResultsPanel

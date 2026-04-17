@@ -13,6 +13,10 @@ EMBEDDING_BATCH_SIZE = 50
 
 # Image generation limits
 IMAGE_MAX_PROMPT_LEN = 1000
+
+# UI Builder wireframe → polish: full prompt includes legend, layout fidelity, style bank, user extra text,
+# and style-ref rules. The default IMAGE_MAX_PROMPT_LEN would truncate before user instructions reach the model.
+UI_CANVAS_POLISH_MAX_PROMPT_LEN = 12000
 IMAGE_MAX_IMAGES = 1
 ALLOWED_IMAGE_DIMENSIONS = {
     672,

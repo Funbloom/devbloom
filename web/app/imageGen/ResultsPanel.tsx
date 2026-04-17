@@ -106,7 +106,11 @@ export function ResultsPanel({
               }
             >
               <div
-                className="imagegen-card-image-wrap"
+                className={
+                  sketchSelectable
+                    ? "imagegen-card-image-wrap imagegen-card-image-wrap-sketch"
+                    : "imagegen-card-image-wrap"
+                }
                 {...(sketchSelectable
                   ? {
                       role: "button" as const,
@@ -132,7 +136,16 @@ export function ResultsPanel({
                     }
                   : {})}
               >
-                <img src={img.url} alt={img.prompt} className="imagegen-card-image" draggable={false} />
+                <img
+                  src={img.url}
+                  alt={img.prompt}
+                  className={
+                    sketchSelectable
+                      ? "imagegen-card-image imagegen-card-image-sketch"
+                      : "imagegen-card-image"
+                  }
+                  draggable={false}
+                />
               </div>
               <div className="imagegen-card-meta">
                 {showSketchCheckboxes && img.fromSketch && (

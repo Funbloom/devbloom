@@ -1009,10 +1009,14 @@ def generate_image(
     project_key: Optional[str] = None,
     reference_image_filenames: Optional[Iterable[str]] = None,  # filenames in project Images/ or https URLs
     images_output_dir: Optional[Path] = None,
+    *,
+    max_prompt_chars: Optional[int] = None,
 ) -> dict:
     if not prompt or len(prompt.strip()) == 0:
         raise ValueError("Prompt is required.")
-    prompt = _shorten_prompt(prompt, MAX_PROMPT_LEN)
+    eff_max = max_prompt_chars if max_prompt_chars is not None else MAX_PROMPT_LEN
+    eff_max = max(256, min(int(eff_max), 32000))
+    prompt = _shorten_prompt(prompt, eff_max)
 
     if model not in IMAGE_MODEL_REGISTRY:
         raise ValueError(f"Unsupported image model: {model}")

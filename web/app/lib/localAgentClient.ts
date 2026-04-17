@@ -234,6 +234,10 @@ export const localAgent = {
       y_min: number;
       x_max: number;
       y_max: number;
+      /** Full-image grayscale PNG (base64) — white = segment; used for colored mask overlay in Breakdown. */
+      mask_png_base64?: string;
+      /** mask area / image area (SAM `area`); used for panoptic-style draw order. */
+      mask_area_fraction?: number;
     }>;
     image_width: number;
     image_height: number;

@@ -3,12 +3,19 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { IMAGEGEN_DEFAULT_IMAGE_MODEL } from "../../lib/imageModels";
 import { normalizeImageUrl } from "../client";
 import {
   IMAGEGEN_EDIT_CONTEXT_KEY,
   IMAGEGEN_EDIT_JOB_KEY,
   IMAGEGEN_EDIT_RETURN_KEY,
 } from "../editKeys";
+import {
+  dimensionsFromSnapshot,
+  getEditDraft,
+  getPanelSnapshot,
+  setEditDraft,
+} from "../imagegenPanelSnapshot";
 import type { GeneratedImage } from "../types";
 
 export default function ImageGenEditPage() {
@@ -30,6 +37,10 @@ export default function ImageGenEditPage() {
         return;
       }
       setSource(parsed);
+      const draft = getEditDraft(parsed.id);
+      if (draft !== undefined) {
+        setChanges(draft);
+      }
     } catch {
       setError("Could not load image context.");
     }
@@ -38,6 +49,9 @@ export default function ImageGenEditPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!source || !changes.trim()) return;
+    const snap = getPanelSnapshot();
+    const dims = snap ? dimensionsFromSnapshot(snap) : { width: 1024, height: 1024 };
+    const model = snap?.imageModel?.trim() || IMAGEGEN_DEFAULT_IMAGE_MODEL;
     sessionStorage.removeItem(IMAGEGEN_EDIT_CONTEXT_KEY);
     const returnTo = sessionStorage.getItem(IMAGEGEN_EDIT_RETURN_KEY);
     sessionStorage.removeItem(IMAGEGEN_EDIT_RETURN_KEY);
@@ -46,6 +60,9 @@ export default function ImageGenEditPage() {
       JSON.stringify({
         changes: changes.trim(),
         image: source,
+        width: dims.width,
+        height: dims.height,
+        model,
         ...(returnTo?.trim() ? { returnTo: returnTo.trim() } : {}),
       }),
     );
@@ -53,6 +70,12 @@ export default function ImageGenEditPage() {
     qs.set("runEdit", "1");
     const rt = returnTo?.trim();
     if (rt) qs.set("returnTo", rt);
+    const safeReturnTo = rt && rt.startsWith("/") && !rt.startsWith("//") ? rt : "";
+    if (safeReturnTo.startsWith("/uiBuilder")) {
+      const sep = safeReturnTo.includes("?") ? "&" : "?";
+      router.push(`${safeReturnTo}${sep}${qs.toString()}`);
+      return;
+    }
     router.push(`/imageGen?${qs.toString()}`);
   };
 
@@ -186,7 +209,13 @@ export default function ImageGenEditPage() {
                 id="edit-changes"
                 className="imagegen-textarea"
                 value={changes}
-                onChange={(e) => setChanges(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setChanges(v);
+                  if (source?.id) {
+                    setEditDraft(source.id, v);
+                  }
+                }}
                 rows={3}
                 placeholder="Describe what to change (e.g. add a red hat, make the background darker)"
                 style={{
@@ -214,7 +243,7 @@ export default function ImageGenEditPage() {
                 alignSelf: "center",
               }}
             >
-              Nano Banana (Gemini) uses this image as reference.
+              Uses the Image Gen panel settings (size, quality, model) from when you opened Edit — in memory until you refresh the app.
             </p>
           </div>
         )}

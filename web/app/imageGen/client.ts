@@ -68,6 +68,8 @@ export async function editImageNanobanana(params: {
   project_key?: string;
   width?: number;
   height?: number;
+  /** Same model ids as Image Gen left tab / generate_image. */
+  model?: string;
 }): Promise<BackendImageResult[]> {
   const body: Record<string, unknown> = {
     changes: params.changes.trim(),
@@ -76,6 +78,7 @@ export async function editImageNanobanana(params: {
   if (params.project_key?.trim()) body.project_key = params.project_key.trim();
   if (typeof params.width === "number") body.width = params.width;
   if (typeof params.height === "number") body.height = params.height;
+  if (params.model?.trim()) body.model = params.model.trim();
   const response = await fetchApi("/tools/edit_image_nanobanana", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -196,6 +199,10 @@ export type UiBreakdownElement = {
   y_min: number;
   x_max: number;
   y_max: number;
+  /** SAM mask as PNG (base64), from local agent — preview overlay and Process export alpha (non-rectangular crops). Not sent to detect API. */
+  maskPngBase64?: string;
+  /** Fraction of image pixels in this mask (from local agent SAM `area` / image pixels). Used for overlay draw order. */
+  maskAreaFraction?: number;
 };
 
 /** SAM Automatic Mask Generator params (optional overrides; server merges with defaults). */
@@ -204,12 +211,17 @@ export type UiBreakdownSamParams = {
   points_per_batch?: number;
   pred_iou_thresh?: number;
   stability_score_thresh?: number;
+  stability_score_offset?: number;
   crop_n_layers?: number;
   crop_nms_thresh?: number;
   crop_overlap_ratio?: number;
   crop_n_points_downscale_factor?: number;
   min_mask_region_area?: number;
   box_nms_thresh?: number;
+  /** Local agent: morphological open iterations (0–3) on each mask — removes speckle; needs OpenCV. */
+  mask_morph_open?: number;
+  /** Local agent: morphological close iterations (0–3) — fills pinholes; needs OpenCV. */
+  mask_morph_close?: number;
 };
 
 /** SAM geometry comes from the local agent (`POST /ui_breakdown/sam`); the API only labels regions. */
@@ -312,6 +324,8 @@ export async function processUiBreakdown(options: {
   regenModel?: string;
   /** Default true: background plate uses GPT Image `background=transparent` (not Remove text). */
   transparentBackground?: boolean;
+  /** If set, only this region’s widget PNG is written; background.png is not generated. */
+  onlyElementId?: string | null;
 }): Promise<{ folder: string; files: UiBreakdownProcessFile[] }> {
   const body: Record<string, unknown> = {
     project_key: options.projectKey.trim(),
@@ -325,6 +339,7 @@ export async function processUiBreakdown(options: {
   if (typeof options.width === "number") body.width = options.width;
   if (typeof options.height === "number") body.height = options.height;
   if (options.regenModel) body.regen_model = options.regenModel;
+  if (options.onlyElementId?.trim()) body.only_element_id = options.onlyElementId.trim();
   const response = await fetchApi("/tools/ui_breakdown_process", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
