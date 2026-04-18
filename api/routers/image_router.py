@@ -114,7 +114,7 @@ class GenerateImageBytesRequest(BaseModel):
 
 
 class EditImageNanobananaRequest(BaseModel):
-    """Edit with a reference image (Gemini / OpenAI per model registry; refs require Gemini path)."""
+    """Edit with a reference image using the selected provider from the image model registry."""
 
     changes: str = Field(min_length=1, max_length=4000)
     reference: str = Field(
@@ -330,7 +330,7 @@ def edit_image_nanobanana_route(
     body: EditImageNanobananaRequest,
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Apply text edits to an image using Gemini image (Nano Banana) with the given image as reference."""
+    """Apply text edits to an image with the given image as reference."""
     check_can_generate_images(user.get("id") or "", user.get("is_admin") or False, count=1)
     changes = (body.changes or "").strip()
     ref = (body.reference or "").strip()
@@ -346,10 +346,6 @@ def edit_image_nanobanana_route(
             model_key = resolve_image_model("imagegen", (body.model or "").strip() or "gpt-image-1.5")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        # Reference conditioning uses Gemini in this codebase; match /tools/generate_image behavior.
-        reg = IMAGE_MODEL_REGISTRY.get(model_key, {})
-        if reg.get("provider") != "gemini":
-            model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
         out_dir = None
         r = ref.strip()
         if not (r.startswith("http://") or r.startswith("https://")):

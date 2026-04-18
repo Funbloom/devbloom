@@ -72,7 +72,7 @@ export async function editImageNanobanana(params: {
   /** Same model ids as Image Gen left tab / generate_image. */
   model?: string;
 }): Promise<BackendImageResult[]> {
-  confirmGeminiImageIfNeeded({ forceGemini: true });
+  confirmGeminiImageIfNeeded({ modelId: params.model });
   const body: Record<string, unknown> = {
     changes: params.changes.trim(),
     reference: params.reference.trim(),
