@@ -295,7 +295,7 @@ export async function stripTextForBreakdown(options: {
   height?: number;
   model?: string;
 }): Promise<BackendImageResult> {
-  confirmGeminiImageIfNeeded({ forceGemini: true });
+  confirmGeminiImageIfNeeded({ modelId: options.model });
   const body: Record<string, unknown> = {
     project_key: options.projectKey.trim(),
     source_filename: options.sourceFilename.trim(),
@@ -340,7 +340,7 @@ export async function processUiBreakdown(options: {
   onlyElementId?: string | null;
 }): Promise<{ folder: string; files: UiBreakdownProcessFile[] }> {
   if (!options.onlyElementId?.trim()) {
-    confirmGeminiImageIfNeeded({ forceGemini: true });
+    confirmGeminiImageIfNeeded({ modelId: options.regenModel });
   }
   const body: Record<string, unknown> = {
     project_key: options.projectKey.trim(),

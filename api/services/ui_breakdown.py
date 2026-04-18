@@ -15,7 +15,7 @@ from typing import Any
 import requests
 from PIL import Image, ImageChops, ImageOps
 
-from core.code_settings import IMAGE_MODEL_REGISTRY, resolve_image_model
+from core.code_settings import resolve_image_model
 from services.image_tool import (
     ALLOWED_FILENAME_RE,
     build_image_filename,
@@ -349,9 +349,7 @@ def strip_text_ui_image(
         base_prompt = f"{base_prompt}\n\nAdditional instructions:\n{prompt_suffix.strip()}"
 
     model_key = resolve_image_model("imagegen", model)
-    reg = IMAGE_MODEL_REGISTRY.get(model_key, {})
-    if reg.get("provider") != "gemini":
-        model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
+    # Respect selected model: GPT Image uses images.edit with the source as reference (see _generate_image_openai).
 
     ui_dir = get_ui_canvas_images_dir(project_key)
 
@@ -498,12 +496,8 @@ def process_ui_breakdown(
     if background_prompt_suffix.strip():
         bg_prompt = f"{bg_prompt}\n\nAdditional instructions:\n{background_prompt_suffix.strip()}"
 
-    # Always Gemini + source filename as reference. OpenAI image generation has no image input; using it
-    # for transparent PNG produced unrelated gray plates. Alpha quality may vary vs GPT Image, but matches the UI.
+    # Respect regen_model: GPT Image uses images.edit with the source as reference (see _generate_image_openai).
     model_key = resolve_image_model("imagegen", regen_model)
-    reg = IMAGE_MODEL_REGISTRY.get(model_key, {})
-    if reg.get("provider") != "gemini":
-        model_key = resolve_image_model("imagegen", "gemini-2.5-flash-image")
     ref_images: list[str] | None = [safe]
     if transparent_background:
         bg_prompt = (
