@@ -6,6 +6,8 @@ def test_edit_image_nanobanana_uses_default_gpt_model(monkeypatch):
 
     monkeypatch.setattr(image_router, "check_can_generate_images", lambda *args, **kwargs: None)
     monkeypatch.setattr(image_router, "increment_usage", lambda *args, **kwargs: None)
+    # Avoid resolve_project_path / Supabase when resolving output dir for a bare filename.
+    monkeypatch.setattr(image_router, "find_image_path", lambda *args, **kwargs: None)
 
     def fake_generate_image(**kwargs):
         called.update(kwargs)
@@ -32,6 +34,7 @@ def test_edit_image_nanobanana_preserves_explicit_gpt_model(monkeypatch):
 
     monkeypatch.setattr(image_router, "check_can_generate_images", lambda *args, **kwargs: None)
     monkeypatch.setattr(image_router, "increment_usage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(image_router, "find_image_path", lambda *args, **kwargs: None)
 
     def fake_generate_image(**kwargs):
         called.update(kwargs)
