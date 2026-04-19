@@ -12,11 +12,6 @@ from typing import Iterable, Optional
 
 import requests
 from openai import OpenAI
-try:
-    from rembg import new_session, remove as rembg_remove  # type: ignore
-except Exception:
-    rembg_remove = None
-    new_session = None
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from services.rag import resolve_project_path
@@ -35,6 +30,14 @@ ALLOWED_FORMATS = {"png", "jpg", "jpeg", "webp"}
 ALLOWED_DIMENSIONS = ALLOWED_IMAGE_DIMENSIONS
 MAX_PROMPT_LEN = IMAGE_MAX_PROMPT_LEN
 MAX_IMAGES = IMAGE_MAX_IMAGES
+
+
+def _load_rembg():
+    try:
+        from rembg import new_session, remove as rembg_remove  # type: ignore
+    except Exception:
+        return None, None
+    return rembg_remove, new_session
 
 
 def _shorten_prompt(prompt: str, max_len: int = MAX_PROMPT_LEN) -> str:
@@ -1017,6 +1020,7 @@ def generate_image(
     eff_max = max_prompt_chars if max_prompt_chars is not None else MAX_PROMPT_LEN
     eff_max = max(256, min(int(eff_max), 32000))
     prompt = _shorten_prompt(prompt, eff_max)
+    reference_sources = list(reference_image_filenames or [])
 
     if model not in IMAGE_MODEL_REGISTRY:
         raise ValueError(f"Unsupported image model: {model}")
@@ -1037,12 +1041,28 @@ def generate_image(
             height=safe_height,
             quantity=quantity,
             project_key=project_key,
-            reference_image_filenames=reference_image_filenames,
+            reference_image_filenames=reference_sources,
             images_output_dir=images_output_dir,
             transparent_background=transparent_background,
         )
 
     if provider == "leonardo":
+        if reference_sources:
+            gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            if not gemini_key:
+                raise ValueError("Gemini API key is missing. Set GEMINI_API_KEY.")
+            safe_width = max(144, int(width))
+            safe_height = max(144, int(height))
+            return _generate_image_gemini(
+                prompt=prompt,
+                width=safe_width,
+                height=safe_height,
+                quantity=quantity,
+                project_key=project_key,
+                reference_image_filenames=reference_sources,
+                images_output_dir=images_output_dir,
+                transparent_background=transparent_background,
+            )
         return _generate_image_leonardo(
             prompt=prompt,
             width=width,
@@ -1068,7 +1088,7 @@ def generate_image(
             style=style,
             transparent_background=transparent_background,
             images_output_dir=images_output_dir,
-            reference_image_filenames=reference_image_filenames,
+            reference_image_filenames=reference_sources,
         )
 
     raise ValueError(f"Unsupported image provider: {provider}")
@@ -1272,6 +1292,7 @@ def remove_background(
     output_name = sanitize_filename(output_name, "png")
 
     if technique in {"rembg", "open", "opensource"}:
+        rembg_remove, new_session = _load_rembg()
         if rembg_remove is None:
             raise ValueError("rembg is not installed. Install it or switch BKGROMOVALTECH to ClipDrop.")
         input_bytes = input_path.read_bytes()
