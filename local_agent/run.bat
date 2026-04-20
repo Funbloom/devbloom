@@ -8,7 +8,7 @@ set "REPO_ROOT=%AGENT_DIR%.."
 cd /d "%REPO_ROOT%"
 
 set "VENV_PY=%AGENT_DIR%.venv\Scripts\python.exe"
-set "VENV_PIP=%AGENT_DIR%.venv\Scripts\pip.exe"
+:: Use `python -m pip` instead of `pip.exe`: after moving the repo, pip.exe launchers still point at the old path.
 
 if exist "%VENV_PY%" goto :deps
 
@@ -25,7 +25,7 @@ if errorlevel 1 (
 
 :deps
 echo [local_agent] Installing dependencies...
-"%VENV_PIP%" install -q -r "%AGENT_DIR%requirements.txt"
+"%VENV_PY%" -m pip install -q -r "%AGENT_DIR%requirements.txt"
 if errorlevel 1 (
   echo ERROR: pip install failed.
   exit /b 1
