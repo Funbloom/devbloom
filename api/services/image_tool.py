@@ -21,6 +21,7 @@ from core.code_settings import (
     IMAGE_MAX_IMAGES,
     IMAGE_MAX_PROMPT_LEN,
     IMAGE_MODEL_REGISTRY,
+    resolve_image_model,
 )
 
 MAX_FILENAME_LEN = 120
@@ -1214,6 +1215,26 @@ def convert_image(
     }
 
 
+def _requested_model_from_tool_args(args: dict) -> str:
+    """Map chat tool `model` to a registry id. LLMs often send placeholders like \"default\"."""
+    raw = args.get("model")
+    if raw is None:
+        return resolve_image_model("imagegen", None)
+    s = str(raw).strip()
+    if not s:
+        return resolve_image_model("imagegen", None)
+    lowered = s.lower()
+    if lowered in (
+        "default",
+        "server",
+        "server default",
+        "auto",
+        "none",
+    ):
+        return resolve_image_model("imagegen", None)
+    return resolve_image_model("imagegen", s)
+
+
 def run_generate_image_tool(args: dict) -> dict:
     defaults = load_image_defaults()
     prompt = str(args.get("prompt", "")).strip()
@@ -1224,7 +1245,7 @@ def run_generate_image_tool(args: dict) -> dict:
         height=int(args.get("height", defaults.get("height", 1024))),
         num_images=int(args.get("num_images", defaults.get("num_images", 1))),
         seed=args.get("seed"),
-        model=args.get("model", "gpt-image-1.5"),
+        model=_requested_model_from_tool_args(args),
         project_key=str(args.get("project_key", "")).strip() or None,
     )
 
