@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import io
+import importlib.util
 import os
 import re
 from pathlib import Path
@@ -44,6 +45,25 @@ _SAM_AMG_KEYS = frozenset(
         "output_mode",
     }
 )
+
+
+def sam_installation_status() -> dict[str, Any]:
+    """Lightweight readiness check for SAM dependencies and checkpoint config."""
+    checkpoint = (os.getenv("SAM_CHECKPOINT_PATH") or "").strip()
+    model_type = (os.getenv("SAM_MODEL_TYPE") or "vit_b").strip().lower()
+    has_checkpoint_env = bool(checkpoint)
+    checkpoint_exists = bool(checkpoint and os.path.isfile(checkpoint))
+    has_torch = importlib.util.find_spec("torch") is not None
+    has_segment_anything = importlib.util.find_spec("segment_anything") is not None
+    installed = has_checkpoint_env and checkpoint_exists and has_torch and has_segment_anything
+    return {
+        "installed": installed,
+        "sam_model_type": model_type,
+        "sam_checkpoint_path_set": has_checkpoint_env,
+        "sam_checkpoint_exists": checkpoint_exists,
+        "torch_installed": has_torch,
+        "segment_anything_installed": has_segment_anything,
+    }
 
 
 def _cache_key() -> str:

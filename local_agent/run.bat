@@ -34,10 +34,53 @@ if errorlevel 1 (
 :: CORS: deployed UI at https://dev.funbloomstudio.com can call this agent from your browser. Override or clear: set LOCAL_AGENT_EXTRA_CORS_ORIGINS= before running.
 if not defined LOCAL_AGENT_EXTRA_CORS_ORIGINS set "LOCAL_AGENT_EXTRA_CORS_ORIGINS=https://dev.funbloomstudio.com"
 
+call :ensure_msvc_env
+
+set "VENV_ACTIVATE=%AGENT_DIR%.venv\Scripts\activate.bat"
+if exist "%VENV_ACTIVATE%" (
+  call "%VENV_ACTIVATE%"
+) else (
+  echo [local_agent] WARNING: activate.bat not found at "%VENV_ACTIVATE%".
+)
+
 echo [local_agent] http://127.0.0.1:8765  ^(Ctrl+C to stop^)
 echo [local_agent] LOCAL_AGENT_EXTRA_CORS_ORIGINS=%LOCAL_AGENT_EXTRA_CORS_ORIGINS%
 "%VENV_PY%" -m uvicorn local_agent.main:app --host 127.0.0.1 --port 8765
 exit /b %ERRORLEVEL%
+
+:ensure_msvc_env
+where cl >nul 2>&1
+if not errorlevel 1 (
+  echo [local_agent] MSVC compiler found on PATH.
+  exit /b 0
+)
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%VSWHERE%" (
+  echo [local_agent] MSVC compiler not found ^(cl.exe^). Install Visual Studio C++ Build Tools to compile texture extensions.
+  exit /b 0
+)
+set "VSINSTALL="
+for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
+if not defined VSINSTALL (
+  echo [local_agent] Visual Studio C++ tools not found. Install "Desktop development with C++".
+  exit /b 0
+)
+set "VCVARS=%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
+if not exist "%VCVARS%" (
+  echo [local_agent] vcvars64.bat not found at "%VCVARS%".
+  exit /b 0
+)
+echo [local_agent] Initializing MSVC build environment...
+call "%VCVARS%" >nul 2>&1
+set "DISTUTILS_USE_SDK=1"
+set "MSSdk=1"
+where cl >nul 2>&1
+if not errorlevel 1 (
+  echo [local_agent] MSVC compiler environment loaded.
+) else (
+  echo [local_agent] Failed to load MSVC compiler environment; texture extension builds may fail.
+)
+exit /b 0
 
 :find_python
 set "PY_RUN="

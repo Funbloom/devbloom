@@ -1,0 +1,575 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { API_BASE } from "../../lib/api";
+import { isLocalAgentContext, localAgent, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
+
+type StatusState = "checking" | "ok" | "missing" | "unknown";
+type ActionResultState = "success" | "error";
+type InstructionTopic =
+  | "local_agent"
+  | "api_server"
+  | "python"
+  | "pytorch"
+  | "cuda"
+  | "hf_home"
+  | "hunyuan"
+  | "hunyuan_texture"
+  | "sam";
+
+function StatusLine({
+  label,
+  state,
+  detail,
+  action,
+}: {
+  label: string;
+  state: StatusState;
+  detail: string;
+  action?: ReactNode;
+}) {
+  const color =
+    state === "ok" ? "#22c55e" : state === "missing" ? "#ef4444" : state === "checking" ? "#f59e0b" : "#94a3b8";
+  return (
+    <div
+      style={{
+        border: "1px solid #2a2f3a",
+        borderRadius: 10,
+        padding: "10px 12px",
+        display: "grid",
+        gap: 6,
+        background: "#0f1115",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span
+            aria-hidden
+            style={{ width: 10, height: 10, borderRadius: "50%", background: color, flexShrink: 0 }}
+          />
+          <strong style={{ fontSize: 14 }}>{label}</strong>
+        </div>
+        {action}
+      </div>
+      <p style={{ margin: 0, color: "var(--muted, #94a3b8)", fontSize: 13 }}>{detail}</p>
+    </div>
+  );
+}
+
+export default function AdminInstallationPage() {
+  const [localAgentState, setLocalAgentState] = useState<StatusState>("checking");
+  const [apiServerState, setApiServerState] = useState<StatusState>("checking");
+  const [samState, setSamState] = useState<StatusState>("checking");
+  const [samDetail, setSamDetail] = useState("Checking SAM installation...");
+  const [hunyuanState, setHunyuanState] = useState<StatusState>("checking");
+  const [hunyuanDetail, setHunyuanDetail] = useState("Checking Hunyuan3D-2 installation...");
+  const [pytorchState, setPytorchState] = useState<StatusState>("checking");
+  const [pythonState, setPythonState] = useState<StatusState>("checking");
+  const [pythonDetail, setPythonDetail] = useState("Checking Python version...");
+  const [cudaState, setCudaState] = useState<StatusState>("checking");
+  const [cudaDetail, setCudaDetail] = useState("Checking CUDA availability...");
+  const [hfHomeState, setHfHomeState] = useState<StatusState>("checking");
+  const [hfHomeDetail, setHfHomeDetail] = useState("Checking HF_HOME...");
+  const [textureExtState, setTextureExtState] = useState<StatusState>("checking");
+  const [textureExtDetail, setTextureExtDetail] = useState("Checking texture extensions...");
+  const [installingTextureExt, setInstallingTextureExt] = useState(false);
+  const [textureInstallResult, setTextureInstallResult] = useState<{
+    state: ActionResultState;
+    message: string;
+    at: string;
+  } | null>(null);
+  const [lastTextureInstallLog, setLastTextureInstallLog] = useState<string>("");
+  const [instructionTopic, setInstructionTopic] = useState<InstructionTopic | null>(null);
+
+  const instructionByTopic: Record<InstructionTopic, { title: string; body: string }> = {
+    local_agent: {
+      title: "Local Agent",
+      body:
+        "- Open a terminal at repo root.\n" +
+        "- Run: cd local_agent\n" +
+        "- Start: ./run.bat (Windows) or ./run.sh (macOS/Linux)\n" +
+        "- Keep this process running while using local file features.",
+    },
+    api_server: {
+      title: "API Server",
+      body:
+        "- Open a terminal in api folder.\n" +
+        "- Start API with your run command (run.bat / uvicorn).\n" +
+        "- Verify: http://localhost:8000/health returns OK.",
+    },
+    python: {
+      title: "Python 3.10.x",
+      body:
+        "- Install Python 3.10.x (any 3.10 patch).\n" +
+        "- Recreate local_agent/.venv with Python 3.10.\n" +
+        "- Restart local agent.",
+    },
+    pytorch: {
+      title: "PyTorch",
+      body:
+        "- Activate local_agent/.venv.\n" +
+        "- Install torch/vision/audio for your CUDA build.\n" +
+        "- Example: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124",
+    },
+    cuda: {
+      title: "CUDA",
+      body:
+        "- Install NVIDIA driver + CUDA toolkit compatible with PyTorch.\n" +
+        "- Minor CUDA mismatch can still work.\n" +
+        "- Verify in venv: torch.cuda.is_available() is true.",
+    },
+    hf_home: {
+      title: "HF_HOME",
+      body:
+        "- Set HF_HOME in local_agent/.env.\n" +
+        "- Example: D:/FunBloom/models/hf_cache\n" +
+        "- Ensure folder exists and is writable.",
+    },
+    hunyuan: {
+      title: "Hunyuan3D-2",
+      body:
+        "- Activate local_agent/.venv.\n" +
+        "- Install editable from clone: pip install -e <Hunyuan3D-2 path>\n" +
+        "- Verify import in the same venv.",
+    },
+    hunyuan_texture: {
+      title: "Hunyuan Texture Extensions",
+      body:
+        "- Option A: click Install Hunyuan texture.\n" +
+        "- Option B manual build in Hunyuan repo:\n" +
+        "  - hy3dgen/texgen/custom_rasterizer -> python setup.py install\n" +
+        "  - hy3dgen/texgen/differentiable_renderer -> python setup.py install\n" +
+        "- Use the same local_agent/.venv.",
+    },
+    sam: {
+      title: "SAM Model",
+      body:
+        "- Install segment_anything deps in local_agent/.venv.\n" +
+        "- Set SAM_CHECKPOINT_PATH in local_agent/.env.\n" +
+        "- Ensure checkpoint file exists at the exact path.",
+    },
+  };
+
+  const instructionAction = (topic: InstructionTopic) => (
+    <button type="button" onClick={() => setInstructionTopic(topic)}>
+      Installation Instructions
+    </button>
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      setLocalAgentState("checking");
+      setApiServerState("checking");
+      setSamState("checking");
+      setSamDetail("Checking SAM installation...");
+      setHunyuanState("checking");
+      setHunyuanDetail("Checking Hunyuan3D-2 installation...");
+      setPytorchState("checking");
+      setPythonState("checking");
+      setPythonDetail("Checking Python version...");
+      setCudaState("checking");
+      setCudaDetail("Checking CUDA availability...");
+      setHfHomeState("checking");
+      setHfHomeDetail("Checking HF_HOME...");
+      setTextureExtState("checking");
+      setTextureExtDetail("Checking texture extensions...");
+
+      const localContext = isLocalAgentContext();
+      if (!localContext) {
+        if (!cancelled) {
+          setLocalAgentState("unknown");
+          setSamState("unknown");
+          setSamDetail("Local Agent checks are disabled on this host.");
+          setHunyuanState("unknown");
+          setHunyuanDetail("Local Agent checks are disabled on this host.");
+          setPytorchState("unknown");
+          setPythonState("unknown");
+          setPythonDetail("Local Agent checks are disabled on this host.");
+          setCudaState("unknown");
+          setCudaDetail("Local Agent checks are disabled on this host.");
+          setHfHomeState("unknown");
+          setHfHomeDetail("Local Agent checks are disabled on this host.");
+          setTextureExtState("unknown");
+          setTextureExtDetail("Local Agent checks are disabled on this host.");
+        }
+      } else {
+        const localOk = await localAgent.health();
+        if (!cancelled) {
+          setLocalAgentState(localOk ? "ok" : "missing");
+        }
+        if (localOk) {
+          try {
+            const sam: LocalModelsInstallationStatus = await localAgent.installationStatus();
+            if (!cancelled) {
+              setHunyuanState(sam.hunyuan3d2_installed ? "ok" : "missing");
+              setHunyuanDetail(
+                sam.hunyuan3d2_installed
+                  ? "Installed (hy3dgen import available)."
+                  : "Not installed. Install Hunyuan3D-2 in local_agent/.venv.",
+              );
+              setPytorchState(sam.pytorch_installed ? "ok" : "missing");
+              setCudaState(sam.cuda_available ? "ok" : "missing");
+              setCudaDetail(
+                sam.cuda_available
+                  ? `Available${sam.gpu_name ? ` (${sam.gpu_name})` : ""}${sam.cuda_version ? `, CUDA ${sam.cuda_version}` : ""}.`
+                  : "Not available. Install CUDA-compatible PyTorch/GPU runtime.",
+              );
+              const hfOk = sam.hf_home_set && sam.hf_home_exists && sam.hf_home_writable;
+              setHfHomeState(hfOk ? "ok" : "missing");
+              const hfMissing: string[] = [];
+              if (!sam.hf_home_set) hfMissing.push("HF_HOME not set");
+              if (sam.hf_home_set && !sam.hf_home_exists) hfMissing.push("HF_HOME path not found");
+              if (sam.hf_home_exists && !sam.hf_home_writable) hfMissing.push("HF_HOME not writable");
+              setHfHomeDetail(hfMissing.length === 0 ? "Configured and writable." : `Missing: ${hfMissing.join(", ")}.`);
+              const textureOk = sam.custom_rasterizer_installed && sam.differentiable_renderer_installed;
+              setTextureExtState(textureOk ? "ok" : "missing");
+              const textureMissing: string[] = [];
+              if (!sam.custom_rasterizer_installed) textureMissing.push("custom_rasterizer");
+              if (!sam.differentiable_renderer_installed) textureMissing.push("differentiable_renderer");
+              setTextureExtDetail(
+                textureMissing.length === 0
+                  ? "Installed (needed for textured mesh generation)."
+                  : `Missing: ${textureMissing.join(", ")} (only required for texturing).`,
+              );
+              setPythonState(sam.python_3_10_installed ? "ok" : "missing");
+              setPythonDetail(
+                sam.python_3_10_installed
+                  ? `Installed (${sam.python_version}).`
+                  : `Missing required version (found ${sam.python_version}, need 3.10.x).`,
+              );
+              if (sam.installed) {
+                setSamState("ok");
+                setSamDetail("Installed and ready.");
+              } else {
+                setSamState("missing");
+                const missing: string[] = [];
+                if (!sam.torch_installed) missing.push("torch");
+                if (!sam.segment_anything_installed) missing.push("segment_anything");
+                if (!sam.sam_checkpoint_path_set) missing.push("SAM_CHECKPOINT_PATH");
+                if (sam.sam_checkpoint_path_set && !sam.sam_checkpoint_exists) missing.push("checkpoint file");
+                setSamDetail(
+                  missing.length > 0 ? `Missing: ${missing.join(", ")}.` : "SAM is not fully configured.",
+                );
+              }
+            }
+          } catch {
+            if (!cancelled) {
+              setSamState("unknown");
+              setSamDetail("Could not read SAM status from Local Agent.");
+              setHunyuanState("unknown");
+              setHunyuanDetail("Could not read Hunyuan3D-2 status from Local Agent.");
+              setPytorchState("unknown");
+              setPythonState("unknown");
+              setPythonDetail("Could not read Python status from Local Agent.");
+              setCudaState("unknown");
+              setCudaDetail("Could not read CUDA status from Local Agent.");
+              setHfHomeState("unknown");
+              setHfHomeDetail("Could not read HF_HOME status from Local Agent.");
+              setTextureExtState("unknown");
+              setTextureExtDetail("Could not read texture extension status from Local Agent.");
+            }
+          }
+        } else if (!cancelled) {
+          setSamState("unknown");
+          setSamDetail("Start Local Agent first, then SAM status can be checked.");
+          setHunyuanState("unknown");
+          setHunyuanDetail("Start Local Agent first, then Hunyuan3D-2 status can be checked.");
+          setPytorchState("unknown");
+          setPythonState("unknown");
+          setPythonDetail("Start Local Agent first, then Python version can be checked.");
+          setCudaState("unknown");
+          setCudaDetail("Start Local Agent first, then CUDA status can be checked.");
+          setHfHomeState("unknown");
+          setHfHomeDetail("Start Local Agent first, then HF_HOME status can be checked.");
+          setTextureExtState("unknown");
+          setTextureExtDetail("Start Local Agent first, then texture extension status can be checked.");
+        }
+      }
+
+      try {
+        const base = API_BASE.replace(/\/+$/, "");
+        const res = await fetch(`${base}/health`, { method: "GET", cache: "no-store" });
+        if (!cancelled) {
+          setApiServerState(res.ok ? "ok" : "missing");
+        }
+      } catch {
+        if (!cancelled) {
+          setApiServerState("missing");
+        }
+      }
+    };
+    void run();
+    const timer = window.setInterval(() => {
+      void run();
+    }, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  return (
+    <main>
+      <div className="imagegen-shell" style={{ minHeight: "calc(100vh - 84px)" }}>
+        <div className="imagegen-right" style={{ minWidth: 0, width: "100%" }}>
+          <section className="imagegen-panel" style={{ height: "100%", minHeight: "calc(100vh - 84px)" }}>
+            <h2 className="imagegen-panel-title">Installation</h2>
+            <div className="imagegen-panel-body" style={{ height: "100%", display: "grid", gap: 12, alignContent: "start" }}>
+              <section
+                style={{
+                  border: "1px solid #2a2f3a",
+                  borderRadius: 12,
+                  padding: "12px",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <h3 style={{ margin: 0, fontSize: 16 }}>Status</h3>
+                {textureInstallResult && (
+                  <div
+                    role="status"
+                    style={{
+                      border: `1px solid ${textureInstallResult.state === "success" ? "#14532d" : "#7f1d1d"}`,
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      background: textureInstallResult.state === "success" ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)",
+                      display: "grid",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <strong>{textureInstallResult.state === "success" ? "Install succeeded" : "Install failed"}</strong>
+                      <button type="button" onClick={() => setTextureInstallResult(null)}>
+                        Dismiss
+                      </button>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 13 }}>{textureInstallResult.message}</p>
+                    <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>{textureInstallResult.at}</p>
+                  </div>
+                )}
+                <StatusLine
+                  label="Local Agent"
+                  state={localAgentState}
+                  action={instructionAction("local_agent")}
+                  detail={
+                    localAgentState === "ok"
+                      ? "Running."
+                      : localAgentState === "checking"
+                        ? "Checking..."
+                        : localAgentState === "unknown"
+                          ? "Unavailable on this host."
+                          : "Not detected. Start local_agent/run.bat."
+                  }
+                />
+                <StatusLine
+                  label="API Server"
+                  state={apiServerState}
+                  action={instructionAction("api_server")}
+                  detail={
+                    apiServerState === "ok"
+                      ? `Running (${API_BASE.replace(/\/+$/, "")}).`
+                      : apiServerState === "checking"
+                        ? "Checking..."
+                        : "Not detected. Start api/run.bat."
+                  }
+                />
+                <StatusLine
+                  label="Python 3.10+ Installed"
+                  state={pythonState}
+                  action={instructionAction("python")}
+                  detail={pythonDetail}
+                />
+                <StatusLine
+                  label="PyTorch Installed"
+                  state={pytorchState}
+                  action={instructionAction("pytorch")}
+                  detail={
+                    pytorchState === "ok"
+                      ? "Installed."
+                      : pytorchState === "checking"
+                        ? "Checking..."
+                        : pytorchState === "unknown"
+                          ? "Unavailable."
+                          : "Not installed in local_agent/.venv."
+                  }
+                />
+                <StatusLine
+                  label="CUDA Available"
+                  state={cudaState}
+                  action={instructionAction("cuda")}
+                  detail={cudaDetail}
+                />
+                <StatusLine
+                  label="HF_HOME Configured"
+                  state={hfHomeState}
+                  action={instructionAction("hf_home")}
+                  detail={hfHomeDetail}
+                />
+                <StatusLine
+                  label="Hunyuan3D-2 Installed"
+                  state={hunyuanState}
+                  action={instructionAction("hunyuan")}
+                  detail={hunyuanDetail}
+                />
+                <StatusLine
+                  label="Hunyuan Texture Extensions"
+                  state={textureExtState}
+                  detail={textureExtDetail}
+                  action={
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {instructionAction("hunyuan_texture")}
+                      {textureExtState === "missing" && (
+                        <button
+                          type="button"
+                          disabled={installingTextureExt || localAgentState !== "ok"}
+                          onClick={() => {
+                            void (async () => {
+                              setInstallingTextureExt(true);
+                              setTextureExtDetail("Installing texture extensions...");
+                              setTextureInstallResult(null);
+                              try {
+                                const result = await localAgent.installHunyuanTextureExtensions();
+                                const combinedLog = [
+                                  result.logs?.custom_rasterizer || "",
+                                  result.logs?.differentiable_renderer || "",
+                                ]
+                                  .filter(Boolean)
+                                  .join("\n\n---\n\n");
+                                setLastTextureInstallLog(combinedLog);
+                                if (result.custom_rasterizer_installed && result.differentiable_renderer_installed) {
+                                  setTextureExtState("ok");
+                                  setTextureExtDetail("Installed (needed for textured mesh generation).");
+                                  setTextureInstallResult({
+                                    state: "success",
+                                    message: "Hunyuan texture extensions installed successfully.",
+                                    at: `Completed at ${new Date().toLocaleTimeString()}`,
+                                  });
+                                } else {
+                                  setTextureExtState("missing");
+                                  setTextureExtDetail(
+                                    "Install finished but one extension is still missing. Check Local Agent terminal output.",
+                                  );
+                                  setTextureInstallResult({
+                                    state: "error",
+                                    message: "Install ran but one extension is still missing.",
+                                    at: `Completed at ${new Date().toLocaleTimeString()}`,
+                                  });
+                                }
+                              } catch (e) {
+                                setTextureExtState("missing");
+                                const msg = e instanceof Error ? e.message : "Texture extension install failed.";
+                                setTextureExtDetail(msg);
+                                setTextureInstallResult({
+                                  state: "error",
+                                  message: msg,
+                                  at: `Failed at ${new Date().toLocaleTimeString()}`,
+                                });
+                              } finally {
+                                setInstallingTextureExt(false);
+                              }
+                            })();
+                          }}
+                          style={{ width: "fit-content" }}
+                        >
+                          {installingTextureExt ? "Installing..." : "Install Hunyuan texture"}
+                        </button>
+                      )}
+                    </div>
+                  }
+                />
+                {lastTextureInstallLog && (
+                  <details>
+                    <summary style={{ cursor: "pointer" }}>Last install log</summary>
+                    <pre
+                      style={{
+                        margin: "8px 0 0",
+                        padding: 10,
+                        borderRadius: 8,
+                        border: "1px solid #2a2f3a",
+                        background: "#0f1115",
+                        fontSize: 12,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        maxHeight: 260,
+                        overflow: "auto",
+                      }}
+                    >
+                      {lastTextureInstallLog}
+                    </pre>
+                  </details>
+                )}
+                <StatusLine
+                  label="SAM Model Installed"
+                  state={samState}
+                  action={instructionAction("sam")}
+                  detail={samDetail}
+                />
+              </section>
+              <section
+                style={{
+                  border: "1px solid #334155",
+                  borderRadius: 12,
+                  padding: "12px",
+                  background: "rgba(30,64,175,0.12)",
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                <strong style={{ fontSize: 15 }}>
+                  Instruction : installing &lt;
+                  {instructionTopic ? instructionByTopic[instructionTopic].title : "select an item"}
+                  &gt;
+                </strong>
+                <pre
+                  style={{
+                    margin: 0,
+                    fontSize: 13,
+                    color: "#dbeafe",
+                    whiteSpace: "pre-wrap",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {instructionTopic
+                    ? instructionByTopic[instructionTopic].body
+                    : "Click \"Installation Instructions\" on any status item to show manual setup steps here."}
+                </pre>
+                {instructionTopic === "python" && (
+                  <a
+                    href="https://www.python.org/downloads/"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: "#93c5fd", fontSize: 13 }}
+                  >
+                    Download Python 3.10 from python.org
+                  </a>
+                )}
+                {instructionTopic === "pytorch" && (
+                  <a
+                    href="https://pytorch.org/get-started/locally/"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: "#93c5fd", fontSize: 13 }}
+                  >
+                    Open PyTorch install selector
+                  </a>
+                )}
+                {instructionTopic === "cuda" && (
+                  <a
+                    href="https://developer.nvidia.com/cuda-12-4-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: "#93c5fd", fontSize: 13 }}
+                  >
+                    Download CUDA toolkit (NVIDIA archive)
+                  </a>
+                )}
+              </section>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  );
+}

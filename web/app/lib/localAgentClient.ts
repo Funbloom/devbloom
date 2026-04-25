@@ -60,6 +60,27 @@ export type NativePickResult =
   | { cancelled: true; path?: undefined }
   | { cancelled: false; path: string };
 
+export type LocalModelsInstallationStatus = {
+  installed: boolean;
+  sam_model_type: string;
+  sam_checkpoint_path_set: boolean;
+  sam_checkpoint_exists: boolean;
+  torch_installed: boolean;
+  segment_anything_installed: boolean;
+  pytorch_installed: boolean;
+  hunyuan3d2_installed: boolean;
+  custom_rasterizer_installed: boolean;
+  differentiable_renderer_installed: boolean;
+  hf_home_set: boolean;
+  hf_home_exists: boolean;
+  hf_home_writable: boolean;
+  cuda_available: boolean;
+  cuda_version: string;
+  gpu_name: string;
+  python_3_10_installed: boolean;
+  python_version: string;
+};
+
 function localAgentWrongServerHint(status: number): string {
   if (status !== 404) return "";
   return (
@@ -111,6 +132,9 @@ export const localAgent = {
     } catch {
       return false;
     }
+  },
+  installationStatus(): Promise<LocalModelsInstallationStatus> {
+    return requestLocalAgent("/installation_status", { method: "GET", body: undefined });
   },
   approveProjectRoot(projectRoot: string): Promise<{ ok: boolean; project_root: string }> {
     return requestLocalAgent("/projects/approve", {
@@ -209,6 +233,17 @@ export const localAgent = {
     return requestLocalAgent("/meshgen/generate", {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  },
+  installHunyuanTextureExtensions(): Promise<{
+    ok: boolean;
+    custom_rasterizer_installed: boolean;
+    differentiable_renderer_installed: boolean;
+    logs: { custom_rasterizer: string; differentiable_renderer: string };
+  }> {
+    return requestLocalAgent("/meshgen/install_texture_extensions", {
+      method: "POST",
+      body: "{}",
     });
   },
   /** Open a folder under an approved project in Explorer / Finder / xdg-open. */

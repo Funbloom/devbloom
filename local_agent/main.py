@@ -41,11 +41,11 @@ from local_agent.security import (
     resolve_under_root,
     standard_project_paths,
 )
+from local_agent.installation_routes import reload_runtime_env, router as installation_router
 from local_agent.json_patch import apply_json_patch
 from local_agent.fs_picker import pick_directory_native, pick_file_native
 
 logger = logging.getLogger(__name__)
-
 
 def _open_folder_in_os(path: Path) -> None:
     """Open a directory in the OS file manager (Windows Explorer, macOS Finder, Linux xdg-open)."""
@@ -93,6 +93,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(installation_router)
 
 
 @app.get("/health")
@@ -312,6 +313,7 @@ def read_binary_file(request: Request, body: FileBinaryReadRequest) -> Response:
 async def ui_breakdown_sam(request: Request, body: UiBreakdownSamRequest) -> dict[str, Any]:
     """Run Segment Anything in-process (same venv as this agent). Requires SAM checkpoint + torch."""
     ensure_localhost(request)
+    _reload_runtime_env()
     root = ensure_root_approved(body.project_root)
     try:
         from local_agent.ui_breakdown_sam import run_sam_segmentation_for_project_file

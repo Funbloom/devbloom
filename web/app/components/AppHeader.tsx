@@ -50,6 +50,7 @@ function initials(email: string): string {
 type PipelineInfo = { key: string; name: string; description?: string };
 
 type GameRegistryEntry = { key: string; name: string; project_keys: string[] };
+type ProjectItem = { project_key: string; display_name: string };
 
 function HeaderMenu({
   label,
@@ -77,6 +78,7 @@ export function AppHeader() {
   const [activeProjectKey, setActiveProjectKey] = useState("");
   const [activeProjectName, setActiveProjectName] = useState("");
   const [gamesRegistry, setGamesRegistry] = useState<GameRegistryEntry[]>([]);
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [pipelinesByGameKey, setPipelinesByGameKey] = useState<Record<string, PipelineInfo[]>>({});
   const [localAgentOk, setLocalAgentOk] = useState(false);
   /** This tab’s hostname may call the agent on 127.0.0.1 (localhost or NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS). */
@@ -92,27 +94,30 @@ export function AppHeader() {
       const stored = window.localStorage.getItem("activeProjectKey") || "";
       const storedName = window.localStorage.getItem("activeProjectName") || "";
       setActiveProjectKey(stored);
-      if (!stored) {
-        setActiveProjectName("");
-        return;
-      }
-      if (storedName) {
-        setActiveProjectName(storedName);
-        return;
-      }
       try {
         const response = await fetchApi("/projects");
         if (!response.ok) {
-          setActiveProjectName(stored);
+          setProjects([]);
+          setActiveProjectName(storedName || stored);
           return;
         }
-        const data = (await response.json()) as { project_key: string; display_name: string }[];
+        const data = (await response.json()) as ProjectItem[];
+        setProjects(Array.isArray(data) ? data : []);
+        if (!stored) {
+          setActiveProjectName("");
+          return;
+        }
+        if (storedName) {
+          setActiveProjectName(storedName);
+          return;
+        }
         const match = data.find((project) => project.project_key === stored);
         const name = match?.display_name || stored;
         setActiveProjectName(name);
         window.localStorage.setItem("activeProjectName", name);
       } catch {
-        setActiveProjectName(stored);
+        setProjects([]);
+        setActiveProjectName(storedName || stored);
       }
     };
     void refreshProject();
@@ -126,6 +131,16 @@ export function AppHeader() {
       window.removeEventListener("storage", handleProjectChange);
     };
   }, []);
+
+  const selectProject = (project: ProjectItem) => {
+    const key = project.project_key.trim();
+    if (!key) {
+      return;
+    }
+    window.localStorage.setItem("activeProjectKey", key);
+    window.localStorage.setItem("activeProjectName", project.display_name || key);
+    window.dispatchEvent(new Event("activeProjectChanged"));
+  };
 
   useEffect(() => {
     if (loading) return;
@@ -277,6 +292,7 @@ export function AppHeader() {
   const activeGameKeyFromPath = gamesPathMatch?.[1] ?? "";
 
   const isAgentsActive = pathname === "/" || pathname === "";
+  const adminActive = pathname === "/admin" || pathname?.startsWith("/admin/");
 
   return (
     <header className="app-header">
@@ -379,12 +395,49 @@ export function AppHeader() {
             );
           })}
 
-          <Link
-            href="/admin"
-            className={`app-header-link ${pathname === "/admin" || pathname?.startsWith("/admin/") ? "app-header-link-active" : ""}`}
+          <HeaderMenu
+            label="Settings"
+            summaryClassName={adminActive ? "app-header-link-active" : ""}
+            wide
           >
-            Admin
-          </Link>
+            <Link
+              href="/admin"
+              className={`app-header-dropdown-link ${pathname === "/admin" ? "app-header-link-active" : ""}`}
+            >
+              Admin
+            </Link>
+            <Link
+              href="/admin/installation"
+              className={`app-header-dropdown-link ${pathname === "/admin/installation" ? "app-header-link-active" : ""}`}
+            >
+              Installation
+            </Link>
+            <details className="app-header-submenu app-header-submenu--side">
+              <summary className="app-header-dropdown-link app-header-submenu-summary">
+                Projects
+              </summary>
+              <div className="app-header-submenu-list app-header-submenu-list--side">
+                {projects.length === 0 ? (
+                  <div className="app-header-dropdown-muted">No projects found.</div>
+                ) : (
+                  projects.map((project) => {
+                    const isActiveProject = activeProjectKey === project.project_key;
+                    return (
+                      <button
+                        key={project.project_key}
+                        type="button"
+                        onClick={() => selectProject(project)}
+                        className={`app-header-dropdown-link app-header-dropdown-action ${isActiveProject ? "app-header-link-active" : ""}`}
+                        title={project.project_key}
+                      >
+                        {project.display_name || project.project_key}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </details>
+          </HeaderMenu>
 
           <div className="app-header-user" style={{ display: "flex", alignItems: "center" }}>
             {!loading &&
