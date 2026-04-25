@@ -1,7 +1,5 @@
-"use client";
-
-import { PipelinePageContent } from "../../[gameKey]/pipelines/[pipelineKey]/page";
+import { redirect } from "next/navigation";
 
 export default function PocketVoyagerGiftsPage() {
-  return <PipelinePageContent gameKey="pocket_voyager" pipelineKey="gift_images" />;
+  redirect("/games/pocket_voyager/pipelines/gift_images");
 }

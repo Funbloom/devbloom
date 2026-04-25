@@ -11,6 +11,7 @@ import {
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
+import { fetchApi } from "../lib/api";
 import { API_BASE, STORAGE_KEY_PROJECT } from "../imageGen/config";
 import {
   editImageNanobanana,
@@ -31,6 +32,7 @@ import {
 import { confirmGeminiImageIfNeeded, isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
 import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
+import { readGlobalImagesPerRow, writeGlobalImagesPerRow } from "../lib/imagesPerRowPreference";
 import { capturePanelSnapshot } from "../imageGen/imagegenPanelSnapshot";
 import type { Style } from "../storyboard/types";
 import {
@@ -94,6 +96,21 @@ const TIP_DRAW_ORIENTATION =
 const TIP_SHOW_ALL =
   "Off: Only saved drawings are listed until you select one; then you see that sketch and its polished outputs. On: Every UI Canvas image is listed.";
 
+/** Avoid stale bytes when the same sketch URL is overwritten (browser HTTP cache). */
+function appendImageUrlCacheBust(url: string, revision: number): string {
+  const u = (url || "").trim();
+  if (!u) {
+    return u;
+  }
+  const sep = u.includes("?") ? "&" : "?";
+  return `${u}${sep}_cb=${revision}`;
+}
+
+type CanvasPolishSize = {
+  width: number;
+  height: number;
+};
+
 function readPersistedStyleRefFilenames(projectKey: string): string[] {
   if (typeof window === "undefined" || !projectKey.trim()) return [];
   try {
@@ -120,6 +137,31 @@ function writePersistedStyleRefFilenames(projectKey: string, filenames: string[]
   } catch {
     /* ignore quota / private mode */
   }
+}
+
+async function resolvePolishSizeFromSketchUrl(url: string): Promise<CanvasPolishSize> {
+  const normalizedUrl = normalizeImageUrl(url);
+  const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const width = img.naturalWidth > 0 ? img.naturalWidth : img.width;
+      const height = img.naturalHeight > 0 ? img.naturalHeight : img.height;
+      if (width <= 0 || height <= 0) {
+        reject(new Error("Sketch image has invalid dimensions."));
+        return;
+      }
+      resolve({ width, height });
+    };
+    img.onerror = () => reject(new Error("Could not read sketch orientation."));
+    img.src = normalizedUrl;
+  });
+  if (dimensions.width > dimensions.height) {
+    return { width: 1024, height: 576 };
+  }
+  if (dimensions.height > dimensions.width) {
+    return { width: 576, height: 1024 };
+  }
+  return { width: 1024, height: 1024 };
 }
 
 const BG_DEFAULTS = {
@@ -311,7 +353,7 @@ export default function UIBuilderPage() {
 
   const [isPrivate, setIsPrivate] = useState(false);
   const [uiCanvasImages, setUiCanvasImages] = useState<GeneratedImage[]>([]);
-  const [imagesPerRow, setImagesPerRow] = useState(3);
+  const [imagesPerRow, setImagesPerRow] = useState(() => readGlobalImagesPerRow());
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [generatingPolish, setGeneratingPolish] = useState(false);
@@ -607,7 +649,15 @@ export default function UIBuilderPage() {
     let cancelled = false;
     const run = async () => {
       await new Promise<void>((r) => requestAnimationFrame(() => r()));
-      const ok = await sketchRef.current?.loadFromUrl(pendingSketchRestore.url);
+      const urlToLoad = pendingSketchRestore.url;
+      let ok = false;
+      try {
+        ok = (await sketchRef.current?.loadFromUrl(urlToLoad)) ?? false;
+      } finally {
+        if (urlToLoad.startsWith("blob:")) {
+          URL.revokeObjectURL(urlToLoad);
+        }
+      }
       if (cancelled) return;
       setPendingSketchRestore(null);
       if (!ok) setStatus("Could not load the sketch into the canvas.");
@@ -806,6 +856,8 @@ export default function UIBuilderPage() {
           setStatus("Updating cloud copy…");
           finalUrl = await uploadImageToCloud(projectKey, sketchEditTarget.filename);
         }
+        const bust = Date.now();
+        finalUrl = appendImageUrlCacheBust(finalUrl, bust);
         const now = new Date().toISOString();
         const next = all.map((img) =>
           img.id === sketchEditTarget.id
@@ -837,9 +889,14 @@ export default function UIBuilderPage() {
         return false;
       }
       const now = new Date().toISOString();
+      const bust = Date.now();
+      const storedUrl = appendImageUrlCacheBust(
+        first.url?.startsWith("http") ? first.url : normalizeImageUrl(first.url || ""),
+        bust,
+      );
       const newItem: GeneratedImage = {
         id: `${now}-${Math.random().toString(36).slice(2)}`,
-        url: first.url?.startsWith("http") ? first.url : normalizeImageUrl(first.url || ""),
+        url: storedUrl,
         filename: first.filename,
         prompt: name,
         styleName: "UI Canvas",
@@ -891,6 +948,33 @@ export default function UIBuilderPage() {
     },
     [tab, confirmLeaveDrawIfNeeded, applyBuilderTab],
   );
+
+  const handleStartNewDrawing = useCallback(async () => {
+    if (tab === "draw" && sketchDirty) {
+      if (!(await confirmLeaveDrawIfNeeded())) return;
+    }
+    setSketchEditTarget(null);
+    setPendingSketchRestore(null);
+    setDrawingName("");
+    sketchRef.current?.clear();
+    setSketchDirty(false);
+    setStatus(null);
+    setTab("draw");
+  }, [tab, sketchDirty, confirmLeaveDrawIfNeeded]);
+
+  const handleBackFromDrawWithoutSave = useCallback(() => {
+    if (sketchDirty) {
+      const ok = window.confirm("you will loose your changes. continue?");
+      if (!ok) {
+        return;
+      }
+    }
+    setSketchDirty(false);
+    setSketchEditTarget(null);
+    setPendingSketchRestore(null);
+    setStatus(null);
+    setTab("generate");
+  }, [sketchDirty]);
 
   const handleDeleteImage = async (id: string) => {
     if (!projectKey) return;
@@ -1082,6 +1166,29 @@ export default function UIBuilderPage() {
         if (tab === "draw" && sketchDirty) {
           if (!(await confirmLeaveDrawIfNeeded())) return;
         }
+        const busted = appendImageUrlCacheBust(normalizeImageUrl(img.url), Date.now());
+        let orientation: "landscape" | "portrait" = "landscape";
+        let objectUrl: string | null = null;
+        try {
+          const res = await fetchApi(busted, { cache: "no-store" });
+          if (!res.ok) {
+            setStatus("Could not load the sketch.");
+            return;
+          }
+          const blob = await res.blob();
+          try {
+            const bmp = await createImageBitmap(blob);
+            orientation = bmp.width >= bmp.height ? "landscape" : "portrait";
+            bmp.close();
+          } catch {
+            orientation = "landscape";
+          }
+          objectUrl = URL.createObjectURL(blob);
+        } catch {
+          setStatus("Could not load the sketch.");
+          return;
+        }
+        setDrawOrientation(orientation);
         setSketchEditTarget({
           id: img.id,
           filename: img.filename!.trim(),
@@ -1089,7 +1196,7 @@ export default function UIBuilderPage() {
         });
         setDrawingName(img.prompt || "");
         setSketchDirty(false);
-        setPendingSketchRestore({ url: normalizeImageUrl(img.url) });
+        setPendingSketchRestore({ url: objectUrl });
         setTab("draw");
         setStatus(null);
       })();
@@ -1241,11 +1348,11 @@ export default function UIBuilderPage() {
 
   const uiCanvasEmptyMessage = useMemo(() => {
     if (uiCanvasImages.length === 0) {
-      return "No UI Canvas images yet. Open the Draw tab, name your sketch, and click Save.";
+      return "No UI Canvas images yet. Click New Drawing, name your sketch, and click Save.";
     }
     if (showAllUiCanvas) return "No UI Canvas images yet.";
     if (!uiCanvasImages.some((img) => img.fromSketch)) {
-      return "No saved drawings yet. Save a sketch from the Draw tab first.";
+      return "No saved drawings yet. Create one with New Drawing first.";
     }
     return "Select a drawing below (click its image), or turn on Show all to see every image.";
   }, [uiCanvasImages, showAllUiCanvas]);
@@ -1271,6 +1378,7 @@ export default function UIBuilderPage() {
         const fn = img.filename!.trim();
         setStatus(`Generating ${i + 1} of ${selectedSketchesForPolish.length}…`);
         const styleRefs = styleReferenceFilenames.slice(0, MAX_STYLE_REFS);
+        const polishSize = await resolvePolishSizeFromSketchUrl(img.url);
         const { images: results, styleName: resolvedStyleName } = await generateUiCanvasPolish({
           projectKey: projectKey.trim(),
           sketchFilename: fn,
@@ -1279,8 +1387,8 @@ export default function UIBuilderPage() {
           extraUserPrompt: extra || undefined,
           styleReferenceFilenames: styleRefs.length ? styleRefs : undefined,
           model: imageModel,
-          width: 1024,
-          height: 1024,
+          width: polishSize.width,
+          height: polishSize.height,
           layoutFidelity,
           transparentBackground: uiCanvasTransparentBg,
           skipGeminiConfirm: true,
@@ -1307,11 +1415,13 @@ export default function UIBuilderPage() {
         const all = await loadAllImages();
         const now = new Date().toISOString();
         const sketchLabel = (img.prompt || "").trim() || "sketch";
+        const basePrompt = `UI polish from wireframe: "${sketchLabel}"`;
+        const storedPrompt = extra ? `${basePrompt}\n\nExtra prompt:\n${extra}` : basePrompt;
         const newItem: GeneratedImage = {
           id: `${now}-${Math.random().toString(36).slice(2)}`,
           url: rawUrl.startsWith("http") ? rawUrl : normalizeImageUrl(rawUrl),
           filename: filename || undefined,
-          prompt: `UI polish from wireframe: "${sketchLabel}"`,
+          prompt: storedPrompt,
           styleName: resolvedStyleName ?? style?.name ?? img.styleName ?? "UI Canvas",
           createdAt: now,
           tab: "ui_canvas",
@@ -1340,12 +1450,18 @@ export default function UIBuilderPage() {
 
   const handleImagesPerRowChange = (value: string) => {
     const n = parseInt(value, 10);
-    if (!Number.isNaN(n) && n >= 1 && n <= 8) setImagesPerRow(n);
+    if (!Number.isNaN(n) && n >= 1 && n <= 8) {
+      setImagesPerRow(n);
+      writeGlobalImagesPerRow(n);
+    }
   };
 
   const setImagesPerRowClamped = (delta: number) => {
     const n = imagesPerRow + delta;
-    if (n >= 1 && n <= 8) setImagesPerRow(n);
+    if (n >= 1 && n <= 8) {
+      setImagesPerRow(n);
+      writeGlobalImagesPerRow(n);
+    }
   };
 
   const saveDisabled = saving || !drawingName.trim() || !projectKey;
@@ -1420,35 +1536,28 @@ export default function UIBuilderPage() {
                 <p style={{ margin: 0, fontSize: 12, color: "#fbbf24" }}>Select a project in Admin to save sketches.</p>
               )}
 
-              <div className="sidebar-tabs" role="tablist" aria-label="UI Builder mode">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === "generate"}
-                  className={tab === "generate" ? "sidebar-tab active" : "sidebar-tab"}
-                  onClick={() => void requestBuilderTab("generate")}
-                >
-                  Generate
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === "draw"}
-                  className={tab === "draw" ? "sidebar-tab active" : "sidebar-tab"}
-                  onClick={() => void requestBuilderTab("draw")}
-                >
-                  Draw
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === "breakdown"}
-                  className={tab === "breakdown" ? "sidebar-tab active" : "sidebar-tab"}
-                  onClick={() => void requestBuilderTab("breakdown")}
-                >
-                  Breakdown
-                </button>
-              </div>
+              {tab !== "draw" && (
+                <div className="sidebar-tabs" role="tablist" aria-label="UI Builder mode">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === "generate"}
+                    className={tab === "generate" ? "sidebar-tab active" : "sidebar-tab"}
+                    onClick={() => void requestBuilderTab("generate")}
+                  >
+                    Generate
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === "breakdown"}
+                    className={tab === "breakdown" ? "sidebar-tab active" : "sidebar-tab"}
+                    onClick={() => void requestBuilderTab("breakdown")}
+                  >
+                    Breakdown
+                  </button>
+                </div>
+              )}
 
               <div className="sidebar-tab-content">
                 {tab === "breakdown" && (
@@ -1459,6 +1568,13 @@ export default function UIBuilderPage() {
                 )}
                 {tab === "generate" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => void handleStartNewDrawing()}
+                      style={{ width: "100%" }}
+                    >
+                      New Drawing
+                    </button>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 13, color: "var(--foreground, #e2e8f0)" }}>Workflow</span>
                       <ImagegenTooltip text={TIP_UIBUILDER_WORKFLOW} />
@@ -1782,6 +1898,9 @@ export default function UIBuilderPage() {
 
                 {tab === "draw" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                    <button type="button" onClick={handleBackFromDrawWithoutSave}>
+                      Back
+                    </button>
                     <label style={{ display: "grid", gap: "0.35rem", fontSize: 13 }}>
                       <span>Drawing name</span>
                       <input
@@ -1969,7 +2088,7 @@ export default function UIBuilderPage() {
           >
             {tab === "draw" ? (
               <>
-                <h2 className="imagegen-panel-title">Sketch</h2>
+                <h2 className="imagegen-panel-title">{sketchEditTarget ? "Edit Drawing" : "New Drawing"}</h2>
                 <div
                   className="imagegen-panel-body"
                   style={{

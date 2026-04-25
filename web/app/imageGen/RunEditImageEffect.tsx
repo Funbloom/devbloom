@@ -56,6 +56,7 @@ export function RunEditImageEffect({
       width?: number;
       height?: number;
       model?: string;
+      styleName?: string | null;
     };
     try {
       job = JSON.parse(raw) as {
@@ -65,6 +66,7 @@ export function RunEditImageEffect({
         width?: number;
         height?: number;
         model?: string;
+        styleName?: string | null;
       };
     } catch {
       setStatus("Invalid edit job.");
@@ -126,7 +128,7 @@ export function RunEditImageEffect({
             url: rawUrl.startsWith("http") ? rawUrl : normalizeImageUrl(rawUrl),
             filename: filename || undefined,
             prompt: promptLabel,
-            styleName: job.image.styleName,
+            styleName: job.styleName?.trim() || job.image.styleName,
             createdAt: now,
             tab: job.image.tab,
             location: defaultLocation,

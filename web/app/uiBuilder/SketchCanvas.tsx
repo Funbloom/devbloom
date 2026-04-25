@@ -123,11 +123,17 @@ export const SketchCanvas = forwardRef<SketchCanvasHandle, Props>(function Sketc
       loadFromUrl: (url: string) => {
         const canvas = canvasRef.current;
         if (!canvas) return Promise.resolve(false);
-        const fullUrl = url.startsWith("http") ? url : `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+        const isBlobUrl = url.startsWith("blob:");
+        const fullUrl =
+          url.startsWith("http") || isBlobUrl
+            ? url
+            : `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
         return (async (): Promise<boolean> => {
           let bitmap: ImageBitmap | null = null;
           try {
-            const res = await fetchApi(fullUrl);
+            const res = isBlobUrl
+              ? await fetch(fullUrl, { cache: "no-store" })
+              : await fetchApi(fullUrl, { cache: "no-store" });
             if (!res.ok) return false;
             const blob = await res.blob();
             bitmap = await createImageBitmap(blob);

@@ -329,7 +329,7 @@ type GameDataPaths = {
 const REL_GIFTS_JSON = "Assets/StreamingAssets/Gifts/gifts_catalog.json";
 const REL_CITIES_JSON = "Assets/StreamingAssets/Travel/cities.json";
 
-export function PipelinePageContent({
+function PipelinePageContent({
   gameKey,
   pipelineKey,
 }: {

@@ -25,6 +25,7 @@ import { API_BASE, STORAGE_KEY_PROJECT } from "./config";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../lib/imagegenMainStyle";
 import { isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
+import { readGlobalImagesPerRow, writeGlobalImagesPerRow } from "../lib/imagesPerRowPreference";
 import { useAuth } from "../contexts/AuthContext";
 import { fetchApi } from "../lib/api";
 import { CharactersTabPanel } from "./CharactersTabPanel";
@@ -167,7 +168,7 @@ function ImageGenPageInner() {
   const [prompt, setPrompt] = useState("");
   const [genPrompt, setGenPrompt] = useState("");
   const [images, setImages] = useState<GeneratedImage[]>([]);
-  const [imagesPerRow, setImagesPerRow] = useState(3);
+  const [imagesPerRow, setImagesPerRow] = useState(() => readGlobalImagesPerRow());
   const [isGenerating, setIsGenerating] = useState(false);
   const [isEditImageGenerating, setIsEditImageGenerating] = useState(false);
   const [isGeneratingCharacter, setIsGeneratingCharacter] = useState(false);
@@ -580,12 +581,18 @@ function ImageGenPageInner() {
 
   const handleImagesPerRowChange = (value: string) => {
     const n = parseInt(value, 10);
-    if (!Number.isNaN(n) && n >= 1 && n <= 8) setImagesPerRow(n);
+    if (!Number.isNaN(n) && n >= 1 && n <= 8) {
+      setImagesPerRow(n);
+      writeGlobalImagesPerRow(n);
+    }
   };
 
   const setImagesPerRowClamped = (delta: number) => {
     const n = imagesPerRow + delta;
-    if (n >= 1 && n <= 8) setImagesPerRow(n);
+    if (n >= 1 && n <= 8) {
+      setImagesPerRow(n);
+      writeGlobalImagesPerRow(n);
+    }
   };
 
   const toggleImageLocation = useCallback(
