@@ -20,6 +20,7 @@ from core.chat_helpers import (
 )
 from core.chat_schemas import ChatMessage, ChatRequest, RagOptions
 from core.code_settings import GPT_MODEL_DEFAULT
+from core.code_settings import IMAGE_MODEL_REGISTRY
 from core.llm_tools import BUILTIN_TOOL_NAMES, get_tools
 from core.skills_loader import build_available_skills_xml, get_skill_content
 from core.sse_utils import sse_event
@@ -40,6 +41,7 @@ from services.rag import (
     resolve_scope_and_project_key,
 )
 from services.xlsx_jobs import enqueue_xlsx_job
+from services.usage import record_provider_usage
 
 try:
     from core.mcp_client import call_mcp_tool
@@ -51,7 +53,19 @@ logger = logging.getLogger(__name__)
 AGENT_HISTORIES: dict[str, list[ChatMessage]] = {}
 
 
-async def chat_stream_generator(body: ChatRequest, client: OpenAI) -> AsyncGenerator[bytes, None]:
+def _record_chat_generated_image_usage(user_id: str, args: dict[str, Any], result: dict[str, Any]) -> None:
+    uid = (user_id or "").strip()
+    if not uid:
+        return
+    model = str((args or {}).get("model") or "gpt-image-1.5")
+    provider = str((IMAGE_MODEL_REGISTRY.get(model) or {}).get("provider") or "unknown")
+    count = len((result or {}).get("images") or [])
+    if count <= 0:
+        return
+    record_provider_usage(uid, provider, service="chat_image_generation", requests_count=count)
+
+
+async def chat_stream_generator(body: ChatRequest, client: OpenAI, user_id: str = "") -> AsyncGenerator[bytes, None]:
     try:
         agent_id = normalize_agent_id(body.agent)
         persona_text = load_persona_text(agent_id)
@@ -286,6 +300,7 @@ async def chat_stream_generator(body: ChatRequest, client: OpenAI) -> AsyncGener
                                 extracted["project_key"] = tool_project_key
                             if forced_tool_name == "generate_image":
                                 result = run_generate_image_tool(extracted)
+                                _record_chat_generated_image_usage(user_id, extracted, result)
                                 yield sse_event("image_generated", json.dumps(result))
                             elif forced_tool_name == "export_docx":
                                 result = run_export_docx_tool(extracted)
@@ -399,6 +414,7 @@ async def chat_stream_generator(body: ChatRequest, client: OpenAI) -> AsyncGener
                         event_payload = result
                     elif tool_name == "generate_image":
                         result = run_generate_image_tool(parsed_args)
+                        _record_chat_generated_image_usage(user_id, parsed_args, result)
                         event_name = "image_generated"
                         event_payload = result
                     elif tool_name == "resize_image":

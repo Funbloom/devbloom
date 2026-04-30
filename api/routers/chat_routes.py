@@ -70,7 +70,6 @@ def condense_chat_history(
 
 @chat_router.post("/chat/stream")
 async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user)) -> StreamingResponse:
-    _ = user
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
 
@@ -82,6 +81,6 @@ async def chat_stream(body: ChatRequest, user: dict = Depends(get_current_user))
 
     client = OpenAI(api_key=api_key)
     return StreamingResponse(
-        chat_stream_generator(body, client),
+        chat_stream_generator(body, client, user_id=(user.get("id") or "")),
         media_type="text/event-stream",
     )

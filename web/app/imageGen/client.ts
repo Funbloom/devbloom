@@ -575,6 +575,8 @@ export async function removeBackground(
     alphaMatting?: boolean;
     alphaMattingForegroundThreshold?: number;
     alphaMattingBackgroundThreshold?: number;
+    /** Optional fallback URL if local filename lookup fails (e.g. cloud-only item). */
+    inputUrl?: string;
     /** Gen/Images/UI relative path (e.g. export/widget.png); use instead of bare filename. */
     inputUiNestedRel?: string;
   }
@@ -587,6 +589,9 @@ export async function removeBackground(
     body.input_filename = "";
   } else {
     body.input_filename = inputFilename;
+  }
+  if (options?.inputUrl?.trim()) {
+    body.input_url = options.inputUrl.trim();
   }
   if (options?.model) body.model = options.model;
   if (typeof options?.alphaMatting === "boolean") body.alpha_matting = options.alphaMatting;

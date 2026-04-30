@@ -1285,6 +1285,7 @@ def run_convert_image_tool(args: dict) -> dict:
 
 def remove_background(
     input_filename: str,
+    input_url: str | None = None,
     output_filename: str | None = None,
     project_key: Optional[str] = None,
     model: str | None = None,
@@ -1294,6 +1295,9 @@ def remove_background(
     *,
     input_ui_nested_rel: str | None = None,
 ) -> dict:
+    input_bytes: bytes | None = None
+    input_name: str = "input.png"
+    output_base_dir: Path | None = None
     nested = (input_ui_nested_rel or "").strip()
     if nested:
         pk = (project_key or "").strip()
@@ -1302,11 +1306,30 @@ def remove_background(
         input_path = resolve_ui_canvas_nested_file(pk, nested.replace("\\", "/"))
         if not input_path.exists() or not input_path.is_file():
             raise ValueError("Input image not found.")
+        input_bytes = input_path.read_bytes()
+        input_name = input_path.name
+        output_base_dir = input_path.parent
     else:
         safe_name = validate_image_filename(input_filename)
         input_path = find_image_path(safe_name, project_key)
-        if not input_path:
-            raise ValueError("Input image not found.")
+        if input_path:
+            input_bytes = input_path.read_bytes()
+            input_name = input_path.name
+            output_base_dir = input_path.parent
+        else:
+            source_url = (input_url or "").strip()
+            if not source_url:
+                raise ValueError("Input image not found.")
+            try:
+                response = requests.get(source_url, timeout=60)
+                response.raise_for_status()
+                input_bytes = response.content
+                path_part = source_url.split("?", 1)[0].rstrip("/")
+                url_name = path_part.rsplit("/", 1)[-1]
+                if url_name:
+                    input_name = url_name
+            except Exception as exc:
+                raise ValueError(f"Input image not found. URL fetch failed: {exc}") from exc
     technique = (os.getenv("BKGROMOVALTECH") or "rembg").strip().lower()
 
     output_name = output_filename or build_image_filename("nobg", "png")
@@ -1316,7 +1339,7 @@ def remove_background(
         rembg_remove, new_session = _load_rembg()
         if rembg_remove is None:
             raise ValueError("rembg is not installed. Install it or switch BKGROMOVALTECH to ClipDrop.")
-        input_bytes = input_path.read_bytes()
+        assert input_bytes is not None
         try:
             session = None
             if model and new_session is not None:
@@ -1335,18 +1358,18 @@ def remove_background(
             )
         except Exception as exc:
             raise ValueError(f"rembg failed: {exc}") from exc
-        output_path = save_bytes_to_file(output_bytes, output_name, project_key, base_dir=input_path.parent)
+        output_path = save_bytes_to_file(output_bytes, output_name, project_key, base_dir=output_base_dir)
     else:
         api_key = os.getenv("CLIPDROP_API_KEY")
         if not api_key:
             raise ValueError("CLIPDROP_API_KEY is missing.")
-        with input_path.open("rb") as file_handle:
-            response = requests.post(
-                "https://clipdrop-api.co/remove-background/v1",
-                files={"image_file": (input_path.name, file_handle)},
-                headers={"x-api-key": api_key},
-                timeout=120,
-            )
+        assert input_bytes is not None
+        response = requests.post(
+            "https://clipdrop-api.co/remove-background/v1",
+            files={"image_file": (input_name, input_bytes)},
+            headers={"x-api-key": api_key},
+            timeout=120,
+        )
 
         if not response.ok:
             try:
@@ -1354,7 +1377,7 @@ def remove_background(
             except ValueError:
                 error_payload = response.text
             raise ValueError(f"Clipdrop request failed: {error_payload}")
-        output_path = save_bytes_to_file(response.content, output_name, project_key, base_dir=input_path.parent)
+        output_path = save_bytes_to_file(response.content, output_name, project_key, base_dir=output_base_dir)
     pk_out = (project_key or "").strip()
     if nested and pk_out:
         try:

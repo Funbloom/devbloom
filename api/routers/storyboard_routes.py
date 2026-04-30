@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
-from core.code_settings import resolve_image_model
+from core.code_settings import IMAGE_MODEL_REGISTRY, resolve_image_model
 
 from services.image_tool import build_image_filename, build_image_url, save_bytes_to_file
 from services.image_storage import upload_image_to_supabase
 from services.rag import get_supabase_client
-from services.usage import check_can_generate_images, increment_usage
+from services.usage import check_can_generate_images, increment_usage, record_provider_usage
 from services.storyboard import (
     add_character,
     add_location,
@@ -419,4 +419,6 @@ def api_generate_tile(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = generate_tile_image(tile_id, current_user_id=user.get("id"), model=model_key)
     increment_usage(user.get("id") or "", 1)
+    provider = str((IMAGE_MODEL_REGISTRY.get(model_key) or {}).get("provider") or "unknown")
+    record_provider_usage(user.get("id") or "", provider, service="image_generation", requests_count=1)
     return result

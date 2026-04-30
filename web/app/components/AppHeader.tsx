@@ -24,6 +24,7 @@ function humanizeSegment(segment: string): string {
 function getCurrentPageLabel(pathname: string): string {
   if (!pathname || pathname === "/") return "Agents";
   if (pathname.startsWith("/admin")) return "Admin";
+  if (pathname.startsWith("/settings/usage")) return "Usage";
   if (pathname.startsWith("/storyboard")) return "Storyboard";
   if (pathname.startsWith("/imageGen")) return "Image Gen";
   if (pathname.startsWith("/meshgen")) return "Mesh Gen";
@@ -292,7 +293,10 @@ export function AppHeader() {
   const activeGameKeyFromPath = gamesPathMatch?.[1] ?? "";
 
   const isAgentsActive = pathname === "/" || pathname === "";
-  const adminActive = pathname === "/admin" || pathname?.startsWith("/admin/");
+  const adminActive =
+    pathname === "/admin" ||
+    pathname?.startsWith("/admin/") ||
+    pathname?.startsWith("/settings/");
 
   return (
     <header className="app-header">
@@ -411,6 +415,12 @@ export function AppHeader() {
               className={`app-header-dropdown-link ${pathname === "/admin/installation" ? "app-header-link-active" : ""}`}
             >
               Installation
+            </Link>
+            <Link
+              href="/settings/usage"
+              className={`app-header-dropdown-link ${pathname === "/settings/usage" ? "app-header-link-active" : ""}`}
+            >
+              Usage
             </Link>
             <details className="app-header-submenu app-header-submenu--side">
               <summary className="app-header-dropdown-link app-header-submenu-summary">

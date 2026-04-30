@@ -667,6 +667,9 @@ function ImageGenPageInner() {
           alphaMatting: bgAlphaMatting,
           alphaMattingForegroundThreshold: bgFgThreshold,
           alphaMattingBackgroundThreshold: bgBgThreshold,
+          // Always provide URL fallback in case filename lookup fails
+          // (e.g. stale local cache, moved project key, or cloud-only source).
+          inputUrl: normalizeImageUrl(target.url),
         });
         const now = new Date().toISOString();
         let url = typeof result.url === "string" ? result.url : "";

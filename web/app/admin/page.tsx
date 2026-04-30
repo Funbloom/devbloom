@@ -121,6 +121,7 @@ export default function AdminPage() {
   }[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
+  const adminTopRef = useRef<HTMLDivElement | null>(null);
 
   const loadSources = async () => {
     setIsLoading(true);
@@ -776,9 +777,16 @@ export default function AdminPage() {
     }
   };
 
+  useEffect(() => {
+    if (activeTab !== "users") return;
+    requestAnimationFrame(() => {
+      adminTopRef.current?.scrollIntoView({ block: "start" });
+    });
+  }, [activeTab]);
+
   return (
     <main>
-      <div className="admin-shell">
+      <div ref={adminTopRef} className="admin-shell">
         <div className="admin-header">
           <div className="admin-header-left">
             <div className="admin-title">Admin</div>

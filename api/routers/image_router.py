@@ -13,7 +13,7 @@ from core.code_settings import (
     UI_CANVAS_POLISH_MAX_PROMPT_LEN,
     resolve_image_model,
 )
-from services.usage import check_can_generate_images, increment_usage
+from services.usage import check_can_generate_images, increment_usage, record_provider_usage
 from services.image_tool import (
     convert_image,
     crop_image,
@@ -45,6 +45,21 @@ CHARACTER_PROMPT_SUFFIX = (
     " Full-body game character, standing in a neutral A-pose, on a plain bright green background without shadows."
     "Show the character twice, once in a front view and once in a side view. Clear silhouette, suitable for character sheet reference."
 )
+
+
+def _record_image_provider_usage(user_id: str, model_key: str | None, images_count: int) -> None:
+    if images_count <= 0:
+        return
+    mk = (model_key or "").strip()
+    provider = "unknown"
+    if mk and mk in IMAGE_MODEL_REGISTRY:
+        provider = str(IMAGE_MODEL_REGISTRY[mk].get("provider") or "unknown")
+    record_provider_usage(
+        user_id,
+        provider,
+        service="image_generation",
+        requests_count=images_count,
+    )
 
 
 class GenerateCharacterImageRequest(BaseModel):
@@ -160,6 +175,7 @@ class ConvertImageRequest(BaseModel):
 
 class RemoveBackgroundRequest(BaseModel):
     input_filename: str = ""
+    input_url: str | None = None
     output_filename: str | None = None
     project_key: str | None = None
     model: str | None = None
@@ -314,6 +330,7 @@ def generate_character_image_route(
         n = len(result.get("images") or [])
         if n > 0:
             increment_usage(user.get("id") or "", n)
+            _record_image_provider_usage(user.get("id") or "", model_key, n)
         out: dict = dict(result)
         out["prompt"] = prompt
         if style_name:
@@ -374,6 +391,7 @@ def edit_image_nanobanana_route(
         n = len(result.get("images") or [])
         if n > 0:
             increment_usage(user.get("id") or "", n)
+            _record_image_provider_usage(user.get("id") or "", model_key, n)
         return result
     except HTTPException:
         raise
@@ -414,6 +432,7 @@ def generate_image_route(
         n = len(result.get("images") or [])
         if n > 0:
             increment_usage(user.get("id") or "", n)
+            _record_image_provider_usage(user.get("id") or "", model_key, n)
         return result
     except HTTPException:
         raise
@@ -514,6 +533,7 @@ def ui_canvas_polish_route(
         n = len(result.get("images") or [])
         if n > 0:
             increment_usage(user.get("id") or "", n)
+            _record_image_provider_usage(user.get("id") or "", model_key, n)
         out = dict(result)
         out["style_name"] = style_name
         return out
@@ -570,6 +590,7 @@ def ui_breakdown_strip_text_route(
             model=body.model,
         )
         increment_usage(user.get("id") or "", 1)
+        _record_image_provider_usage(user.get("id") or "", body.model or "gemini-2.5-flash-image", 1)
         return out
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -603,6 +624,7 @@ def ui_breakdown_process_route(
             only_element_id=(body.only_element_id or "").strip() or None,
         )
         increment_usage(user.get("id") or "", 1)
+        _record_image_provider_usage(user.get("id") or "", body.regen_model or "gpt-image-1.5", 1)
         return out
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -660,6 +682,7 @@ def generate_image_bytes_route(
             project_key=body.project_key,
         )
         increment_usage(user.get("id") or "", 1)
+        _record_image_provider_usage(user.get("id") or "", model_key, 1)
         return {
             "content_base64": base64.b64encode(data).decode("utf-8"),
             "mime": "image/png",
@@ -778,6 +801,7 @@ def remove_background_route(
     try:
         return remove_background(
             input_filename=body.input_filename or "",
+            input_url=body.input_url,
             output_filename=body.output_filename,
             project_key=body.project_key,
             model=body.model,

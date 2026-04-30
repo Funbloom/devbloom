@@ -47,6 +47,21 @@ IMAGE_MODEL_DEFAULTS: dict[str, str] = {
     "storyboard": "gpt-image-1.5",
 }
 
+# Usage/budget env keys
+OPENAI_TOKEN_BUDGET_ENV_BY_PERIOD: dict[str, str] = {
+    "month": "OPENAI_TOKEN_BUDGET_MONTH",
+    "year": "OPENAI_TOKEN_BUDGET_YEAR",
+}
+GEMINI_TOKEN_QUOTA_ENV_BY_PERIOD: dict[str, str] = {
+    "month": "GEMINI_TOKEN_QUOTA_MONTH",
+    "year": "GEMINI_TOKEN_QUOTA_YEAR",
+}
+
+# Code defaults (used when env vars are not set).
+OPENAI_TOKEN_BUDGET_DEFAULT_BY_PERIOD: dict[str, int] = {
+    "month": 1_000_000,
+}
+
 
 def resolve_image_model(feature: str, requested: str | None) -> str:
     if requested:
