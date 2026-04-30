@@ -100,6 +100,47 @@ def test_usage_summary_year_uses_year_limits(monkeypatch):
     assert result["remaining"]["gemini_tokens"] == 8000
 
 
+def test_usage_summary_month_reconciles_totals_with_openai_org_metrics(monkeypatch):
+    monkeypatch.setattr(
+        usage,
+        "get_supabase_client",
+        lambda: _FakeSupabase([]),
+    )
+    monkeypatch.setattr(
+        usage,
+        "get_provider_usage",
+        lambda *_args, **_kwargs: {
+            "providers": {
+                "openai": {"provider": "openai", "total_tokens": 120, "cost_usd": 1.25},
+                "gemini": {"provider": "gemini", "total_tokens": 80, "cost_usd": 0.75},
+            },
+            "totals": {
+                "requests_count": 4,
+                "input_tokens": 50,
+                "output_tokens": 150,
+                "total_tokens": 200,
+                "cost_usd": 2.0,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        usage,
+        "_openai_graph_data",
+        lambda *_args, **_kwargs: {
+            "available": True,
+            "mode": "month_daily",
+            "totals": {"tokens": 900, "cost_usd": 3.5},
+        },
+    )
+
+    result = usage.get_usage_summary("u-1", "month")
+
+    assert result["providers"]["openai"]["total_tokens"] == 900
+    assert result["providers"]["openai"]["cost_usd"] == 3.5
+    assert result["totals"]["total_tokens"] == 980
+    assert result["totals"]["cost_usd"] == 4.25
+
+
 def test_openai_usage_bucket_uses_results_key():
     """Live API uses `results`; older docs used `result`."""
     bucket_results = {

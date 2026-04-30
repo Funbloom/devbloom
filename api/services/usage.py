@@ -747,13 +747,19 @@ def get_usage_summary(user_id: str, period: str = "month") -> dict[str, Any]:
     openai_graph = _openai_graph_data(p, today)
     if openai_graph.get("available") and openai_graph.get("mode") == "month_daily":
         external_totals = openai_graph.get("totals") or {}
+        prior_openai = providers.get("openai") or {}
+        prior_openai_tokens = int(prior_openai.get("total_tokens", 0) or 0)
+        prior_openai_cost = float(prior_openai.get("cost_usd", 0.0) or 0.0)
         openai_used = int(external_totals.get("tokens", openai_used) or openai_used)
+        openai_cost = float(external_totals.get("cost_usd", prior_openai_cost) or 0.0)
         providers["openai"] = {
-            **(providers.get("openai") or {}),
+            **prior_openai,
             "provider": "openai",
             "total_tokens": openai_used,
-            "cost_usd": float(external_totals.get("cost_usd", (providers.get("openai") or {}).get("cost_usd", 0.0)) or 0.0),
+            "cost_usd": openai_cost,
         }
+        totals["total_tokens"] = int(totals.get("total_tokens", 0) or 0) - prior_openai_tokens + openai_used
+        totals["cost_usd"] = float(totals.get("cost_usd", 0.0) or 0.0) - prior_openai_cost + openai_cost
 
     return {
         "period": p,
