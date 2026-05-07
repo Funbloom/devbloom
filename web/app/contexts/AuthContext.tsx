@@ -18,6 +18,11 @@ import {
   setOnUnauthorized,
   setOnUnauthorizedMessage,
 } from "../lib/api";
+import {
+  dispatchActiveProjectChanged,
+  STORAGE_KEY_ACTIVE_PROJECT,
+  STORAGE_KEY_ACTIVE_PROJECT_NAME,
+} from "../lib/activeProject";
 import type { User, Session } from "@supabase/supabase-js";
 
 type AuthUser = { id: string; email: string; is_admin: boolean };
@@ -76,17 +81,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  /** Restore active project from DB (overrides stale localStorage when present). */
+  /**
+   * Hydrate active project from DB only when localStorage has no selection.
+   * Avoids clobbering the header menu / other tabs after token refresh (regression fix).
+   */
   const syncActiveProjectFromProfile = useCallback(async () => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") {
+      return;
+    }
+    const localKey = (window.localStorage.getItem(STORAGE_KEY_ACTIVE_PROJECT) || "").trim();
+    if (localKey) {
+      return;
+    }
     try {
       const res = await fetchApi("/users/me/profile");
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const data = (await res.json()) as { current_project_key?: string | null };
       const key = (data.current_project_key ?? "").trim();
       if (key) {
-        window.localStorage.setItem("activeProjectKey", key);
-        window.dispatchEvent(new Event("activeProjectChanged"));
+        window.localStorage.setItem(STORAGE_KEY_ACTIVE_PROJECT, key);
+        window.localStorage.removeItem(STORAGE_KEY_ACTIVE_PROJECT_NAME);
+        dispatchActiveProjectChanged();
       }
     } catch {
       // ignore — offline or profile missing
@@ -131,9 +148,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthUser(null);
     setApiAccessToken(null);
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem("activeProjectKey");
-      window.localStorage.removeItem("activeProjectName");
-      window.dispatchEvent(new Event("activeProjectChanged"));
+      window.localStorage.removeItem(STORAGE_KEY_ACTIVE_PROJECT);
+      window.localStorage.removeItem(STORAGE_KEY_ACTIVE_PROJECT_NAME);
+      dispatchActiveProjectChanged();
     }
     router.push("/login");
   }, [router]);

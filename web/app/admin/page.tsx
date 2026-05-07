@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { persistActiveProjectToProfile } from "../lib/activeProject";
 import { fetchApi, API_BASE } from "../lib/api";
 import { projectKeyFromDisplayName } from "../lib/projectKey";
 import { localAgent, getLocalProjectPath, setLocalProjectPath, isLocalAgentContext } from "../lib/localAgentClient";
@@ -167,18 +168,6 @@ export default function AdminPage() {
     }
   };
 
-  const persistCurrentProjectToProfile = useCallback(async (projectKeyValue: string | null) => {
-    try {
-      await fetchApi("/users/me/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ current_project_key: projectKeyValue }),
-      });
-    } catch {
-      // non-blocking; local selection still works
-    }
-  }, []);
-
   const loadUsers = async () => {
     setUsersLoading(true);
     setUsersError(null);
@@ -286,7 +275,7 @@ export default function AdminPage() {
       if (activeProjectKey) {
         setActiveProjectKey("");
         window.localStorage.removeItem("activeProjectKey");
-        void persistCurrentProjectToProfile(null);
+        void persistActiveProjectToProfile(null);
       }
       if (scope === "project") {
         setScope("generic");
@@ -297,9 +286,9 @@ export default function AdminPage() {
     if (activeProjectKey && !exists) {
       setActiveProjectKey("");
       window.localStorage.removeItem("activeProjectKey");
-      void persistCurrentProjectToProfile(null);
+      void persistActiveProjectToProfile(null);
     }
-  }, [projects, activeProjectKey, scope, projectsLoaded, persistCurrentProjectToProfile]);
+  }, [projects, activeProjectKey, scope, projectsLoaded]);
 
   useEffect(() => {
     if (scope === "project") {
@@ -567,7 +556,7 @@ export default function AdminPage() {
       window.localStorage.removeItem("activeProjectName");
     }
     window.dispatchEvent(new Event("activeProjectChanged"));
-    void persistCurrentProjectToProfile(value.trim() || null);
+    void persistActiveProjectToProfile(value.trim() || null);
     if (scope === "project") {
       setProjectKey(value);
     }

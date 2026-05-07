@@ -5,6 +5,12 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import {
+  dispatchActiveProjectChanged,
+  persistActiveProjectToProfile,
+  STORAGE_KEY_ACTIVE_PROJECT,
+  STORAGE_KEY_ACTIVE_PROJECT_NAME,
+} from "../lib/activeProject";
 import { API_BASE, fetchApi } from "../lib/api";
 import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
 
@@ -92,8 +98,8 @@ export function AppHeader() {
 
   useEffect(() => {
     const refreshProject = async () => {
-      const stored = window.localStorage.getItem("activeProjectKey") || "";
-      const storedName = window.localStorage.getItem("activeProjectName") || "";
+      const stored = window.localStorage.getItem(STORAGE_KEY_ACTIVE_PROJECT) || "";
+      const storedName = window.localStorage.getItem(STORAGE_KEY_ACTIVE_PROJECT_NAME) || "";
       setActiveProjectKey(stored);
       try {
         const response = await fetchApi("/projects");
@@ -115,7 +121,7 @@ export function AppHeader() {
         const match = data.find((project) => project.project_key === stored);
         const name = match?.display_name || stored;
         setActiveProjectName(name);
-        window.localStorage.setItem("activeProjectName", name);
+        window.localStorage.setItem(STORAGE_KEY_ACTIVE_PROJECT_NAME, name);
       } catch {
         setProjects([]);
         setActiveProjectName(storedName || stored);
@@ -138,9 +144,10 @@ export function AppHeader() {
     if (!key) {
       return;
     }
-    window.localStorage.setItem("activeProjectKey", key);
-    window.localStorage.setItem("activeProjectName", project.display_name || key);
-    window.dispatchEvent(new Event("activeProjectChanged"));
+    window.localStorage.setItem(STORAGE_KEY_ACTIVE_PROJECT, key);
+    window.localStorage.setItem(STORAGE_KEY_ACTIVE_PROJECT_NAME, project.display_name || key);
+    dispatchActiveProjectChanged();
+    void persistActiveProjectToProfile(key);
   };
 
   useEffect(() => {
