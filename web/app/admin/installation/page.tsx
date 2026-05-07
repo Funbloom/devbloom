@@ -20,11 +20,14 @@ type InstructionTopic =
 
 function StatusLine({
   label,
+  purpose,
   state,
   detail,
   action,
 }: {
   label: string;
+  /** One-line explanation of why this component matters for the app. */
+  purpose?: string;
   state: StatusState;
   detail: string;
   action?: ReactNode;
@@ -52,11 +55,13 @@ function StatusLine({
         </div>
         {action}
       </div>
+      {purpose ? (
+        <p style={{ margin: 0, color: "var(--muted, #94a3b8)", fontSize: 12, lineHeight: 1.4 }}>{purpose}</p>
+      ) : null}
       <p style={{ margin: 0, color: "var(--muted, #94a3b8)", fontSize: 13 }}>{detail}</p>
     </div>
   );
 }
-
 export default function AdminInstallationPage() {
   const [localAgentState, setLocalAgentState] = useState<StatusState>("checking");
   const [apiServerState, setApiServerState] = useState<StatusState>("checking");
@@ -86,6 +91,7 @@ export default function AdminInstallationPage() {
     local_agent: {
       title: "Local Agent",
       body:
+        "- Clone the repository from https://github.com/FunBloomStudio/GameDevKing.git\n" +
         "- Open a terminal at repo root.\n" +
         "- Run: cd local_agent\n" +
         "- Start: ./run.bat (Windows) or ./run.sh (macOS/Linux)\n" +
@@ -94,9 +100,18 @@ export default function AdminInstallationPage() {
     api_server: {
       title: "API Server",
       body:
+        "API Server is running on AWS at http://dev.funbloomstudio.com/ so you don't need to install it. But you can also install it locally by following the instructions below." +
+        "- Clone the repository from https://github.com/FunBloomStudio/GameDevKing.git\n" +
         "- Open a terminal in api folder.\n" +
         "- Start API with your run command (run.bat / uvicorn).\n" +
-        "- Verify: http://localhost:8000/health returns OK.",
+        "- Verify: http://localhost:8000/health returns OK.\n" +
+        "Run WebServer locally: \n" +
+        "- Clone the repository from https://github.com/FunBloomStudio/GameDevKing.git\n" +
+        "- Open a terminal at repo root.\n" +
+        "- Run: cd web\n" +
+        "- Start: npm install\n" +
+        "- Start: npm run dev\n" +
+        "- Open the browser and navigate to http://localhost:3000\n",
     },
     python: {
       title: "Python 3.10.x",
@@ -156,6 +171,24 @@ export default function AdminInstallationPage() {
       Installation Instructions
     </button>
   );
+
+  useEffect(() => {
+    if (!instructionTopic) {
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setInstructionTopic(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [instructionTopic]);
 
   useEffect(() => {
     let cancelled = false;
@@ -351,6 +384,7 @@ export default function AdminInstallationPage() {
                 )}
                 <StatusLine
                   label="Local Agent"
+                  purpose="Runs on your PC so the Studio can safely read/write your game project folders, spawn native folder pickers, and host heavy local tools."
                   state={localAgentState}
                   action={instructionAction("local_agent")}
                   detail={
@@ -365,6 +399,7 @@ export default function AdminInstallationPage() {
                 />
                 <StatusLine
                   label="API Server"
+                  purpose="Hosted backend for sign-in, cloud APIs, persistence, and features that cannot run entirely in the browser."
                   state={apiServerState}
                   action={instructionAction("api_server")}
                   detail={
@@ -377,12 +412,14 @@ export default function AdminInstallationPage() {
                 />
                 <StatusLine
                   label="Python 3.10+ Installed"
+                  purpose="The Local Agent and optional ML integrations (below) expect this Python generation; wrong versions usually break installs."
                   state={pythonState}
                   action={instructionAction("python")}
                   detail={pythonDetail}
                 />
                 <StatusLine
                   label="PyTorch Installed"
+                  purpose="Needed on the machine running the Local Agent for GPU-backed generation (mesh, segmentation, downloads that use Torch)."
                   state={pytorchState}
                   action={instructionAction("pytorch")}
                   detail={
@@ -397,24 +434,28 @@ export default function AdminInstallationPage() {
                 />
                 <StatusLine
                   label="CUDA Available"
+                  purpose="Lets PyTorch use an NVIDIA GPU on this machine so Mesh Gen and similar workloads stay fast instead of CPU-only."
                   state={cudaState}
                   action={instructionAction("cuda")}
                   detail={cudaDetail}
                 />
                 <StatusLine
                   label="HF_HOME Configured"
+                  purpose="Writable cache folder Hugging Face uses when Mesh Gen pipelines download models/checkpoints locally."
                   state={hfHomeState}
                   action={instructionAction("hf_home")}
                   detail={hfHomeDetail}
                 />
                 <StatusLine
                   label="Hunyuan3D-2 Installed"
+                  purpose="Used by Mesh Gen to turn images or prompts into 3D meshes on your machine via the Local Agent."
                   state={hunyuanState}
                   action={instructionAction("hunyuan")}
                   detail={hunyuanDetail}
                 />
                 <StatusLine
                   label="Hunyuan Texture Extensions"
+                  purpose="Optional compiled pieces of Hunyuan for textured mesh output in Mesh Gen (not needed for geometry-only previews)."
                   state={textureExtState}
                   detail={textureExtDetail}
                   action={
@@ -502,74 +543,126 @@ export default function AdminInstallationPage() {
                 )}
                 <StatusLine
                   label="SAM Model Installed"
+                  purpose="Segment Anything runs locally so UI Builder’s UI breakdown can segment screenshots before cloud labeling passes."
                   state={samState}
                   action={instructionAction("sam")}
                   detail={samDetail}
                 />
               </section>
-              <section
-                style={{
-                  border: "1px solid #334155",
-                  borderRadius: 12,
-                  padding: "12px",
-                  background: "rgba(30,64,175,0.12)",
-                  display: "grid",
-                  gap: 8,
-                }}
-              >
-                <strong style={{ fontSize: 15 }}>
-                  Instruction : installing &lt;
-                  {instructionTopic ? instructionByTopic[instructionTopic].title : "select an item"}
-                  &gt;
-                </strong>
-                <pre
-                  style={{
-                    margin: 0,
-                    fontSize: 13,
-                    color: "#dbeafe",
-                    whiteSpace: "pre-wrap",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {instructionTopic
-                    ? instructionByTopic[instructionTopic].body
-                    : "Click \"Installation Instructions\" on any status item to show manual setup steps here."}
-                </pre>
-                {instructionTopic === "python" && (
-                  <a
-                    href="https://www.python.org/downloads/"
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: "#93c5fd", fontSize: 13 }}
-                  >
-                    Download Python 3.10 from python.org
-                  </a>
-                )}
-                {instructionTopic === "pytorch" && (
-                  <a
-                    href="https://pytorch.org/get-started/locally/"
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: "#93c5fd", fontSize: 13 }}
-                  >
-                    Open PyTorch install selector
-                  </a>
-                )}
-                {instructionTopic === "cuda" && (
-                  <a
-                    href="https://developer.nvidia.com/cuda-12-4-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local"
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: "#93c5fd", fontSize: 13 }}
-                  >
-                    Download CUDA toolkit (NVIDIA archive)
-                  </a>
-                )}
-              </section>
             </div>
           </section>
         </div>
       </div>
+
+      {instructionTopic ? (
+        <div
+          role="presentation"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.65)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            boxSizing: "border-box",
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              setInstructionTopic(null);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="installation-instructions-title"
+            style={{
+              width: "100%",
+              maxWidth: 560,
+              maxHeight: "min(85vh, 640px)",
+              overflow: "auto",
+              borderRadius: 12,
+              border: "1px solid #334155",
+              background: "#0f1115",
+              boxShadow: "0 25px 50px -12px rgba(0,0,0,0.55)",
+              display: "grid",
+              gap: 12,
+              padding: "16px 18px",
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+              <strong id="installation-instructions-title" style={{ fontSize: 17, margin: 0, lineHeight: 1.3 }}>
+                {instructionByTopic[instructionTopic].title}
+              </strong>
+              <button
+                type="button"
+                aria-label="Close instructions"
+                onClick={() => setInstructionTopic(null)}
+                style={{
+                  flexShrink: 0,
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #475569",
+                  background: "#1e293b",
+                  color: "var(--color-text, #f1f5f9)",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <pre
+              style={{
+                margin: 0,
+                fontSize: 13,
+                color: "#e2e8f0",
+                whiteSpace: "pre-wrap",
+                fontFamily: "inherit",
+                lineHeight: 1.55,
+              }}
+            >
+              {instructionByTopic[instructionTopic].body}
+            </pre>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              {instructionTopic === "python" && (
+                <a
+                  href="https://www.python.org/downloads/"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#93c5fd", fontSize: 13 }}
+                >
+                  Download Python 3.10 from python.org
+                </a>
+              )}
+              {instructionTopic === "pytorch" && (
+                <a
+                  href="https://pytorch.org/get-started/locally/"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#93c5fd", fontSize: 13 }}
+                >
+                  Open PyTorch install selector
+                </a>
+              )}
+              {instructionTopic === "cuda" && (
+                <a
+                  href="https://developer.nvidia.com/cuda-12-4-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#93c5fd", fontSize: 13 }}
+                >
+                  Download CUDA toolkit (NVIDIA archive)
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

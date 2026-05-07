@@ -14,7 +14,7 @@ from core.code_settings import (
 )
 from services.rag import get_supabase_client
 
-MAX_IMAGES_PER_USER_PER_DAY = int(os.getenv("MAX_IMAGES_PER_USER_PER_DAY", "20"))
+MAX_IMAGES_PER_USER_PER_DAY = int(os.getenv("MAX_IMAGES_PER_USER_PER_DAY", "80"))
 logger = logging.getLogger(__name__)
 OPENAI_API_BASE = "https://api.openai.com/v1"
 
