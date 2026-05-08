@@ -2,6 +2,9 @@
     // Use IntelliSense to learn about possible attributes.
     // Hover to view descriptions of existing attributes.
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    //
+    // Both configs use the SHARED root .venv (one venv at the repo root for both
+    // api and local_agent). Bootstrap it once via api/run.bat or local_agent/run.bat.
     "version": "0.2.0",
     "configurations": [
         {
@@ -9,9 +12,12 @@
             "cwd": "${workspaceFolder}/api",
             "type": "debugpy",
             "request": "launch",
-            "python": "${workspaceFolder}/api/.venv/Scripts/python",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "osx": {
-                "python": "${workspaceFolder}/api/.venv/bin/python"
+                "python": "${workspaceFolder}/.venv/bin/python"
+            },
+            "linux": {
+                "python": "${workspaceFolder}/.venv/bin/python"
             },
             "module": "uvicorn",
             "args": [
@@ -27,9 +33,12 @@
             "cwd": "${workspaceFolder}",
             "type": "debugpy",
             "request": "launch",
-            "python": "${workspaceFolder}/local_agent/.venv/Scripts/python.exe",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "osx": {
-                "python": "${workspaceFolder}/local_agent/.venv/bin/python"
+                "python": "${workspaceFolder}/.venv/bin/python"
+            },
+            "linux": {
+                "python": "${workspaceFolder}/.venv/bin/python"
             },
             "module": "uvicorn",
             "args": [

@@ -128,7 +128,7 @@ def _require_hunyuan() -> None:
             msg += f" Caused by: {HY3DGEN_ERROR!r}"
             if isinstance(HY3DGEN_ERROR, ModuleNotFoundError) and "torch" in str(HY3DGEN_ERROR).lower():
                 msg += (
-                    " Install PyTorch into local_agent/.venv first (CUDA wheel from "
+                    " Install PyTorch into the root .venv first (CUDA wheel from "
                     "https://pytorch.org/get-started/locally/), then restart the agent. "
                     "See local_agent/README.md → Mesh Gen."
                 )

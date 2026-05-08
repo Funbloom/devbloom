@@ -14,10 +14,10 @@ Response: `{ "elements": [...], "image_width": int, "image_height": int }`.
 
 ## Install
 
-From the repo root, with **`local_agent/.venv`** active:
+From the repo root, with the **root `.venv`** active (one shared venv for `api` + `local_agent`):
 
 ```powershell
-pip install -r local_agent/requirements.txt -r local_agent/requirements-sam.txt
+pip install -r requirements.txt -r local_agent/requirements-sam.txt
 ```
 
 ## Checkpoints

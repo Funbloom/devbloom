@@ -66,7 +66,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "service": "gamedev-api"}
+    return {"ok": True, "service": "devbloom-api"}
 
 
 @app.head("/auth/me")

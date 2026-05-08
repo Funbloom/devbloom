@@ -1,6 +1,6 @@
-# Nginx config for Game Dev King — dev.funbloomstudio.com (EC2).
+# Nginx config for DevBloom — dev.funbloomstudio.com (EC2).
 # A record: dev.funbloomstudio.com → your EC2 IP.
-# Copy to /etc/nginx/conf.d/gamedevking.conf (or sites-available on Ubuntu).
+# Copy to /etc/nginx/conf.d/devbloom.conf (or sites-available on Ubuntu).
 # Then: sudo nginx -t
 # If nginx isn't running: sudo systemctl start nginx (or sudo systemctl enable --now nginx)
 # For config changes later: sudo systemctl reload nginx
@@ -10,7 +10,7 @@
 #   Certbot often adds a separate server { listen 443 ssl; ... } block. That block MUST
 #   include the same "location /api/ { ... proxy_pass http://127.0.0.1:8000/; ... }" as
 #   below. If 443 only proxies "/" to port 3000, /api/* hits Next (wrong) or fails → 502.
-#   Fix: sudo nano /etc/nginx/conf.d/gamedevking.conf — duplicate /api/ into the ssl server,
+#   Fix: sudo nano /etc/nginx/conf.d/devbloom.conf — duplicate /api/ into the ssl server,
 #   then sudo nginx -t && sudo systemctl reload nginx
 
 # Same domain, path-based: web at dev.funbloomstudio.com/, API at dev.funbloomstudio.com/api/

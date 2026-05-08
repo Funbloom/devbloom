@@ -1,0 +1,30 @@
+# Optional: Hunyuan3D-2 mesh-gen support deps.
+#
+# RECOMMENDED: don't install this file directly - use the setup script instead.
+# It also installs Hunyuan's own requirements, the editable hy3dgen package,
+# and (optionally) builds the texture extensions (custom_rasterizer +
+# differentiable_renderer) in one shot:
+#
+#   .\.venv\Scripts\Activate.ps1
+#   .\scripts\install-meshgen.ps1 -HunyuanPath D:\FunBloom\models\Hunyuan3D-2
+#   # add -SkipTextureExtensions to skip the (slow) MSVC build if you don't
+#   # need textured Mesh Gen output.
+#
+# Manual install (if you really only want this file):
+#   pip install -r requirements.txt                       # root deps first
+#   pip install -r util/requirements-meshgen.txt          # this file
+#   pip install -r <HUNYUAN_PATH>/requirements.txt        # Hunyuan's own deps
+#   pip install -e <HUNYUAN_PATH>                         # editable hy3dgen
+#
+# PyTorch must be installed separately with the CUDA build that matches your
+# GPU driver. See https://pytorch.org/get-started/locally/ - example:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+#
+# This file purposely does NOT pin torch so you can pick the right CUDA wheel.
+
+diffusers>=0.27.0
+transformers>=4.40.0
+accelerate>=0.29.0
+safetensors>=0.4.0
+huggingface_hub>=0.23.0
+trimesh>=4.0.0

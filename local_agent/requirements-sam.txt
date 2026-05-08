@@ -1,5 +1,7 @@
-# Optional: UI Breakdown SAM (install into local_agent/.venv — same as Mesh Gen).
-# pip install -r requirements.txt -r requirements-sam.txt
+# Optional: UI Breakdown SAM (install into the shared root .venv — same as Mesh Gen).
+# From the repo root:
+#   pip install -r requirements.txt
+#   pip install -r local_agent/requirements-sam.txt
 #
 # See README-SAM.md for checkpoints and SAM_CHECKPOINT_PATH.
 

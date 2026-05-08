@@ -91,7 +91,7 @@ export default function AdminInstallationPage() {
     local_agent: {
       title: "Local Agent",
       body:
-        "- Clone the repository from https://github.com/FunBloomStudio/GameDevKing.git\n" +
+        "- Clone the repository from https://github.com/FunBloomStudio/devbloom.git\n" +
         "- Open a terminal at repo root.\n" +
         "- Run: cd local_agent\n" +
         "- Start: ./run.bat (Windows) or ./run.sh (macOS/Linux)\n" +
@@ -101,12 +101,12 @@ export default function AdminInstallationPage() {
       title: "API Server",
       body:
         "API Server is running on AWS at http://dev.funbloomstudio.com/ so you don't need to install it. But you can also install it locally by following the instructions below." +
-        "- Clone the repository from https://github.com/FunBloomStudio/GameDevKing.git\n" +
+        "- Clone the repository from https://github.com/FunBloomStudio/devbloom.git\n" +
         "- Open a terminal in api folder.\n" +
         "- Start API with your run command (run.bat / uvicorn).\n" +
         "- Verify: http://localhost:8000/health returns OK.\n" +
         "Run WebServer locally: \n" +
-        "- Clone the repository from https://github.com/FunBloomStudio/GameDevKing.git\n" +
+        "- Clone the repository from https://github.com/FunBloomStudio/devbloom.git\n" +
         "- Open a terminal at repo root.\n" +
         "- Run: cd web\n" +
         "- Start: npm install\n" +
@@ -117,13 +117,13 @@ export default function AdminInstallationPage() {
       title: "Python 3.10.x",
       body:
         "- Install Python 3.10.x (any 3.10 patch).\n" +
-        "- Recreate local_agent/.venv with Python 3.10.\n" +
+        "- Recreate the root .venv with Python 3.10.\n" +
         "- Restart local agent.",
     },
     pytorch: {
       title: "PyTorch",
       body:
-        "- Activate local_agent/.venv.\n" +
+        "- Activate the root .venv (shared by api and local_agent).\n" +
         "- Install torch/vision/audio for your CUDA build.\n" +
         "- Example: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124",
     },
@@ -144,7 +144,7 @@ export default function AdminInstallationPage() {
     hunyuan: {
       title: "Hunyuan3D-2",
       body:
-        "- Activate local_agent/.venv.\n" +
+        "- Activate the root .venv.\n" +
         "- Install editable from clone: pip install -e <Hunyuan3D-2 path>\n" +
         "- Verify import in the same venv.",
     },
@@ -155,12 +155,12 @@ export default function AdminInstallationPage() {
         "- Option B manual build in Hunyuan repo:\n" +
         "  - hy3dgen/texgen/custom_rasterizer -> python setup.py install\n" +
         "  - hy3dgen/texgen/differentiable_renderer -> python setup.py install\n" +
-        "- Use the same local_agent/.venv.",
+        "- Use the same root .venv.",
     },
     sam: {
       title: "SAM Model",
       body:
-        "- Install segment_anything deps in local_agent/.venv.\n" +
+        "- Install segment_anything deps in the root .venv (pip install -r local_agent/requirements-sam.txt).\n" +
         "- Set SAM_CHECKPOINT_PATH in local_agent/.env.\n" +
         "- Ensure checkpoint file exists at the exact path.",
     },
@@ -240,7 +240,7 @@ export default function AdminInstallationPage() {
               setHunyuanDetail(
                 sam.hunyuan3d2_installed
                   ? "Installed (hy3dgen import available)."
-                  : "Not installed. Install Hunyuan3D-2 in local_agent/.venv.",
+                  : "Not installed. Install Hunyuan3D-2 in the root .venv.",
               );
               setPytorchState(sam.pytorch_installed ? "ok" : "missing");
               setCudaState(sam.cuda_available ? "ok" : "missing");
@@ -429,7 +429,7 @@ export default function AdminInstallationPage() {
                         ? "Checking..."
                         : pytorchState === "unknown"
                           ? "Unavailable."
-                          : "Not installed in local_agent/.venv."
+                          : "Not installed in the root .venv."
                   }
                 />
                 <StatusLine

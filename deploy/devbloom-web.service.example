@@ -1,8 +1,8 @@
-# Example systemd unit for Game Dev King web (Next.js).
-# Copy to /etc/systemd/system/gamedev-web.service
-# Replace /home/ec2-user/gamedev-king with your APP_ROOT if different; set USER/Group if not ec2-user.
+# Example systemd unit for DevBloom web (Next.js).
+# Copy to /etc/systemd/system/devbloom-web.service
+# Replace /home/ec2-user/devbloom with your APP_ROOT if different; set USER/Group if not ec2-user.
 # Set NEXT_PUBLIC_API_URL_BASE to your API URL (path-based: https://yourdomain.com/api, or subdomain: https://api.yourdomain.com).
-# Then: sudo systemctl daemon-reload && sudo systemctl enable --now gamedev-web
+# Then: sudo systemctl daemon-reload && sudo systemctl enable --now devbloom-web
 
 [Unit]
 Description=DevBloom (Next.js)
@@ -12,7 +12,7 @@ After=network.target
 Type=simple
 User=ec2-user
 Group=ec2-user
-WorkingDirectory=/home/ec2-user/gamedev-king/web
+WorkingDirectory=/home/ec2-user/devbloom/web
 Environment=NODE_ENV=production
 Environment=NEXT_PUBLIC_API_URL_BASE=https://dev.funbloomstudio.com/api
 ExecStart=/usr/bin/npm start

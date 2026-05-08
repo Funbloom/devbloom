@@ -1,5 +1,5 @@
-# Example nginx config for Game Dev King (EC2 + HTTPS).
-# Copy to /etc/nginx/conf.d/gamedevking.conf (or sites-available on Ubuntu)
+# Example nginx config for DevBloom (EC2 + HTTPS).
+# Copy to /etc/nginx/conf.d/devbloom.conf (or sites-available on Ubuntu)
 # and replace yourdomain.com with your real domain.
 # Then: sudo nginx -t && sudo systemctl reload nginx
 # After that, run certbot: sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com

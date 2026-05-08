@@ -1,0 +1,14 @@
+# Consolidated dev requirements for the whole repo (single .venv at the root).
+#
+# Composes the per-module lists so each module remains the source of truth:
+#   - api/requirements.txt          (FastAPI server)
+#   - local_agent/requirements.txt  (Local agent FastAPI service)
+#
+# Optional / heavy ML add-ons stay opt-in (install on top after this file):
+#   - local_agent/requirements-sam.txt          (Segment Anything: torch + SAM)
+#   - util/requirements-meshgen.txt             (Hunyuan3D-2 smoke test deps)
+#
+# Production EC2 deploy is NOT affected: ec2-deploy.sh still creates api/.venv
+# from api/requirements.txt only.
+-r api/requirements.txt
+-r local_agent/requirements.txt

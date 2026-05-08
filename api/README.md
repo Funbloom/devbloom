@@ -2,15 +2,20 @@
 
 Python service for chat, RAG, image tools, and game integrations.
 
+> **Venv:** all local Python work uses the **shared `.venv` at the repo root** (one venv for `api` + `local_agent`). `api/run.bat` creates/activates it for you. See the main [README](../README.md#backend-one-venv-for-everything-python) for one-time bootstrap.
+>
+> Production EC2 deploy is unaffected — `deploy/ec2-deploy.sh` still creates a minimal `api/.venv` on the server from `api/requirements.txt`.
+
 ---
 
 ## Tests
 
-Install dependencies, then run pytest **from the `api` directory** so `pytest.ini` and imports resolve.
+Activate the **root** `.venv`, install dependencies, then run pytest **from the `api` directory** so `pytest.ini` and imports resolve.
 
 ```bash
-cd api
+# from the repo root, with .venv activated
 python -m pip install -r requirements.txt -r requirements-dev.txt
+cd api
 python -m pytest
 ```
 
@@ -24,7 +29,7 @@ python -m pytest
 From the **repository root**:
 
 ```bash
-python -m pip install -r api/requirements.txt -r api/requirements-dev.txt
+python -m pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest -c api/pytest.ini api/tests
 ```
 
@@ -36,9 +41,10 @@ python -m pytest -c api/pytest.ini api/tests
 
 ```bash
 cd api
-python -m pip install -r requirements.txt
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+Or run `api\run.bat` (Windows) — bootstraps the root `.venv`, installs deps, and launches uvicorn.
 
 Configure keys via `api/.env` or your environment for local development.
 

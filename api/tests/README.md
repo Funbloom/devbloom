@@ -44,14 +44,14 @@ python -m pytest tests/http
 
 ## Prerequisites
 
-Install **both** `requirements.txt` and `requirements-dev.txt`. HTTP tests import the full FastAPI app and need the same packages as production, not only dev tools.
+All Python work uses the **shared `.venv` at the repo root** (one venv for `api` + `local_agent`). Activate it first, then install **both** `requirements.txt` and `requirements-dev.txt`. HTTP tests import the full FastAPI app and need the same packages as production, not only dev tools.
 
 ```bash
-cd api
+# from the repo root, with .venv activated
 python -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-On Windows (PowerShell), use the same commands from the `api` folder.
+On Windows (PowerShell), use the same commands from the repo root after activating `.venv\Scripts\Activate.ps1`.
 
 ---
 

@@ -1,39 +1,63 @@
-# Game Dev King
+# DevBloom
 ## Multi agents to assist game developers on one project.
 ## Developped by Andy Fire Studio LLC.
 
 This repo contains:
-- `web/` — Next.js App Router frontend (TypeScript)
+- `web/` — Next.js App Router frontend (TypeScript) — uses `web/node_modules/` (npm)
 - `api/` — FastAPI backend that streams tokens over SSE
+- `local_agent/` — local-only FastAPI service (file picker, Mesh Gen, SAM, etc.)
+- `util/` — small one-off Python utilities (e.g. Hunyuan smoke test)
+
+All Python services share **one virtual environment at the repo root** (`.venv/`). The frontend uses npm under `web/`.
 
 ## Prereqs
 - Node.js 18+
 - Python 3.10+
-- uv (Python package manager)
 
 ## Setup
 
-### Backend
+### Backend (one venv for everything Python)
+
+The repo uses a single `.venv` at the repo root for both `api` and `local_agent`. The `run.bat` / `run.sh` scripts create it automatically on first run, but you can also bootstrap it yourself:
+
 ```bash
-cd api
-uv venv
-PC:
-   .\.venv\Scripts\activate
-MAC
-   source .venv/bin/activate
-uv pip install -r requirements.txt
-cp .env.example env   # or on Windows: copy .env.example env
-# add your OpenAI key in api/env
+# from the repo root
+python -m venv .venv
+
+# Windows (PowerShell)
+.\.venv\Scripts\Activate.ps1
+# Windows (cmd)
+.\.venv\Scripts\activate.bat
+# macOS / Linux
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-dev.txt
+
+cp api/.env.example api/.env   # Windows: copy api\.env.example api\.env
+# add your OpenAI / Supabase keys in api/.env
 ```
 
-Run:
+Run the API server:
 ```bash
+cd api
 uvicorn main:app --reload --port 8000
 ```
 
+Or just double‑click / run `api\run.bat` (Windows) — it activates the root `.venv`, installs deps, and starts uvicorn for you.
+
+#### Optional ML add-ons (local agent)
+These are heavy and CUDA-specific, so they are **opt-in** on top of the root venv:
+
+| Feature | Install |
+|---|---|
+| **Mesh Gen (Hunyuan3D-2)** | After installing a CUDA PyTorch wheel from [pytorch.org](https://pytorch.org/get-started/locally/), run `.\scripts\install-meshgen.ps1 -HunyuanPath <your-Hunyuan3D-2-clone>` (e.g. `D:\FunBloom\models\Hunyuan3D-2`). The script installs `util/requirements-meshgen.txt`, Hunyuan's own `requirements.txt`, the editable `hy3dgen` package, and the two texture extensions in one shot. Add `-SkipTextureExtensions` to skip the slow MSVC build if you only want untextured meshes. |
+| **UI Breakdown SAM** | `pip install -r local_agent/requirements-sam.txt` (also installs torch CPU; for CUDA install the matching torch wheel first) |
+
+See `local_agent/README.md` and `local_agent/README-SAM.md` for full details.
+
 #### TECH
-Supabase is the database that is currently used 
-- Project GameDevKing
+Supabase is the database that is currently used. Configure your Supabase project URL and keys in `api/.env` for this DevBloom deployment.
 
 ### Frontend
 ```bash
@@ -60,7 +84,7 @@ Run the **same checks locally** before you commit (from the **repository root**)
 | **Windows** (PowerShell) | `.\scripts\ci-local.ps1` |
 | **macOS / Linux / Git Bash / WSL** | `chmod +x scripts/ci-local.sh && ./scripts/ci-local.sh` |
 
-**Manual equivalent** (if you prefer not to use the scripts):
+**Manual equivalent** (if you prefer not to use the scripts — activate the root `.venv` first so pytest finds the deps):
 
 ```bash
 cd web && npm ci && npm run lint && npm run build && cd ../api && python -m pip install -r requirements.txt -r requirements-dev.txt && python -m pytest tests -q

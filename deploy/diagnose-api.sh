@@ -4,12 +4,21 @@
 
 set +e
 
-echo "=== gamedev-api (systemd) ==="
-if systemctl list-unit-files gamedev-api.service &>/dev/null; then
-  systemctl is-active gamedev-api
-  systemctl --no-pager -l status gamedev-api 2>&1 | head -30
+API_UNIT="devbloom-api"
+if systemctl cat devbloom-api.service &>/dev/null; then
+  API_UNIT="devbloom-api"
+elif systemctl cat gamedev-api.service &>/dev/null; then
+  API_UNIT="gamedev-api"
+  echo "(Using legacy systemd unit gamedev-api; install deploy/devbloom-api.service.example to migrate.)"
+  echo ""
+fi
+
+echo "=== ${API_UNIT} (systemd) ==="
+if systemctl cat "${API_UNIT}.service" &>/dev/null; then
+  systemctl is-active "${API_UNIT}"
+  systemctl --no-pager -l status "${API_UNIT}" 2>&1 | head -30
 else
-  echo "Unit gamedev-api.service not found. Install deploy/gamedev-api.service.example first."
+  echo "Unit devbloom-api.service not found (nor legacy gamedev-api). Install deploy/devbloom-api.service.example first."
 fi
 
 echo ""
@@ -25,8 +34,8 @@ echo "=== curl upstream (connection refused = API down; 200/401/404 = something 
 curl -sS -o /dev/null -w "GET /docs -> HTTP %{http_code}\n" --max-time 5 http://127.0.0.1:8000/docs || echo "curl failed"
 
 echo ""
-echo "=== Last gamedev-api journal ==="
-journalctl -u gamedev-api -n 50 --no-pager 2>/dev/null || true
+echo "=== Last ${API_UNIT} journal ==="
+journalctl -u "${API_UNIT}" -n 50 --no-pager 2>/dev/null || true
 
 echo ""
 echo "=== nginx errors (recent) ==="
@@ -37,5 +46,5 @@ else
 fi
 
 echo ""
-echo "If curl to :8000 fails but games/ + venv are OK, run: sudo systemctl restart gamedev-api"
+echo "If curl to :8000 fails but games/ + venv are OK, run: sudo systemctl restart ${API_UNIT}"
 echo "If HTTPS returns 502 but HTTP works, check nginx listen 443 block includes location /api/ (certbot sometimes omits it)."

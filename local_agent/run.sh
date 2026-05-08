@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run from repo root so `local_agent` imports resolve. Creates local_agent/.venv on first run.
+# Run from repo root so `local_agent` imports resolve. Uses the SHARED root .venv
+# (one venv at the repo root for both api and local_agent). Creates it on first run.
 # Requires Python 3.10+ as `python3` or `python` on PATH.
 #
 # Usage:
@@ -14,8 +15,9 @@ AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${AGENT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
-VENV_PY="${AGENT_DIR}/.venv/bin/python"
-VENV_PIP="${AGENT_DIR}/.venv/bin/pip"
+VENV_DIR="${REPO_ROOT}/.venv"
+VENV_PY="${VENV_DIR}/bin/python"
+VENV_PIP="${VENV_DIR}/bin/pip"
 
 print_python_help() {
   echo ""
@@ -41,12 +43,12 @@ if [[ ! -x "${VENV_PY}" ]]; then
     print_python_help
     exit 1
   fi
-  echo "[local_agent] Creating venv in local_agent/.venv ..."
-  "${PY_CMD}" -m venv "${AGENT_DIR}/.venv"
+  echo "[local_agent] Creating shared venv in .venv ..."
+  "${PY_CMD}" -m venv "${VENV_DIR}"
 fi
 
-echo "[local_agent] Installing dependencies..."
-"${VENV_PIP}" install -q -r "${AGENT_DIR}/requirements.txt"
+echo "[local_agent] Installing dependencies (root requirements.txt)..."
+"${VENV_PIP}" install -q -r "${REPO_ROOT}/requirements.txt"
 
 # CORS: deployed UI can call this agent from your browser. Override or clear before running:
 #   export LOCAL_AGENT_EXTRA_CORS_ORIGINS=https://your-host.example

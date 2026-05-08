@@ -1,13 +1,16 @@
 @echo off
 setlocal EnableDelayedExpansion
-:: Run from repo root so `local_agent` imports resolve. Creates local_agent\.venv on first run.
+:: Run from repo root so `local_agent` imports resolve. Uses the SHARED root .venv
+:: (one venv at the repo root for both api and local_agent). Creates it on first run.
 :: Requires Python 3.10+ on PATH as `python`, or the Windows `py` launcher (`py -3`).
 
 set "AGENT_DIR=%~dp0"
 set "REPO_ROOT=%AGENT_DIR%.."
+for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
 cd /d "%REPO_ROOT%"
 
-set "VENV_PY=%AGENT_DIR%.venv\Scripts\python.exe"
+set "VENV_DIR=%REPO_ROOT%\.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 :: Use `python -m pip` instead of `pip.exe`: after moving the repo, pip.exe launchers still point at the old path.
 
 if exist "%VENV_PY%" goto :deps
@@ -15,8 +18,8 @@ if exist "%VENV_PY%" goto :deps
 call :find_python
 if errorlevel 1 exit /b 1
 
-echo [local_agent] Creating venv in local_agent\.venv ...
-!PY_RUN! -m venv "%AGENT_DIR%.venv"
+echo [local_agent] Creating shared venv in .venv ...
+!PY_RUN! -m venv "%VENV_DIR%"
 if errorlevel 1 (
   echo ERROR: Could not create venv.
   call :print_python_help
@@ -24,8 +27,8 @@ if errorlevel 1 (
 )
 
 :deps
-echo [local_agent] Installing dependencies...
-"%VENV_PY%" -m pip install -q -r "%AGENT_DIR%requirements.txt"
+echo [local_agent] Installing dependencies (root requirements.txt)...
+"%VENV_PY%" -m pip install -q -r "%REPO_ROOT%\requirements.txt"
 if errorlevel 1 (
   echo ERROR: pip install failed.
   exit /b 1
@@ -36,7 +39,7 @@ if not defined LOCAL_AGENT_EXTRA_CORS_ORIGINS set "LOCAL_AGENT_EXTRA_CORS_ORIGIN
 
 call :ensure_msvc_env
 
-set "VENV_ACTIVATE=%AGENT_DIR%.venv\Scripts\activate.bat"
+set "VENV_ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
 if exist "%VENV_ACTIVATE%" (
   call "%VENV_ACTIVATE%"
 ) else (

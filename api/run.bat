@@ -1,13 +1,16 @@
 @echo off
 setlocal EnableDelayedExpansion
-:: Run the FastAPI app from the api folder (main:app). Creates api\.venv on first run.
+:: Run the FastAPI app from the api folder (main:app). Uses the SHARED root .venv
+:: (one venv at the repo root for both api and local_agent). Creates it on first run.
 :: Requires Python 3.10+ on PATH as `python`, or the Windows `py` launcher (`py -3`).
 
 set "API_DIR=%~dp0"
-cd /d "%API_DIR%"
+set "REPO_ROOT=%API_DIR%.."
+for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
 
-set "VENV_PY=%API_DIR%.venv\Scripts\python.exe"
-set "ACTIVATE=%API_DIR%.venv\Scripts\activate.bat"
+set "VENV_DIR=%REPO_ROOT%\.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+set "ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
 
 if exist "%VENV_PY%" (
   call "%ACTIVATE%"
@@ -17,8 +20,8 @@ if exist "%VENV_PY%" (
 call :find_python
 if errorlevel 1 exit /b 1
 
-echo [api] Creating venv in api\.venv ...
-!PY_RUN! -m venv --upgrade-deps "%API_DIR%.venv"
+echo [api] Creating shared venv in .venv ...
+!PY_RUN! -m venv --upgrade-deps "%VENV_DIR%"
 if errorlevel 1 (
   echo ERROR: Could not create venv.
   call :print_python_help
@@ -33,7 +36,7 @@ if errorlevel 1 (
   echo [api] No pip in venv; bootstrapping with ensurepip...
   python -m ensurepip --default-pip
   if errorlevel 1 (
-    echo ERROR: ensurepip failed. Remove api\.venv and run this script again, or use full Python from python.org
+    echo ERROR: ensurepip failed. Remove .venv and run this script again, or use full Python from python.org
     exit /b 1
   )
   python -m pip install --upgrade pip
@@ -42,13 +45,14 @@ if errorlevel 1 (
     exit /b 1
   )
 )
-echo [api] Installing dependencies...
-python -m pip install -q -r "%API_DIR%requirements.txt"
+echo [api] Installing dependencies (root requirements.txt)...
+python -m pip install -q -r "%REPO_ROOT%\requirements.txt"
 if errorlevel 1 (
   echo ERROR: pip install failed.
   exit /b 1
 )
 
+cd /d "%API_DIR%"
 echo [api] http://127.0.0.1:8000  ^(Ctrl+C to stop^)
 python -m uvicorn main:app --reload --port 8000
 exit /b %ERRORLEVEL%

@@ -1,0 +1,4 @@
+# Dev-only extras (pytest, etc.) for the consolidated root .venv.
+# Install alongside requirements.txt:
+#   python -m pip install -r requirements.txt -r requirements-dev.txt
+-r api/requirements-dev.txt

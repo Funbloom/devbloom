@@ -42,7 +42,7 @@ const TIP_LABEL_MODEL =
 const TIP_LABEL_TEMP = "Sampling temperature for the labeling JSON response (lower = more deterministic).";
 
 const TIP_DETECTION_SERVER =
-  "Local agent: SAM_CHECKPOINT_PATH and SAM_MODEL_TYPE (vit_b|vit_l|vit_h). Install: pip install -r requirements-sam.txt in local_agent/.venv. API: GEMINI_API_KEY for VLM labels; UI_BREAKDOWN_LABEL_MODEL optional. CUDA recommended for SAM.";
+  "Local agent: SAM_CHECKPOINT_PATH and SAM_MODEL_TYPE (vit_b|vit_l|vit_h). Install: pip install -r local_agent/requirements-sam.txt in the root .venv. API: GEMINI_API_KEY for VLM labels; UI_BREAKDOWN_LABEL_MODEL optional. CUDA recommended for SAM.";
 
 const TIP_CROP_PADDING =
   "Extra pixels added on every side when cutting out each widget for export. Helps avoid cutting off anti-aliased edges; 0 means tight to the box.";

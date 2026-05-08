@@ -13,23 +13,26 @@ Local-only FastAPI service for reading/writing project files on the developer ma
 
 ## Requirements
 - Python 3.10+
-Cuda 12.4 : https://developer.nvidia.com/cuda-12-4-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local
+- CUDA 12.4 (only if you use Mesh Gen / SAM): https://developer.nvidia.com/cuda-12-4-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local
 
+> **Venv:** the local agent shares the **root `.venv`** with the API (one venv at the repo root). `local_agent/run.bat` / `run.sh` create and use it for you. See the main [README](../README.md#backend-one-venv-for-everything-python) for the one-time bootstrap.
 
 ## Install (Windows / PC)
+From the **repo root**:
 ```powershell
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r local_agent\requirements.txt
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
 Optional **UI Breakdown SAM:** copy `local_agent\.env.example` to `local_agent\.env` and set `SAM_CHECKPOINT_PATH` (see [README-SAM.md](README-SAM.md)). The agent loads `.env` on startup.
 
 ## Install (macOS)
+From the **repo root**:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r local_agent/requirements.txt
+pip install -r requirements.txt
 ```
 
 Optional **UI Breakdown SAM:** copy `local_agent/.env.example` to `local_agent/.env` and set `SAM_CHECKPOINT_PATH` (see [README-SAM.md](README-SAM.md)).
@@ -122,20 +125,20 @@ Needs a **GUI session**. **macOS**: AppleScript (`osascript`), no tkinter. **Win
 ```
 GET /health
 ```
-Response includes `"service": "local_agent"` so the web app can tell this process from the main API (`gamedev-api`).
+Response includes `"service": "local_agent"` so the web app can tell this process from the main API (`devbloom-api`).
 
 ## Mesh Gen / Hunyuan3D-2 (in-process)
 
 Use the **Mesh Gen** page in the web app (localhost only). It calls `POST /meshgen/generate` on this agent.
 
-**`No module named 'torch'`** means PyTorch is not installed in **`local_agent/.venv`**. The agent’s `requirements.txt` does not include Torch (you must pick a **CUDA** build that matches your GPU drivers). Install in this order:
+**`No module named 'torch'`** means PyTorch is not installed in the **root `.venv`**. The base `requirements.txt` does not include Torch (you must pick a **CUDA** build that matches your GPU drivers). Install in this order:
 
-### One-time: PyTorch + Hunyuan in `local_agent/.venv` (Windows)
+### One-time: PyTorch + Hunyuan in the root `.venv` (Windows)
 
-From the **repo root**, with the **local agent venv** active:
+From the **repo root**, with the **root venv** active:
 
 ```powershell
-.\local_agent\.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 ```
 
 1. **PyTorch (CUDA)** — open [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/), choose *pip* + your CUDA version, then run the command it shows. Typical example (replace `cu124` if the site says another CUDA):
@@ -144,21 +147,28 @@ From the **repo root**, with the **local agent venv** active:
    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
    ```
 
-2. **Agent + Hunyuan** — still in the same venv:
+2. **Agent + Hunyuan (one-shot script)** — still in the same venv. The script installs `util/requirements-meshgen.txt`, Hunyuan's own `requirements.txt`, the editable `hy3dgen` package, and (by default) builds the texture extensions:
 
    ```powershell
-   pip install -r local_agent\requirements.txt
-   pip install -e D:\path\to\Hunyuan3D-2
+   .\scripts\install-meshgen.ps1 -HunyuanPath D:\FunBloom\models\Hunyuan3D-2
+   # or set $env:HUNYUAN_PATH once and just run:
+   #   .\scripts\install-meshgen.ps1
    ```
 
-   Use your real Hunyuan clone path and follow [Hunyuan3D-2 README](https://github.com/Tencent-Hunyuan/Hunyuan3D-2) for `requirements.txt`.
+   Skip the (slow) texture build with `-SkipTextureExtensions` if you only need **untextured** meshes:
+
+   ```powershell
+   .\scripts\install-meshgen.ps1 -HunyuanPath D:\FunBloom\models\Hunyuan3D-2 -SkipTextureExtensions
+   ```
+
+   If you see `ERROR: ... is not a valid editable requirement`, you passed the literal placeholder path instead of your real Hunyuan clone path. See [Hunyuan3D-2 README](https://github.com/Tencent-Hunyuan/Hunyuan3D-2) for upstream details.
 
 ### Texturing: `custom_rasterizer` (required if Mesh Gen “texture” is ON)
 
-The paint pipeline imports a **compiled** module `custom_rasterizer`. If you see `ModuleNotFoundError: No module named 'custom_rasterizer'`, build the extensions **in the same `local_agent/.venv`**:
+The paint pipeline imports a **compiled** module `custom_rasterizer`. The one-shot script above builds both extensions for you. If you ever see `ModuleNotFoundError: No module named 'custom_rasterizer'`, re-run the script **without** `-SkipTextureExtensions`, or build the extensions manually **in the same root `.venv`**:
 
 ```powershell
-cd D:\path\to\Hunyuan3D-2\hy3dgen\texgen\custom_rasterizer
+cd D:\FunBloom\models\Hunyuan3D-2\hy3dgen\texgen\custom_rasterizer
 python setup.py install
 cd ..\differentiable_renderer
 python setup.py install
@@ -192,7 +202,7 @@ Mesh Gen **`face_count`** (UI: *max faces*) caps **triangles** after Hunyuan’s
 ### Mesh Gen returns 503
 
 1. Read the **503 response detail** from the API/UI and the **agent terminal** (import errors log at **ERROR** with a full traceback). Confirm **`HF_HOME`** is set for the agent process (see table above).
-2. **Use the same Python as `local_agent/.venv`:** run `local_agent\run.bat` once to create the venv, then in that venv install PyTorch/CUDA and `pip install -e <path-to-Hunyuan3D-2>`. Do **not** start the agent with a random global Python if Hunyuan is only installed in the venv.
-3. In VS Code, use **Run and Debug → Python Debugger: Local Agent** (it targets `local_agent/.venv`). If the Debug Console shows `c:\Python310\python.exe`, the workspace **selected interpreter** is wrong—pick **`.\local_agent\.venv\Scripts\python.exe`** for the debug session or rely on `run.bat`.
+2. **Use the same Python as the root `.venv`:** run `local_agent\run.bat` once to create the venv, then in that venv install PyTorch/CUDA and `pip install -e <path-to-Hunyuan3D-2>`. Do **not** start the agent with a random global Python if Hunyuan is only installed in the venv.
+3. In VS Code, use **Run and Debug → Python Debugger: Local Agent** (it targets the root `.venv`). If the Debug Console shows `c:\Python310\python.exe`, the workspace **selected interpreter** is wrong—pick **`.\.venv\Scripts\python.exe`** for the debug session or rely on `run.bat`.
 4. After fixing the environment, **restart** the agent so `meshgen_hunyuan` reloads.
 

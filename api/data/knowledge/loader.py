@@ -47,7 +47,7 @@ def _strip_html(content: str) -> str:
 def _fetch_remote(url: str) -> str:
     request = Request(
         url,
-        headers={"User-Agent": "GameDevKing/1.0 (+https://example.local)"},
+        headers={"User-Agent": "DevBloom/1.0 (+https://example.local)"},
     )
     with urlopen(request, timeout=DEFAULT_TIMEOUT) as response:
         return response.read().decode("utf-8", errors="ignore")
