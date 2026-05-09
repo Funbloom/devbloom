@@ -7,6 +7,7 @@ export const IMAGE_MODEL_OPTIONS: ImageModelOption[] = [
   { value: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image" },
   { value: "leonardo-gemini-2.5-flash-image", label: "Leonardo (Gemini 2.5 Flash Image)" },
   { value: "gpt-image-1.5", label: "GPT Image 1.5" },
+  { value: "gpt-image-2", label: "GPT Image 2" },
 ];
 
 /** Default for storyboard tiles and any shared UI that does not override. */

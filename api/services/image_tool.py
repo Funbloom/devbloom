@@ -867,7 +867,7 @@ def _generate_image_openai(
 
     if ref_files:
         params["image"] = ref_files
-        if model_name in ("gpt-image-1", "gpt-image-1.5"):
+        if model_name in ("gpt-image-1", "gpt-image-1.5", "gpt-image-2"):
             params["input_fidelity"] = "high"
         # images.edit does not support quality="hd" (images.generate does).
         if params.get("quality") == "hd":

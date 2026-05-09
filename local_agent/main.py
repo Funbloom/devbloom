@@ -313,7 +313,7 @@ def read_binary_file(request: Request, body: FileBinaryReadRequest) -> Response:
 async def ui_breakdown_sam(request: Request, body: UiBreakdownSamRequest) -> dict[str, Any]:
     """Run Segment Anything in-process (same venv as this agent). Requires SAM checkpoint + torch."""
     ensure_localhost(request)
-    _reload_runtime_env()
+    reload_runtime_env()
     root = ensure_root_approved(body.project_root)
     try:
         from local_agent.ui_breakdown_sam import run_sam_segmentation_for_project_file

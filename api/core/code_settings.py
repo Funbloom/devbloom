@@ -39,6 +39,7 @@ IMAGE_MODEL_REGISTRY: dict[str, dict[str, str]] = {
         "provider_model": "gemini-2.5-flash-image",
     },
     "gpt-image-1.5": {"provider": "openai", "provider_model": "gpt-image-1.5"},
+    "gpt-image-2": {"provider": "openai", "provider_model": "gpt-image-2"},
 }
 
 IMAGE_MODEL_DEFAULTS: dict[str, str] = {
