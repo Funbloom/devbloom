@@ -872,8 +872,14 @@ def get_image(filename: str, project_key: str | None = None) -> FileResponse:
     except HTTPException:
         raise
     except ValueError as exc:
-        logger.warning("Invalid image request.", extra={"filename": filename, "project_key": project_key, "error": str(exc)})
+        logger.warning(
+            "Invalid image request.",
+            extra={"image_filename": filename, "project_key": project_key, "error": str(exc)},
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Unexpected error while serving generated image.", extra={"filename": filename, "project_key": project_key})
+        logger.exception(
+            "Unexpected error while serving generated image.",
+            extra={"image_filename": filename, "project_key": project_key},
+        )
         raise HTTPException(status_code=500, detail="Failed to read image.") from exc
