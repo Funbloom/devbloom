@@ -30,6 +30,7 @@ from local_agent.models import (
     FileJsonWriteRequest,
     FileBinaryReadRequest,
     FileBinaryWriteRequest,
+    ImageResizeDirectoryRequest,
     MeshGenGenerateRequest,
     ProjectResolveRequest,
     UiBreakdownSamRequest,
@@ -41,6 +42,7 @@ from local_agent.security import (
     resolve_under_root,
     standard_project_paths,
 )
+from local_agent.image_resize import resize_images_in_directory
 from local_agent.installation_routes import reload_runtime_env, router as installation_router
 from local_agent.json_patch import apply_json_patch
 from local_agent.fs_picker import pick_directory_native, pick_file_native
@@ -380,6 +382,20 @@ def write_binary_file(request: Request, body: FileBinaryWriteRequest) -> dict[st
     return {"ok": True, "path": str(path)}
 
 
+@app.post("/images/resize_directory")
+async def images_resize_directory(request: Request, body: ImageResizeDirectoryRequest) -> dict[str, Any]:
+    """Resize every supported image in an approved directory in place."""
+    ensure_localhost(request)
+    root = ensure_root_approved(body.directory_path)
+    try:
+        return await asyncio.to_thread(resize_images_in_directory, root, body.width, body.height)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Directory image resize failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def guess_media_type(path: Path) -> str:
     ext = path.suffix.lower()
     if ext in {".png"}:
@@ -388,6 +404,10 @@ def guess_media_type(path: Path) -> str:
         return "image/jpeg"
     if ext in {".webp"}:
         return "image/webp"
+    if ext in {".gif"}:
+        return "image/gif"
+    if ext in {".bmp"}:
+        return "image/bmp"
     return "application/octet-stream"
 
 

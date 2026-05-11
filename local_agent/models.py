@@ -78,6 +78,12 @@ class FileBinaryWriteRequest(BaseModel):
     content_base64: str = Field(min_length=1)
 
 
+class ImageResizeDirectoryRequest(BaseModel):
+    directory_path: str = Field(min_length=1)
+    width: int = Field(ge=1, le=8192)
+    height: int = Field(ge=1, le=8192)
+
+
 class UiBreakdownSamRequest(BaseModel):
     """Run SAM on a UI image under an approved project (same layout as API: Images/ or Gen/Images/UI/)."""
 

@@ -218,6 +218,31 @@ export const localAgent = {
       }),
     });
   },
+  resizeImagesInDirectory(body: {
+    directory_path: string;
+    width: number;
+    height: number;
+  }): Promise<{
+    directory: string;
+    requested_width: number;
+    requested_height: number;
+    processed_count: number;
+    failed_count: number;
+    processed: Array<{
+      filename: string;
+      path: string;
+      old_width: number;
+      old_height: number;
+      width: number;
+      height: number;
+    }>;
+    failed: Array<{ filename: string; error: string }>;
+  }> {
+    return requestLocalAgent("/images/resize_directory", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
   meshgenGenerate(body: {
     project_root: string;
     relative_path: string;
