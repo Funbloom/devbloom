@@ -10,7 +10,11 @@ from openai import OpenAI
 
 from core.code_settings import GPT_MODEL_DEFAULT
 from services.image_tool import generate_openai_image_to_dir
-from .gifts_service import resolve_gift_images_dir
+from .gifts_service import (
+    POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
+    downscale_pocket_voyager_image,
+    resolve_gift_images_dir,
+)
 
 
 def load_cities_catalog(catalog_path: str) -> dict[str, Any]:
@@ -259,11 +263,12 @@ def batch_create_cities(
                     prompt=prompt_text,
                     output_dir=images_dir,
                     filename=f"{gid}.png",
-                    width=1024,
-                    height=1024,
+                    width=POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
+                    height=POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
                     quality="low",
                     model_name="gpt-image-1.5",
                 )
+                downscale_pocket_voyager_image(Path(result["path"]))
                 gift_entry["imageFileName"] = result["filename"]
             except Exception as exc:
                 errors.append(f"Image generation failed for gift {gid}: {exc}")

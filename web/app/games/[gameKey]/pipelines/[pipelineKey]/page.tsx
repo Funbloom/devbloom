@@ -30,6 +30,12 @@ const GIFT_IMAGE_SINGLE_SUBJECT_SUFFIX =
 const REL_LOCATION_UPDATE_IMAGES_DIR = "Assets/StreamingAssets/Travel/LocationUpdateImages";
 /** Value written to cities.json `image` for generated / auto-resolved assets (under StreamingAssets). */
 const LOC_UPDATE_JSON_PATH_PREFIX = "Travel/LocationUpdateImages";
+const POCKET_VOYAGER_PIPELINE_IMAGE_GENERATION_SIZE = 1024;
+const POCKET_VOYAGER_PIPELINE_IMAGE_OUTPUT_SIZE = 256;
+
+function citiesSelectedStorageKey(projectKey: string): string {
+  return `pocketVoyagerCitiesSelectedCityIds:${projectKey}`;
+}
 
 /** Appended to every location-update image generation prompt. */
 const LOCATION_UPDATE_IMAGE_SCENE_CONSTRAINTS =
@@ -423,6 +429,8 @@ function PipelinePageContent({
   /** Scroll container for the main city/gift list (split view or tall list). */
   const mainListScrollRef = useRef<HTMLDivElement>(null);
   const pendingMainListScrollTop = useRef<number | null>(null);
+  const hasAutoScrolledToSelectedCityRef = useRef(false);
+  const [selectedCityIdsHydrated, setSelectedCityIdsHydrated] = useState(false);
   const preserveMainListScrollForNextCatalogReload = useCallback(() => {
     const el = mainListScrollRef.current;
     if (el) pendingMainListScrollTop.current = el.scrollTop;
@@ -545,14 +553,58 @@ function PipelinePageContent({
     return btoa(binary);
   };
 
+  const base64ToBlob = (contentBase64: string) => {
+    const binary = atob(contentBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: "image/png" });
+  };
+
+  const resizeGeneratedImageBase64 = async (contentBase64: string, width: number, height: number) => {
+    const blob = base64ToBlob(contentBase64);
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const nextImage = new Image();
+        nextImage.onload = () => resolve(nextImage);
+        nextImage.onerror = () => reject(new Error("Failed to load generated image for resize."));
+        nextImage.src = objectUrl;
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        throw new Error("Canvas 2D context is unavailable.");
+      }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(image, 0, 0, width, height);
+      const resizedBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((nextBlob) => {
+          if (!nextBlob) {
+            reject(new Error("Failed to encode resized image."));
+            return;
+          }
+          resolve(nextBlob);
+        }, "image/png");
+      });
+      return arrayBufferToBase64(await resizedBlob.arrayBuffer());
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+
   const generateImageBytes = async (prompt: string, quality: string, projectKey: string | null) => {
     const res = await fetchApi("/tools/generate_image_bytes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         prompt,
-        width: 1024,
-        height: 1024,
+        width: POCKET_VOYAGER_PIPELINE_IMAGE_GENERATION_SIZE,
+        height: POCKET_VOYAGER_PIPELINE_IMAGE_GENERATION_SIZE,
         quality,
         model: "gpt-image-1.5",
         project_key: projectKey,
@@ -564,7 +616,11 @@ function PipelinePageContent({
     }
     const payload = (await res.json()) as { content_base64?: string };
     if (!payload.content_base64) throw new Error("Image bytes missing.");
-    return payload.content_base64;
+    return await resizeGeneratedImageBase64(
+      payload.content_base64,
+      POCKET_VOYAGER_PIPELINE_IMAGE_OUTPUT_SIZE,
+      POCKET_VOYAGER_PIPELINE_IMAGE_OUTPUT_SIZE
+    );
   };
 
   const appendPipelineLog = useCallback((line: string) => {
@@ -1145,6 +1201,74 @@ function PipelinePageContent({
             .includes(giftSearch.trim().toLowerCase())
         )
       : allCityItems;
+
+  useEffect(() => {
+    if (pipelineKey !== "cities") {
+      return;
+    }
+    hasAutoScrolledToSelectedCityRef.current = false;
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (!activeProjectKeyForGame) {
+      setSelectedCityIds({});
+      setSelectedCityIdsHydrated(true);
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(citiesSelectedStorageKey(activeProjectKeyForGame));
+      if (!raw) {
+        setSelectedCityIds({});
+        setSelectedCityIdsHydrated(true);
+        return;
+      }
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const next: Record<string, boolean> = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        if (value === true) {
+          next[key] = true;
+        }
+      }
+      setSelectedCityIds(next);
+    } catch {
+      setSelectedCityIds({});
+    }
+    setSelectedCityIdsHydrated(true);
+  }, [activeProjectKeyForGame, pipelineKey]);
+
+  useEffect(() => {
+    if (pipelineKey !== "cities" || !selectedCityIdsHydrated || !activeProjectKeyForGame || typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(
+        citiesSelectedStorageKey(activeProjectKeyForGame),
+        JSON.stringify(selectedCityIds)
+      );
+    } catch {
+      // ignore persistence failures
+    }
+  }, [activeProjectKeyForGame, pipelineKey, selectedCityIds, selectedCityIdsHydrated]);
+
+  useLayoutEffect(() => {
+    if (pipelineKey !== "cities" || !selectedCityIdsHydrated || hasAutoScrolledToSelectedCityRef.current) {
+      return;
+    }
+    const selectedCity = filteredCityItems.find((city) => city.name_id && selectedCityIds[city.name_id]);
+    if (!selectedCity?.name_id || !mainListScrollRef.current) {
+      return;
+    }
+    const selectorValue =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(selectedCity.name_id)
+        : selectedCity.name_id.replace(/["\\]/g, "\\$&");
+    const target = mainListScrollRef.current.querySelector<HTMLElement>(`[data-city-id="${selectorValue}"]`);
+    if (!target) {
+      return;
+    }
+    target.scrollIntoView({ block: "start", inline: "nearest" });
+    hasAutoScrolledToSelectedCityRef.current = true;
+  }, [filteredCityItems, pipelineKey, selectedCityIds, selectedCityIdsHydrated]);
 
   const createGiftInCatalogCore = async (opts: {
     giftId: string;
@@ -2397,6 +2521,7 @@ function PipelinePageContent({
                     {filteredCityItems.map((city) => (
                       <div
                         key={city.name_id || city.display_name}
+                        data-city-id={city.name_id || undefined}
                         style={{
                           display: "grid",
                           gap: "0.5rem",

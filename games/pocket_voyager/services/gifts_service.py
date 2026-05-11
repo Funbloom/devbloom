@@ -5,9 +5,31 @@ import re
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from services.image_tool import generate_openai_image_to_dir, sanitize_filename
 
 _GIFT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+POCKET_VOYAGER_IMAGE_GENERATION_SIZE = 1024
+POCKET_VOYAGER_IMAGE_OUTPUT_SIZE = 256
+
+
+def downscale_pocket_voyager_image(path: Path) -> None:
+    target = path.resolve()
+    ext = target.suffix.lower()
+    save_format = "PNG"
+    if ext in {".jpg", ".jpeg"}:
+        save_format = "JPEG"
+    elif ext == ".webp":
+        save_format = "WEBP"
+    with Image.open(target) as image:
+        resized = image.resize(
+            (POCKET_VOYAGER_IMAGE_OUTPUT_SIZE, POCKET_VOYAGER_IMAGE_OUTPUT_SIZE),
+            Image.Resampling.LANCZOS,
+        )
+        if save_format == "JPEG":
+            resized = resized.convert("RGB")
+        resized.save(target, format=save_format)
 
 
 def _sanitize_filename(name: str) -> str:
@@ -184,11 +206,12 @@ def generate_gift_image(catalog_path: str, gift_id: str) -> dict[str, Any]:
         prompt=prompt,
         output_dir=images_dir,
         filename=filename,
-        width=1024,
-        height=1024,
+        width=POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
+        height=POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
         quality="low",
         model_name="gpt-image-1.5",
     )
+    downscale_pocket_voyager_image(Path(result["path"]))
     gift["imageFileName"] = result["filename"]
 
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -279,12 +302,13 @@ def batch_update_gift_images(
                 prompt=prompt,
                 output_dir=images_dir,
                 filename=f"{gid}.png",
-                width=1024,
-                height=1024,
+                width=POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
+                height=POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
                 quality=quality,
                 style=style_mode,
                 model_name="gpt-image-1.5",
             )
+            downscale_pocket_voyager_image(Path(result["path"]))
             gift["imageFileName"] = result["filename"]
             updated.append(gift)
         except Exception as exc:
