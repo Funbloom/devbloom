@@ -16,6 +16,65 @@ from .gifts_service import (
     resolve_gift_images_dir,
 )
 
+LOC_UPDATE_JSON_PATH_PREFIX = "Travel/LocationUpdateImages"
+_SAFE_IMAGE_BASENAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+_LOC_UPDATE_STOPWORDS = {
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "as", "by", "with", "from",
+    "is", "was", "are", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did",
+    "will", "would", "could", "should", "may", "might", "must", "shall", "can",
+    "i", "im", "ive", "ill", "id", "you", "your", "me", "my", "we", "our", "they", "their", "it", "its",
+    "this", "that", "these", "those", "some", "any", "no", "not", "just", "like", "about", "into",
+}
+
+
+def _basename_only(path_or_name: str) -> str:
+    text = (path_or_name or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    return text.split("/")[-1].strip()
+
+
+def _is_safe_image_basename(name: str) -> bool:
+    return bool(_SAFE_IMAGE_BASENAME_RE.match(name)) and len(name) <= 120
+
+
+def _is_placeholder_location_image(base: str) -> bool:
+    lowered = (base or "").strip().lower()
+    return lowered in {"placeholder.png", "placeholder.jpg", "placeholder.jpeg"}
+
+
+def _slug_from_location_update_text(text: str) -> str:
+    tokens = re.findall(r"[a-z0-9]+", text.strip().lower())
+    filtered = [token for token in tokens if len(token) >= 3 and token not in _LOC_UPDATE_STOPWORDS]
+    if len(filtered) >= 2:
+        return f"{filtered[0]}_{filtered[1]}"[:64]
+    if len(filtered) == 1:
+        return filtered[0][:48]
+    return "update"
+
+
+def _suggest_location_update_basename(city_id: str, update_index: int, text: str) -> str:
+    city = re.sub(r"[^a-zA-Z0-9_-]+", "_", (city_id or "").strip().lower()).strip("_") or "city"
+    tail = _slug_from_location_update_text(text)
+    stem = f"{city}_{tail}".strip("_")[:76]
+    if not stem:
+        stem = f"{city}_update_{update_index + 1}"
+    return f"{stem}.png"
+
+
+def _unique_location_update_basename(stem_with_ext: str, existing_lower: set[str]) -> str:
+    stem = re.sub(r"\.(png|jpg|jpeg|webp)$", "", stem_with_ext.strip(), flags=re.IGNORECASE)
+    name = f"{stem}.png"
+    suffix = 0
+    while name.lower() in existing_lower:
+        suffix += 1
+        name = f"{stem}_{suffix}.png"
+    return name
+
+
+def _json_location_update_image_path(filename: str) -> str:
+    return f"{LOC_UPDATE_JSON_PATH_PREFIX}/{_basename_only(filename)}"
+
 
 def load_cities_catalog(catalog_path: str) -> dict[str, Any]:
     raw_path = (catalog_path or "").strip()
@@ -212,6 +271,13 @@ def batch_create_cities(
     new_gifts: list[dict[str, Any]] = []
     images_dir = resolve_gift_images_dir(str(gifts_file))
     images_dir.mkdir(parents=True, exist_ok=True)
+    location_update_images_dir = (cities_file.parent / "LocationUpdateImages").resolve()
+    location_update_images_dir.mkdir(parents=True, exist_ok=True)
+    existing_location_update_lower = {
+        path.name.lower()
+        for path in location_update_images_dir.iterdir()
+        if path.is_file() and not path.name.lower().endswith(".meta")
+    }
     errors: list[str] = []
 
     def _slug(s: str) -> str:
@@ -274,13 +340,37 @@ def batch_create_cities(
                 errors.append(f"Image generation failed for gift {gid}: {exc}")
 
         normalized_updates: list[dict[str, str]] = []
-        for update in updates:
+        for update_index, update in enumerate(updates):
             if not isinstance(update, dict):
                 continue
             text = str(update.get("text") or "").strip()
-            image = str(update.get("image") or "").strip()
-            if text:
-                normalized_updates.append({"text": text, "image": image})
+            if not text:
+                continue
+            raw_image = str(update.get("image") or "").strip()
+            base = _basename_only(raw_image)
+            use_semantic_basename = _is_placeholder_location_image(base) or not base or not _is_safe_image_basename(base)
+            suggested = _suggest_location_update_basename(city_id, update_index, text)
+            filename = (
+                _unique_location_update_basename(suggested, existing_location_update_lower)
+                if use_semantic_basename
+                else base
+            )
+            try:
+                result = generate_openai_image_to_dir(
+                    prompt=text,
+                    output_dir=location_update_images_dir,
+                    filename=filename,
+                    width=POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
+                    height=POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
+                    quality="low",
+                    model_name="gpt-image-1.5",
+                )
+                downscale_pocket_voyager_image(Path(result["path"]))
+                existing_location_update_lower.add(result["filename"].lower())
+                normalized_updates.append({"text": text, "image": _json_location_update_image_path(result["filename"])})
+            except Exception as exc:
+                errors.append(f"Location update image generation failed for city {city_id} #{update_index + 1}: {exc}")
+                normalized_updates.append({"text": text, "image": ""})
 
         cities_list.append(
             {

@@ -189,6 +189,117 @@ function isPlaceholderLocationImage(base: string): boolean {
   return b === "placeholder.jpg" || b === "placeholder.jpeg" || b === "placeholder.png";
 }
 
+function locationUpdateFilenameTokens(filename: string): string[] {
+  const stem = basenameOnly(filename).replace(/\.[^.]+$/, "");
+  return stripDiacriticsLower(stem)
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !LOC_UPDATE_STOPWORDS.has(token));
+}
+
+function buildLocationUpdateMatchTokens(cityId: string, cityDisplayName: string, text: string): string[] {
+  const out = new Set<string>();
+  const addTokens = (tokens: string[]) => {
+    for (const token of tokens) {
+      const cleaned = token.trim();
+      if (cleaned.length >= 3 && !LOC_UPDATE_STOPWORDS.has(cleaned)) {
+        out.add(cleaned);
+      }
+    }
+  };
+  addTokens(
+    sanitizeCityStub(cityId)
+      .split("_")
+      .filter(Boolean)
+  );
+  addTokens(
+    stripDiacriticsLower(cityDisplayName)
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+  addTokens(slugFromLocationUpdateText(text).split("_").filter(Boolean));
+  addTokens(
+    stripDiacriticsLower(text)
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 8)
+  );
+  return Array.from(out);
+}
+
+function findBestExistingLocationUpdateMatch(
+  cityId: string,
+  cityDisplayName: string,
+  updateIndex: number,
+  text: string,
+  existingFilenames: string[],
+  claimedLower: Set<string>
+): string | null {
+  const candidates = existingFilenames.filter((name) => !claimedLower.has(name.toLowerCase()));
+  if (candidates.length === 0) {
+    return null;
+  }
+  const suggested = suggestLocationUpdateBasename(cityId, updateIndex, text);
+  const suggestedLower = suggested.toLowerCase();
+  const exact = candidates.find((name) => name.toLowerCase() === suggestedLower);
+  if (exact) {
+    return exact;
+  }
+  const suggestedStem = suggestedLower.replace(/\.[^.]+$/, "");
+  const sameStem = candidates.find((name) => {
+    const lower = name.toLowerCase();
+    const stem = lower.replace(/\.[^.]+$/, "");
+    return stem === suggestedStem || stem.startsWith(`${suggestedStem}_`);
+  });
+  if (sameStem) {
+    return sameStem;
+  }
+
+  const wantedTokens = buildLocationUpdateMatchTokens(cityId, cityDisplayName, text);
+  if (wantedTokens.length === 0) {
+    return null;
+  }
+  const cityTokens = sanitizeCityStub(cityId)
+    .split("_")
+    .filter((token) => token.length >= 3);
+  let best: { name: string; score: number } | null = null;
+  for (const name of candidates) {
+    const tokenSet = new Set<string>(locationUpdateFilenameTokens(name));
+    if (tokenSet.size === 0) {
+      continue;
+    }
+    let score = 0;
+    let matchedWanted = 0;
+    for (const token of wantedTokens) {
+      if (tokenSet.has(token)) {
+        matchedWanted += 1;
+        score += cityTokens.includes(token) ? 3 : 2;
+      }
+    }
+    if (matchedWanted === 0) {
+      continue;
+    }
+    const cityMatched = cityTokens.some((token) => tokenSet.has(token));
+    if (cityMatched) {
+      score += 3;
+    }
+    const slugTokens = slugFromLocationUpdateText(text)
+      .split("_")
+      .filter((token) => token.length >= 3);
+    const slugMatched = slugTokens.filter((token) => tokenSet.has(token)).length;
+    score += slugMatched * 2;
+    if (!best || score > best.score) {
+      best = { name, score };
+    }
+  }
+  return best && best.score >= 6 ? best.name : null;
+}
+
 /** Match `image_exists` from `_normalize_gift_catalog_entry` by listing the gift images folder (one request). */
 async function applyGiftImageExistsFromProject(
   projectRoot: string,
@@ -385,6 +496,10 @@ function PipelinePageContent({
   const [citiesToolTab, setCitiesToolTab] = useState<"create" | "updates" | "pipelines">("create");
   const [missingGiftsPipelineStatus, setMissingGiftsPipelineStatus] = useState<string | null>(null);
   const [isCreatingMissingGifts, setIsCreatingMissingGifts] = useState(false);
+  const [relinkExistingUpdatesStatus, setRelinkExistingUpdatesStatus] = useState<string | null>(null);
+  const [isRelinkingExistingUpdates, setIsRelinkingExistingUpdates] = useState(false);
+  const [testExistingUpdatesStatus, setTestExistingUpdatesStatus] = useState<string | null>(null);
+  const [isTestingExistingUpdates, setIsTestingExistingUpdates] = useState(false);
   const [linkedGiftBasePath, setLinkedGiftBasePath] = useState("");
   const [selectedLinkedGiftId, setSelectedLinkedGiftId] = useState<string | null>(null);
   const [selectedLinkedGiftImage, setSelectedLinkedGiftImage] = useState<string | null>(null);
@@ -1136,7 +1251,7 @@ function PipelinePageContent({
       if (!gift) throw new Error("Gift not found.");
       const name = String(gift["displayName"] || gift["name"] || giftId).trim();
       const desc = String(gift["description"] || "").trim();
-      const prompt = `${desc ? `${name}. ${desc}` : name}${GIFT_IMAGE_SINGLE_SUBJECT_SUFFIX}`;
+      const prompt = buildGiftImagePrompt(desc ? `${name}. ${desc}` : name);
       const base64 = await generateImageBytes(prompt, "low", activeProjectKeyForGame);
       const filename = `${giftId}.png`;
       await localAgent.writeBinary(
@@ -1201,6 +1316,23 @@ function PipelinePageContent({
             .includes(giftSearch.trim().toLowerCase())
         )
       : allCityItems;
+
+  const getCitiesSharedStylePrompt = (): string => {
+    if (pipelineKey !== "cities") {
+      return "";
+    }
+    const styleObj = giftStyles.find((s) => s.id === locationUpdateImageStyleId);
+    return styleObj?.prompt?.trim() ?? "";
+  };
+
+  const buildGiftImagePrompt = (base: string): string => {
+    const promptParts = [base.trim()];
+    const stylePrompt = getCitiesSharedStylePrompt();
+    if (stylePrompt) {
+      promptParts.push(stylePrompt);
+    }
+    return `${promptParts.filter(Boolean).join(". ")}${GIFT_IMAGE_SINGLE_SUBJECT_SUFFIX}`;
+  };
 
   useEffect(() => {
     if (pipelineKey !== "cities") {
@@ -1313,7 +1445,7 @@ function PipelinePageContent({
       const desc = String(newGift.description || "");
       const base =
         (opts.imagePrompt && opts.imagePrompt.trim()) || `${display}${desc ? `. ${desc}` : ""}`;
-      const promptBase = `${base.trim()}${GIFT_IMAGE_SINGLE_SUBJECT_SUFFIX}`;
+      const promptBase = buildGiftImagePrompt(base);
       const base64 = await generateImageBytes(promptBase, "low", activeProjectKeyForGame);
       filename = `${gid}.png`;
       await localAgent.writeBinary(root, `Assets/StreamingAssets/Gifts/Images/${filename}`, base64);
@@ -1450,6 +1582,182 @@ function PipelinePageContent({
     }
   };
 
+  const handleRelinkExistingLocationUpdates = async () => {
+    if (!gameDataPaths?.projectRoot) {
+      setRelinkExistingUpdatesStatus("Local project path is not available.");
+      return;
+    }
+    const selected = allCityItems.filter((c) => selectedCityIds[c.name_id]);
+    if (selected.length === 0) {
+      setRelinkExistingUpdatesStatus("Select at least one city using the checkboxes in the list.");
+      return;
+    }
+    setIsRelinkingExistingUpdates(true);
+    preserveMainListScrollForNextCatalogReload();
+    setRelinkExistingUpdatesStatus("Scanning placeholder location updates and relinking matching files...");
+    try {
+      const listing = await localAgent.listDir(gameDataPaths.projectRoot, REL_LOCATION_UPDATE_IMAGES_DIR);
+      const existingFilenames = listing.entries
+        .filter((entry) => entry.is_file)
+        .map((entry) => entry.name)
+        .filter((name) => !name.toLowerCase().endsWith(".meta"))
+        .filter((name) => /\.(png|jpg|jpeg|webp)$/i.test(name))
+        .filter((name) => !isPlaceholderLocationImage(name));
+      if (existingFilenames.length === 0) {
+        setRelinkExistingUpdatesStatus(`No existing files found under ${REL_LOCATION_UPDATE_IMAGES_DIR}.`);
+        return;
+      }
+
+      const selectedIds = new Set(selected.map((city) => city.name_id).filter(Boolean));
+      const claimedLower = new Set<string>();
+      const citiesData = await readCitiesRaw();
+      const citiesValue = citiesData["cities"];
+      const citiesList = Array.isArray(citiesValue) ? (citiesValue as Record<string, unknown>[]) : [];
+      let relinked = 0;
+      let unresolved = 0;
+
+      for (const city of citiesList) {
+        const cityId = String(city.nameId || city.name_id || "").trim();
+        if (!cityId || !selectedIds.has(cityId)) {
+          continue;
+        }
+        const cityDisplay = String(city.displayName || city.display_name || cityId).trim();
+        const rawUpdates = city.locationUpdates;
+        const legacyUpdates = city.location_updates;
+        const arr = Array.isArray(rawUpdates) ? rawUpdates : Array.isArray(legacyUpdates) ? legacyUpdates : null;
+        if (!arr) {
+          continue;
+        }
+        for (let i = 0; i < arr.length; i += 1) {
+          const update = arr[i];
+          if (!update || typeof update !== "object") {
+            continue;
+          }
+          const text = String(update.text ?? "").trim();
+          if (!text) {
+            continue;
+          }
+          const base = basenameOnly(String(update.image ?? "").trim());
+          if (!isPlaceholderLocationImage(base)) {
+            continue;
+          }
+          const matched = findBestExistingLocationUpdateMatch(
+            cityId,
+            cityDisplay,
+            i,
+            text,
+            existingFilenames,
+            claimedLower
+          );
+          if (!matched) {
+            unresolved += 1;
+            continue;
+          }
+          claimedLower.add(matched.toLowerCase());
+          update.image = jsonImagePathForLocationUpdate(matched);
+          relinked += 1;
+          appendPipelineLog(
+            `location image: relinked placeholder to ${REL_LOCATION_UPDATE_IMAGES_DIR}/${matched} [${cityId}] #${i + 1}`
+          );
+        }
+      }
+
+      if (relinked > 0) {
+        citiesData["cities"] = citiesList;
+        await writeCitiesRaw(citiesData);
+        setCatalogReload((prev) => prev + 1);
+        appendPipelineLog(`data: cities.json — relinked ${relinked} existing location update image(s).`);
+      }
+
+      if (relinked === 0) {
+        setRelinkExistingUpdatesStatus(
+          unresolved > 0
+            ? `No matches found for ${unresolved} placeholder location update(s).`
+            : "No placeholder location update images needed relinking."
+        );
+      } else if (unresolved > 0) {
+        setRelinkExistingUpdatesStatus(
+          `Done. Relinked ${relinked} location update image(s); ${unresolved} placeholder row(s) still need a match.`
+        );
+      } else {
+        setRelinkExistingUpdatesStatus(`Done. Relinked ${relinked} location update image(s).`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Relink failed.";
+      setRelinkExistingUpdatesStatus(`Error: ${message}`);
+      appendPipelineLog(`location update relink error: ${message}`);
+    } finally {
+      setIsRelinkingExistingUpdates(false);
+    }
+  };
+
+  const handleTestExistingLocationUpdates = async () => {
+    if (!gameDataPaths?.projectRoot) {
+      setTestExistingUpdatesStatus("Local project path is not available.");
+      return;
+    }
+    setIsTestingExistingUpdates(true);
+    setTestExistingUpdatesStatus(`Scanning ${REL_LOCATION_UPDATE_IMAGES_DIR} for unused files...`);
+    try {
+      const listing = await localAgent.listDir(gameDataPaths.projectRoot, REL_LOCATION_UPDATE_IMAGES_DIR);
+      const existingFilenames = listing.entries
+        .filter((entry) => entry.is_file)
+        .map((entry) => entry.name)
+        .filter((name) => !name.toLowerCase().endsWith(".meta"))
+        .filter((name) => /\.(png|jpg|jpeg|webp)$/i.test(name))
+        .sort((a, b) => a.localeCompare(b));
+      if (existingFilenames.length === 0) {
+        setTestExistingUpdatesStatus(`No image files found under ${REL_LOCATION_UPDATE_IMAGES_DIR}.`);
+        return;
+      }
+
+      const usedLower = new Set<string>();
+      const citiesData = await readCitiesRaw();
+      const citiesValue = citiesData["cities"];
+      const citiesList = Array.isArray(citiesValue) ? (citiesValue as Record<string, unknown>[]) : [];
+      for (const city of citiesList) {
+        const rawUpdates = city.locationUpdates;
+        const legacyUpdates = city.location_updates;
+        const arr = Array.isArray(rawUpdates) ? rawUpdates : Array.isArray(legacyUpdates) ? legacyUpdates : null;
+        if (!arr) {
+          continue;
+        }
+        for (const update of arr) {
+          if (!update || typeof update !== "object") {
+            continue;
+          }
+          const base = basenameOnly(String(update.image ?? "").trim());
+          if (!base || !/\.(png|jpg|jpeg|webp)$/i.test(base)) {
+            continue;
+          }
+          usedLower.add(base.toLowerCase());
+        }
+      }
+
+      const unused = existingFilenames.filter((name) => !usedLower.has(name.toLowerCase()));
+      appendPipelineLog(
+        unused.length === 0
+          ? `location image test: all ${existingFilenames.length} file(s) under ${REL_LOCATION_UPDATE_IMAGES_DIR} are referenced in cities.json.`
+          : `location image test: ${unused.length} unused file(s) under ${REL_LOCATION_UPDATE_IMAGES_DIR}: ${unused.join(", ")}`
+      );
+      if (unused.length === 0) {
+        setTestExistingUpdatesStatus(
+          `All good. ${existingFilenames.length} file(s) under ${REL_LOCATION_UPDATE_IMAGES_DIR} are referenced in cities.json.`
+        );
+        return;
+      }
+      setTestExistingUpdatesStatus(
+        `Unused files (${unused.length}):\n${unused.join("\n")}`
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Test failed.";
+      setTestExistingUpdatesStatus(`Error: ${message}`);
+      appendPipelineLog(`location update test error: ${message}`);
+    } finally {
+      setIsTestingExistingUpdates(false);
+    }
+  };
+
   const handleEditGift = async () => {
     if (!gameDataPaths?.projectRoot) {
       setEditGiftStatus("Local project path is not available.");
@@ -1570,8 +1878,10 @@ function PipelinePageContent({
       `Existing gift ids (avoid duplicates):\n${existingGifts.join(", ") || "None"}\n\n` +
       `Create ${Number.isFinite(count) ? count : 5} new cities around the world that are NOT in the list. ` +
       `For each city, create exactly 5 gifts. Provide concise display names and descriptions. ` +
+      `Also create exactly 3 locationUpdates per city. Each locationUpdate must be a short casual travel text message, warm and playful, max 150 characters. ` +
+      `For each locationUpdate include an image field set to "placeholder.png". ` +
       `Return JSON only with the schema:\n` +
-      `{ "cities": [ { "cityId": string, "displayName": string, "gifts": [ { "giftId": string, "displayName": string, "description": string, "activityTags": [string] } ] } ] }`;
+      `{ "cities": [ { "cityId": string, "displayName": string, "locationUpdates": [ { "text": string, "image": string } ], "gifts": [ { "giftId": string, "displayName": string, "description": string, "activityTags": [string] } ] } ] }`;
   };
 
   const handleBatchCreatePrompt = () => {
@@ -1627,12 +1937,42 @@ function PipelinePageContent({
       };
       const createdCities = Array.isArray(data.created_cities) ? data.created_cities : [];
       const createdGifts = Array.isArray(data.created_gifts) ? data.created_gifts : [];
+      const invalidCreatedCities = createdCities
+        .map((city) => {
+          const cityId = String(city["nameId"] || city["name_id"] || "").trim() || "(unknown city)";
+          const rawUpdates = Array.isArray(city["locationUpdates"])
+            ? (city["locationUpdates"] as Record<string, unknown>[])
+            : Array.isArray(city["location_updates"])
+              ? (city["location_updates"] as Record<string, unknown>[])
+              : [];
+          return { cityId, updateCount: rawUpdates.filter((update) => String(update?.["text"] ?? "").trim()).length };
+        })
+        .filter((city) => city.updateCount < 3);
+      if (invalidCreatedCities.length > 0) {
+        throw new Error(
+          `Batch plan returned city entries without 3 location updates: ${invalidCreatedCities
+            .map((city) => `${city.cityId} (${city.updateCount})`)
+            .join(", ")}`
+        );
+      }
+      const existingLocationUpdateLower = new Set<string>();
+      try {
+        const { entries } = await localAgent.listDir(gameDataPaths.projectRoot, REL_LOCATION_UPDATE_IMAGES_DIR);
+        for (const entry of entries) {
+          if (!entry.is_file) continue;
+          const name = entry.name.trim();
+          if (!name || name.toLowerCase().endsWith(".meta")) continue;
+          existingLocationUpdateLower.add(name.toLowerCase());
+        }
+      } catch {
+        // Folder may not exist yet; writeBinary will create it on demand.
+      }
       for (const gift of createdGifts) {
         const gid = String(gift["id"] || "").trim();
         if (!gid) continue;
         const name = String(gift["displayName"] || gift["name"] || gid).trim();
         const desc = String(gift["description"] || "").trim();
-        const prompt = desc ? `${name}. ${desc}` : name;
+        const prompt = buildGiftImagePrompt(desc ? `${name}. ${desc}` : name);
         const base64 = await generateImageBytes(prompt, "low", activeProjectKeyForGame);
         const filename = `${gid}.png`;
         await localAgent.writeBinary(
@@ -1645,6 +1985,47 @@ function PipelinePageContent({
         appendPipelineLog(`image: ${REL_GIFT_IMAGES_DIR}/${filename} (generated) [batch gift ${gid}]`);
       }
       for (const city of createdCities) {
+        const cityId = String(city["nameId"] || city["name_id"] || "").trim();
+        const rawUpdates = Array.isArray(city["locationUpdates"])
+          ? (city["locationUpdates"] as Record<string, unknown>[]).slice(0, 3)
+          : Array.isArray(city["location_updates"])
+            ? (city["location_updates"] as Record<string, unknown>[]).slice(0, 3)
+            : [];
+        const normalizedUpdates: Array<{ text: string; image: string }> = [];
+        for (let idx = 0; idx < rawUpdates.length; idx += 1) {
+          const update = rawUpdates[idx];
+          const text = String(update?.["text"] ?? "").trim();
+          if (!text) {
+            continue;
+          }
+          const rawImage = String(update?.["image"] ?? "").trim();
+          const base = basenameOnly(rawImage).trim();
+          const useSemanticBasename = isPlaceholderLocationImage(base) || !base || !isSafeImageBasename(base);
+          const semanticSuggested = suggestLocationUpdateBasename(cityId, idx, text);
+          const diskBasename = useSemanticBasename
+            ? uniqueLocationUpdateBasename(semanticSuggested, existingLocationUpdateLower)
+            : base;
+          const promptParts = [text];
+          const stylePrompt = getCitiesSharedStylePrompt();
+          if (stylePrompt) {
+            promptParts.push(stylePrompt);
+          }
+          promptParts.push(LOCATION_UPDATE_IMAGE_SCENE_CONSTRAINTS);
+          const imagePrompt = promptParts.join(". ");
+          const imageBase64 = await generateImageBytes(imagePrompt, "low", activeProjectKeyForGame);
+          await localAgent.writeBinary(
+            gameDataPaths.projectRoot,
+            `${REL_LOCATION_UPDATE_IMAGES_DIR}/${diskBasename}`,
+            imageBase64
+          );
+          existingLocationUpdateLower.add(diskBasename.toLowerCase());
+          normalizedUpdates.push({
+            text,
+            image: jsonImagePathForLocationUpdate(diskBasename),
+          });
+          appendPipelineLog(`image: ${REL_LOCATION_UPDATE_IMAGES_DIR}/${diskBasename} (generated) [batch city ${cityId}] #${idx + 1}`);
+        }
+        city["locationUpdates"] = normalizedUpdates;
         citiesList.push(city);
       }
       citiesData["cities"] = citiesList;
@@ -1864,7 +2245,7 @@ function PipelinePageContent({
     const replaceExisting = locationUpdateAction === "add_new";
     preserveMainListScrollForNextCatalogReload();
     setIsUpdatingLoc(true);
-    setUpdateLocStatus("Updating locationUpdates...");
+    setUpdateLocStatus("Updating locationUpdates and generating images...");
     try {
       const res = await fetchApi(`/games/${gameKey}/pipelines/cities/location_plan`, {
         method: "POST",
@@ -1884,27 +2265,79 @@ function PipelinePageContent({
       const citiesData = await readCitiesRaw();
       const citiesValue = citiesData["cities"];
       const citiesList = Array.isArray(citiesValue) ? (citiesValue as Record<string, unknown>[]) : [];
+      const existingLower = new Set<string>();
+      try {
+        const { entries } = await localAgent.listDir(gameDataPaths.projectRoot, REL_LOCATION_UPDATE_IMAGES_DIR);
+        for (const entry of entries) {
+          if (!entry.is_file) continue;
+          const name = entry.name.trim();
+          if (!name || name.toLowerCase().endsWith(".meta")) continue;
+          existingLower.add(name.toLowerCase());
+        }
+      } catch {
+        // Folder may not exist yet; writeBinary will create it on demand.
+      }
       let touched = 0;
+      let generated = 0;
       for (const city of citiesList) {
         const cityId = String(city.nameId || city.name_id || "").trim();
         if (!cityId) continue;
         const incoming = updatesByCity[cityId] || [];
         if (incoming.length === 0) continue;
         touched += 1;
+        const currentExisting = Array.isArray(city.locationUpdates) ? (city.locationUpdates as Record<string, unknown>[]) : [];
+        const baseIndex = replaceExisting ? 0 : currentExisting.length;
+        const normalizedIncoming: CityUpdate[] = [];
+        for (let idx = 0; idx < incoming.length; idx += 1) {
+          const update = incoming[idx];
+          const text = String(update?.text ?? "").trim();
+          if (!text) {
+            continue;
+          }
+          const rawImage = String(update?.image ?? "").trim();
+          const base = basenameOnly(rawImage).trim();
+          const useSemanticBasename = isPlaceholderLocationImage(base) || !base || !isSafeImageBasename(base);
+          const semanticSuggested = suggestLocationUpdateBasename(cityId, baseIndex + idx, text);
+          const requestedBasename = useSemanticBasename ? semanticSuggested : base;
+          const diskBasename = uniqueLocationUpdateBasename(requestedBasename, existingLower);
+          const notes = locationUpdateImageGenNotes.trim();
+          const styleObj = giftStyles.find((s) => s.id === locationUpdateImageStyleId);
+          const stylePrompt = styleObj?.prompt?.trim() ?? "";
+          const promptParts = [text];
+          if (notes) promptParts.push(notes);
+          if (stylePrompt) promptParts.push(stylePrompt);
+          promptParts.push(LOCATION_UPDATE_IMAGE_SCENE_CONSTRAINTS);
+          const imagePrompt = promptParts.join(". ");
+          const imageBase64 = await generateImageBytes(imagePrompt, "low", activeProjectKeyForGame);
+          await localAgent.writeBinary(
+            gameDataPaths.projectRoot,
+            `${REL_LOCATION_UPDATE_IMAGES_DIR}/${diskBasename}`,
+            imageBase64
+          );
+          existingLower.add(diskBasename.toLowerCase());
+          normalizedIncoming.push({
+            text,
+            image: jsonImagePathForLocationUpdate(diskBasename),
+          });
+          generated += 1;
+          appendPipelineLog(
+            `image: ${REL_LOCATION_UPDATE_IMAGES_DIR}/${diskBasename} (generated) [${cityId}]`
+          );
+        }
         if (replaceExisting) {
-          city.locationUpdates = incoming;
+          city.locationUpdates = normalizedIncoming;
         } else {
           const existing = Array.isArray(city.locationUpdates) ? city.locationUpdates : [];
-          city.locationUpdates = [...existing, ...incoming];
+          city.locationUpdates = [...existing, ...normalizedIncoming];
         }
       }
       citiesData["cities"] = citiesList;
       await writeCitiesRaw(citiesData);
       setCatalogReload((prev) => prev + 1);
       appendPipelineLog(
-        `data: cities.json — locationUpdates (${replaceExisting ? "replace" : "append"}) for ${touched} city/cities via LLM plan.`
+        `data: cities.json — locationUpdates (${replaceExisting ? "replace" : "append"}) for ${touched} city/cities via LLM plan; generated ${generated} image(s).`
       );
-      setUpdateLocStatus("locationUpdates updated.");
+      setUpdateLocStatus(`locationUpdates updated. Generated ${generated} image(s).`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Update failed.";
       setUpdateLocStatus(`Error: ${message}`);
@@ -2168,6 +2601,20 @@ function PipelinePageContent({
             )}
             {pipelineKey === "cities" && (
               <div style={{ marginTop: "0.75rem", display: "grid", gap: "0.75rem" }}>
+                <label style={{ display: "grid", gap: "0.25rem" }}>
+                  <span>Style</span>
+                  <select
+                    value={locationUpdateImageStyleId}
+                    onChange={(e) => setLocationUpdateImageStyleId(e.target.value)}
+                  >
+                    <option value="">None</option>
+                    {giftStyles.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <div style={{ display: "flex", gap: "0.5rem" }}>
                   <button
                     type="button"
@@ -2306,7 +2753,7 @@ function PipelinePageContent({
                           )}
                         </p>
                         <label style={{ display: "grid", gap: "0.25rem" }}>
-                          <span>Image style (defaults from ImageGen → Image tab → Style)</span>
+                          <span>Image style (same shared Cities style selector above)</span>
                           <select
                             value={locationUpdateImageStyleId}
                             onChange={(e) => setLocationUpdateImageStyleId(e.target.value)}
@@ -2366,13 +2813,48 @@ function PipelinePageContent({
                     <button
                       type="button"
                       onClick={() => void handleCreateAllMissingGifts()}
-                      disabled={isCreatingMissingGifts}
+                      disabled={isCreatingMissingGifts || isRelinkingExistingUpdates || isTestingExistingUpdates}
                     >
                       {isCreatingMissingGifts ? "Working..." : "Create All missing gifts"}
                     </button>
                     {missingGiftsPipelineStatus && (
                       <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
                         {missingGiftsPipelineStatus}
+                      </div>
+                    )}
+                    <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                      For selected cities, placeholder location update images are compared against the existing filenames
+                      already under <code style={{ fontSize: 11 }}>{REL_LOCATION_UPDATE_IMAGES_DIR}</code>. If a likely
+                      semantic match is found from the city id and update text, the <code style={{ fontSize: 11 }}>image</code>{" "}
+                      field in <code style={{ fontSize: 11 }}>cities.json</code> is relinked to that file.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleRelinkExistingLocationUpdates()}
+                      disabled={isCreatingMissingGifts || isRelinkingExistingUpdates || isTestingExistingUpdates}
+                    >
+                      {isRelinkingExistingUpdates ? "Working..." : "Relink existing updates"}
+                    </button>
+                    {relinkExistingUpdatesStatus && (
+                      <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                        {relinkExistingUpdatesStatus}
+                      </div>
+                    )}
+                    <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                      Tests every image file already under <code style={{ fontSize: 11 }}>{REL_LOCATION_UPDATE_IMAGES_DIR}</code>{" "}
+                      and reports which ones are not referenced by any <code style={{ fontSize: 11 }}>cities.json</code>{" "}
+                      location update.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleTestExistingLocationUpdates()}
+                      disabled={isCreatingMissingGifts || isRelinkingExistingUpdates || isTestingExistingUpdates}
+                    >
+                      {isTestingExistingUpdates ? "Working..." : "Test"}
+                    </button>
+                    {testExistingUpdatesStatus && (
+                      <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)", whiteSpace: "pre-wrap" }}>
+                        {testExistingUpdatesStatus}
                       </div>
                     )}
                   </div>
