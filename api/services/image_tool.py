@@ -8,12 +8,13 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 import requests
 from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+from core.local_paths import require_local_project_path
 from services.rag import resolve_project_path
 from core.local_settings import load_image_defaults
 from core.code_settings import (
@@ -416,6 +417,39 @@ def delete_ui_canvas_nested_file(project_key: str, relative: str) -> None:
     path.unlink()
 
 
+def resolve_project_root_relative_file(project_key: str, relative: str) -> Path:
+    """
+    Resolve a file path under the project's local root (same segment rules as Gen/Images/UI nested paths).
+    Example relative: Assets/StreamingAssets/MyGame/data/sprite.png
+    """
+    pk = (project_key or "").strip()
+    if not pk:
+        raise ValueError("project_key is required.")
+    root = Path(require_local_project_path(pk)).resolve()
+    rel = (relative or "").strip().replace("\\", "/").lstrip("/")
+    if not rel or ".." in rel:
+        raise ValueError("Invalid path.")
+    parts = [p for p in rel.split("/") if p]
+    if not parts:
+        raise ValueError("Invalid path.")
+    segment_re = re.compile(r"^[a-zA-Z0-9._-]+$")
+    for p in parts:
+        if not segment_re.match(p):
+            raise ValueError("Invalid path segment.")
+    candidate = root.joinpath(*parts).resolve()
+    if root not in candidate.parents and candidate != root:
+        raise ValueError("Invalid path.")
+    return candidate
+
+
+def delete_project_relative_file(project_key: str, relative: str) -> None:
+    """Delete a single file under the project's local root (not directories)."""
+    path = resolve_project_root_relative_file(project_key, relative)
+    if not path.is_file():
+        raise ValueError("File not found.")
+    path.unlink()
+
+
 def delete_ui_canvas_export_folder(project_key: str, subfolder: str) -> None:
     """
     Delete Gen/Images/UI/<subfolder>/ and all contents (breakdown export directory).
@@ -508,6 +542,18 @@ def _load_reference_image_bytes(
                             return (fname, data, mime_type)
                     except ValueError:
                         pass
+                    root_str = resolve_project_path(pk)
+                    if root_str:
+                        root = Path(root_str).resolve()
+                        candidate = (root / rel).resolve()
+                        if candidate.is_file() and (root in candidate.parents or candidate == root):
+                            data = candidate.read_bytes()
+                            mime_type, _ = mimetypes.guess_type(candidate.name)
+                            if not mime_type:
+                                mime_type = "image/png"
+                            name_hint = candidate.name
+                            fname = _ensure_openai_reference_filename(name_hint, mime_type)
+                            return (fname, data, mime_type)
             safe_name = validate_image_filename(s)
             image_path = find_image_path(safe_name, project_key)
             if not image_path:
@@ -535,6 +581,7 @@ def _gemini_reference_inline_part(
     Build one Gemini content part (inline image) from either:
     - https?://... URL (fetched; used for storyboard Supabase URLs), or
     - relative path under Gen/Images/UI (e.g. MyExport/widget.png) when it contains /, or
+    - relative path under the resolved project root (e.g. Assets/StreamingAssets/.../card.png), or
     - bare filename under the project Images directory (existing behavior).
     """
     loaded = _load_reference_image_bytes(source, project_key)
@@ -960,6 +1007,7 @@ def generate_openai_image_bytes(
     transparent_background: bool | None = None,
     model_name: str = "gpt-image-1.5",
     project_key: Optional[str] = None,
+    reference_image_bytes: Optional[bytes] = None,
 ) -> bytes:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -974,9 +1022,18 @@ def generate_openai_image_bytes(
     else:
         size = "1024x1536"
 
+    registry_entry = IMAGE_MODEL_REGISTRY.get(model_name)
+    openai_model = str(registry_entry.get("provider_model", model_name)) if registry_entry else model_name
+    if reference_image_bytes is not None and len(reference_image_bytes) > 0:
+        if not registry_entry or registry_entry.get("provider") != "openai":
+            raise ValueError(
+                "Reference image conditioning for image bytes requires an OpenAI GPT Image model "
+                "(e.g. gpt-image-1.5 or gpt-image-2)."
+            )
+
     client = OpenAI(api_key=api_key)
     params: dict = {
-        "model": model_name,
+        "model": openai_model,
         "prompt": prompt,
         "size": size,
         "n": 1,
@@ -989,7 +1046,16 @@ def generate_openai_image_bytes(
     elif transparent_background is False:
         params["background"] = "opaque"
 
-    response = client.images.generate(**params)
+    ref_bytes = reference_image_bytes if reference_image_bytes else None
+    if ref_bytes:
+        params["image"] = [("reference.png", ref_bytes)]
+        if openai_model in ("gpt-image-1", "gpt-image-1.5", "gpt-image-2"):
+            params["input_fidelity"] = "high"
+        if params.get("quality") == "hd":
+            params["quality"] = "high"
+        response = client.images.edit(**params)
+    else:
+        response = client.images.generate(**params)
     data_item = response.data[0] if response.data else None
     b64 = getattr(data_item, "b64_json", None) if data_item else None
     if not b64 and isinstance(data_item, dict):

@@ -25,6 +25,7 @@ from core.llm_tools import get_tools
 from routers.admin_routes import admin_router
 from routers.chat_routes import chat_router
 from routers.games import games_router
+from server_games.solitaire.router import solitaire_image_router
 from routers.image_router import image_router
 from routers.pdf_routes import pdf_router
 from routers.projects import projects_router
@@ -89,6 +90,7 @@ app.include_router(games_router, dependencies=[Depends(get_current_user)])
 app.include_router(storyboard_router)
 app.include_router(pdf_router, dependencies=[Depends(get_current_user)])
 app.include_router(image_router)
+app.include_router(solitaire_image_router)
 app.include_router(settings_router, dependencies=[Depends(get_current_user)])
 app.include_router(usage_router, dependencies=[Depends(get_current_user)])
 app.include_router(user_profile_router)

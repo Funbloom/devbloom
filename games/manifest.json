@@ -15,6 +15,17 @@
           "description": "Load and inspect city data from a cities JSON file."
         }
       ]
+    },
+    {
+      "key": "solitaire",
+      "name": "Solitaire",
+      "pipelines": [
+        {
+          "key": "cards",
+          "name": "Cards",
+          "description": "Generate playing card images in a chosen style from a reference image."
+        }
+      ]
     }
   ]
 }

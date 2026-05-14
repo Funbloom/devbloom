@@ -1,3 +1,6 @@
+from fastapi import HTTPException
+import pytest
+
 from routers import image_router
 
 
@@ -53,3 +56,21 @@ def test_edit_image_nanobanana_preserves_explicit_gpt_model(monkeypatch):
     image_router.edit_image_nanobanana_route(body, user)
 
     assert called["model"] == "gpt-image-1.5"
+
+
+def test_generate_image_bytes_rejects_gemini_when_reference_set(monkeypatch):
+    monkeypatch.setattr(image_router, "check_can_generate_images", lambda *args, **kwargs: None)
+
+    import base64
+
+    body = image_router.GenerateImageBytesRequest(
+        prompt="a card",
+        model="gemini-2.5-flash-image",
+        reference_image_base64=base64.b64encode(b"x").decode("ascii"),
+    )
+    user = {"id": "user-1", "is_admin": False}
+
+    with pytest.raises(HTTPException) as exc_info:
+        image_router.generate_image_bytes_route(body, user)
+    assert exc_info.value.status_code == 400
+    assert "OpenAI GPT Image" in str(exc_info.value.detail)

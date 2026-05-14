@@ -17,4 +17,12 @@ export type GeneratedImage = {
   sourceSketchFilename?: string;
   /** Gen/Images/UI relative path (e.g. subfolder/widget.png) for breakdown exports; not persisted in image JSON. */
   nestedUiRelativePath?: string;
+  /**
+   * Project-relative path under the resolved local project root (forward slashes), e.g.
+   * `Assets/StreamingAssets/Solitaire/Cards/classic_ace_spades.png`. Used by Image Gen edit when `url` is a blob.
+   */
+  projectRelativeImagePath?: string;
+  /** When set, Image Gen edit submit uses these dimensions instead of size/quality presets. */
+  editWidth?: number;
+  editHeight?: number;
 };

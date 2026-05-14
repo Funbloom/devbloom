@@ -1,6 +1,7 @@
 import mimetypes
 import logging
 import base64
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -13,10 +14,12 @@ from core.code_settings import (
     UI_CANVAS_POLISH_MAX_PROMPT_LEN,
     resolve_image_model,
 )
+from services.rag import resolve_project_path
 from services.usage import check_can_generate_images, increment_usage, record_provider_usage
 from services.image_tool import (
     convert_image,
     crop_image,
+    delete_project_relative_file,
     find_image_path,
     generate_image,
     get_images_dir,
@@ -126,6 +129,8 @@ class GenerateImageBytesRequest(BaseModel):
     transparent_background: bool | None = None
     model: str | None = None
     project_key: str | None = None
+    # Raw base64 (no data: URL prefix). When set, OpenAI images.edit is used with this as style reference (~max 6 MiB decoded).
+    reference_image_base64: str | None = Field(default=None, max_length=10_485_760)
 
 
 class EditImageNanobananaRequest(BaseModel):
@@ -199,6 +204,14 @@ class ListUiCanvasNestedImagesRequest(BaseModel):
 class DeleteUiCanvasNestedImageRequest(BaseModel):
     project_key: str = Field(min_length=1)
     relative_path: str = Field(min_length=1, description="Path under Gen/Images/UI, e.g. MyExport/widget.png")
+
+
+class DeleteProjectRelativeFileRequest(BaseModel):
+    project_key: str = Field(min_length=1)
+    relative_path: str = Field(
+        min_length=1,
+        description="Path relative to project root, e.g. Assets/StreamingAssets/Solitaire/Cards/foo.png",
+    )
 
 
 class DeleteUiCanvasExportFolderRequest(BaseModel):
@@ -369,9 +382,21 @@ def edit_image_nanobanana_route(
             try:
                 pk_edit = (body.project_key or "").strip()
                 if pk_edit and ("/" in r or "\\" in r):
-                    nested_p = resolve_ui_canvas_nested_file(pk_edit, r.replace("\\", "/"))
-                    if nested_p.is_file():
-                        out_dir = nested_p.parent
+                    rel = r.replace("\\", "/").lstrip("/")
+                    if ".." not in rel:
+                        try:
+                            nested_p = resolve_ui_canvas_nested_file(pk_edit, rel)
+                            if nested_p.is_file():
+                                out_dir = nested_p.parent
+                        except ValueError:
+                            pass
+                        if out_dir is None:
+                            root_str = resolve_project_path(pk_edit)
+                            if root_str:
+                                root = Path(root_str).resolve()
+                                candidate = (root / rel).resolve()
+                                if candidate.is_file() and (root in candidate.parents or candidate == root):
+                                    out_dir = candidate.parent
                 else:
                     found = find_image_path(validate_image_filename(r), body.project_key)
                     if found:
@@ -660,6 +685,9 @@ async def import_image_route(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+_MAX_REFERENCE_IMAGE_BYTES = 6 * 1024 * 1024
+
+
 @image_router.post("/tools/generate_image_bytes")
 def generate_image_bytes_route(
     body: GenerateImageBytesRequest,
@@ -671,7 +699,31 @@ def generate_image_bytes_route(
         count=1,
     )
     try:
-        model_key = body.model or "gpt-image-1.5"
+        model_key = (body.model or "").strip() or "gpt-image-1.5"
+        if model_key not in IMAGE_MODEL_REGISTRY:
+            raise ValueError(f"Unsupported image model: {model_key}")
+
+        reference_bytes: bytes | None = None
+        raw_ref = (body.reference_image_base64 or "").strip()
+        if raw_ref:
+            if raw_ref.startswith("data:"):
+                comma = raw_ref.find(",")
+                if comma != -1:
+                    raw_ref = raw_ref[comma + 1 :].strip()
+            try:
+                reference_bytes = base64.b64decode(raw_ref, validate=False)
+            except Exception as exc:
+                raise ValueError("Invalid reference_image_base64 (expected raw base64).") from exc
+            if len(reference_bytes) > _MAX_REFERENCE_IMAGE_BYTES:
+                raise ValueError(
+                    f"Reference image is too large after decode ({len(reference_bytes)} bytes). Max {_MAX_REFERENCE_IMAGE_BYTES} bytes."
+                )
+            provider = str(IMAGE_MODEL_REGISTRY[model_key].get("provider") or "")
+            if provider != "openai":
+                raise ValueError(
+                    "reference_image_base64 requires an OpenAI GPT Image model (e.g. gpt-image-1.5 or gpt-image-2)."
+                )
+
         data = generate_openai_image_bytes(
             prompt=body.prompt,
             width=body.width,
@@ -680,6 +732,7 @@ def generate_image_bytes_route(
             transparent_background=body.transparent_background,
             model_name=model_key,
             project_key=body.project_key,
+            reference_image_bytes=reference_bytes,
         )
         increment_usage(user.get("id") or "", 1)
         _record_image_provider_usage(user.get("id") or "", model_key, 1)
@@ -687,6 +740,10 @@ def generate_image_bytes_route(
             "content_base64": base64.b64encode(data).decode("utf-8"),
             "mime": "image/png",
         }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -769,6 +826,22 @@ def delete_ui_canvas_nested_image_route(
     """Delete one file under Gen/Images/UI (nested path only)."""
     try:
         delete_ui_canvas_nested_file(
+            body.project_key.strip(),
+            body.relative_path.strip().replace("\\", "/"),
+        )
+        return {"ok": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@image_router.post("/tools/delete_project_relative_file")
+def delete_project_relative_file_route(
+    body: DeleteProjectRelativeFileRequest,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Delete one file under the project's local root (server-mapped path; same auth as UI canvas delete)."""
+    try:
+        delete_project_relative_file(
             body.project_key.strip(),
             body.relative_path.strip().replace("\\", "/"),
         )

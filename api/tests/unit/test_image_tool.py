@@ -1,5 +1,66 @@
+import base64
+
 from services import image_tool
 from pathlib import Path
+
+
+def test_generate_openai_image_bytes_uses_edit_when_reference(monkeypatch):
+    called: dict[str, object] = {}
+
+    class _DataItem:
+        b64_json = base64.b64encode(b"fake-png").decode("ascii")
+
+    class _Response:
+        data = [_DataItem()]
+
+    class _FakeImages:
+        def edit(self, **kwargs):
+            called["edit"] = kwargs
+            return _Response()
+
+        def generate(self, **kwargs):
+            called["generate"] = kwargs
+            return _Response()
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            self.images = _FakeImages()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(image_tool, "OpenAI", _FakeClient)
+
+    out = image_tool.generate_openai_image_bytes(
+        "playing card ace of spades",
+        model_name="gpt-image-1.5",
+        reference_image_bytes=b"\x89PNG\r\n\x1a\nfake",
+    )
+
+    assert out == b"fake-png"
+    assert "edit" in called
+    assert "generate" not in called
+    assert called["edit"]["model"] == "gpt-image-1.5"
+    assert called["edit"]["image"][0][0] == "reference.png"
+
+
+def test_generate_openai_image_bytes_rejects_reference_for_non_openai_model(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            self.images = None
+
+    monkeypatch.setattr(image_tool, "OpenAI", _FakeClient)
+
+    try:
+        image_tool.generate_openai_image_bytes(
+            "prompt",
+            model_name="gemini-2.5-flash-image",
+            reference_image_bytes=b"\x89PNG",
+        )
+    except ValueError as exc:
+        assert "OpenAI GPT Image" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_leonardo_reference_generation_uses_gemini_path(monkeypatch):

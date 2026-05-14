@@ -46,8 +46,12 @@ export function parseNestedUiRelFromUrl(url: string): string | null {
   }
 }
 
-/** Resolve reference for Nano Banana edit API: full HTTPS URL, bare Images/ filename, or Gen/Images/UI nested path. */
+/** Resolve reference for Nano Banana edit API: project-root relative path, UI nested rel, full HTTPS URL, or bare Images/ filename. */
 export function resolveReferenceForEditApi(img: GeneratedImage): string {
+  const projectRel = img.projectRelativeImagePath?.trim();
+  if (projectRel) {
+    return projectRel.replace(/\\/g, "/");
+  }
   const nested = img.nestedUiRelativePath?.trim();
   if (nested) return nested.replace(/\\/g, "/");
   const u = (img.url || "").trim();
@@ -535,6 +539,25 @@ export async function deleteUiCanvasNestedImage(
   relativePath: string
 ): Promise<void> {
   const response = await fetchApi("/tools/delete_ui_canvas_nested_image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_key: projectKey.trim(),
+      relative_path: relativePath.trim().replace(/\\/g, "/"),
+    }),
+  });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
+}
+
+/** Delete a file under the project's local root (API server path mapping), e.g. Assets/... */
+export async function deleteProjectRelativeFile(
+  projectKey: string,
+  relativePath: string
+): Promise<void> {
+  const response = await fetchApi("/tools/delete_project_relative_file", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

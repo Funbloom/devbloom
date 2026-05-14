@@ -167,7 +167,16 @@ export default function ImageGenEditPage() {
     const selectedStyle = selectedStyleId !== "__none" ? styles.find((style) => style.id === selectedStyleId) ?? null : null;
     const baseChanges = changes.trim();
     const finalChanges = selectedStyle?.prompt?.trim() ? `${selectedStyle.prompt.trim()}\n\n${baseChanges}` : baseChanges;
-    const dims = dimensionsFromPresets(sizePreset, qualityPreset);
+    const dims =
+      source &&
+      typeof source.editWidth === "number" &&
+      typeof source.editHeight === "number" &&
+      Number.isFinite(source.editWidth) &&
+      Number.isFinite(source.editHeight) &&
+      source.editWidth > 0 &&
+      source.editHeight > 0
+        ? { width: Math.round(source.editWidth), height: Math.round(source.editHeight) }
+        : dimensionsFromPresets(sizePreset, qualityPreset);
     sessionStorage.removeItem(IMAGEGEN_EDIT_CONTEXT_KEY);
     const returnTo = sessionStorage.getItem(IMAGEGEN_EDIT_RETURN_KEY);
     sessionStorage.removeItem(IMAGEGEN_EDIT_RETURN_KEY);
@@ -360,7 +369,11 @@ export default function ImageGenEditPage() {
                     }}
                   >
                     <img
-                      src={normalizeImageUrl(source.url)}
+                      src={
+                        source.url.startsWith("blob:") || source.url.startsWith("data:")
+                          ? source.url
+                          : normalizeImageUrl(source.url)
+                      }
                       alt=""
                       style={{
                         maxWidth: "100%",

@@ -39,7 +39,9 @@ function getCurrentPageLabel(pathname: string): string {
   if (pathname.startsWith("/uiBuilder")) return "UI Builder";
   const gamesPath = pathname.match(/^\/games\/([^/]+)(?:\/pipelines\/([^/]+))?/);
   if (gamesPath) {
+    const gameKey = gamesPath[1];
     const pipelineKey = gamesPath[2];
+    if (gameKey === "solitaire" && pipelineKey === "cards") return "Cards";
     if (pipelineKey === "gift_images") return "Gifts";
     if (pipelineKey === "cities") return "Cities";
     if (pipelineKey) return humanizeSegment(pipelineKey);
