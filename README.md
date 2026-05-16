@@ -23,6 +23,8 @@ The repo uses a single `.venv` at the repo root for both `api` and `local_agent`
 ```bash
 # from the repo root
 python -m venv .venv
+#Mac
+python3 -m venv .venv
 
 # Windows (PowerShell)
 .\.venv\Scripts\Activate.ps1
@@ -32,7 +34,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt -r requirements-dev.txt
+python3.10 -m pip install -r requirements.txt -r requirements-dev.txt
 
 cp api/.env.example api/.env   # Windows: copy api\.env.example api\.env
 # add your OpenAI / Supabase keys in api/.env

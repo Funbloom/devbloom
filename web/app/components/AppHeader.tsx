@@ -17,6 +17,7 @@ import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
 const STUDIO_LINKS: { path: string; label: string }[] = [
   { path: "/storyboard", label: "Storyboard" },
   { path: "/imageGen", label: "Image Gen" },
+  { path: "/audio", label: "Voice Gen" },
   { path: "/imageResize", label: "Image Resize" },
   { path: "/meshgen", label: "Mesh Gen" },
   { path: "/uiBuilder", label: "UI Builder" },
@@ -34,6 +35,7 @@ function getCurrentPageLabel(pathname: string): string {
   if (pathname.startsWith("/settings/usage")) return "Usage";
   if (pathname.startsWith("/storyboard")) return "Storyboard";
   if (pathname.startsWith("/imageGen")) return "Image Gen";
+  if (pathname.startsWith("/audio")) return "Voice Gen";
   if (pathname.startsWith("/imageResize")) return "Image Resize";
   if (pathname.startsWith("/meshgen")) return "Mesh Gen";
   if (pathname.startsWith("/uiBuilder")) return "UI Builder";

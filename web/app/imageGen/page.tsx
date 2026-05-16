@@ -27,6 +27,8 @@ import { isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
 import { readGlobalImagesPerRow, writeGlobalImagesPerRow } from "../lib/imagesPerRowPreference";
 import { useAuth } from "../contexts/AuthContext";
+import { StudioActivityBox } from "../components/studio/StudioActivityBox";
+import type { StudioActivity } from "../components/studio/types";
 import { fetchApi } from "../lib/api";
 import { CharactersTabPanel } from "./CharactersTabPanel";
 import { ImageTabPanel } from "./ImageTabPanel";
@@ -34,79 +36,6 @@ import { ResultsPanel } from "./ResultsPanel";
 import { ImagegenTooltip } from "./ImagegenTooltip";
 import { parseStoredImages, toPayload } from "./persistence";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
-
-/** Same pattern as UI Builder → Breakdown Activity (status + indeterminate progress). */
-type ImageGenGenerateActivity = { message: string; isError: boolean } | null;
-
-function ImageGenGenerateActivityBox({
-  activity,
-  working,
-}: {
-  activity: ImageGenGenerateActivity;
-  working: boolean;
-}) {
-  return (
-    <div
-      style={{
-        flexShrink: 0,
-        marginBottom: "0.75rem",
-        padding: "10px 12px",
-        borderRadius: 8,
-        border: "1px solid #2a2f3a",
-        background: "#0f1115",
-      }}
-      aria-live="polite"
-      aria-busy={working}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          marginBottom: 6,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            color: "#94a3b8",
-          }}
-        >
-          Activity
-        </div>
-        {working && (
-          <span style={{ fontSize: 11, color: "#22d3ee", fontWeight: 600 }}>Working…</span>
-        )}
-      </div>
-      <div
-        style={{
-          fontSize: 13,
-          lineHeight: 1.45,
-          color: activity?.isError
-            ? "#f87171"
-            : activity
-              ? "var(--foreground, #e2e8f0)"
-              : "#94a3b8",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-        }}
-      >
-        {activity === null
-          ? "Ready — enter a prompt and click Generate."
-          : activity.message}
-      </div>
-      {working && (
-        <div className="breakdown-progress-track" role="progressbar" aria-valuetext="In progress" style={{ marginTop: 10 }}>
-          <div className="breakdown-progress-bar" />
-        </div>
-      )}
-    </div>
-  );
-}
 
 function StylesAddForm({
   onAdd,
@@ -207,7 +136,7 @@ function ImageGenPageInner() {
     quality: (getPanelSnapshot()?.imageDefaultsQuality ?? "medium") as "high" | "medium" | "low",
   }));
   /** Image tab: generation status / errors (matches UI Builder Breakdown Activity). */
-  const [generateActivity, setGenerateActivity] = useState<ImageGenGenerateActivity>(null);
+  const [generateActivity, setGenerateActivity] = useState<StudioActivity>(null);
 
   /** Only persist after initial load for this project has completed; avoids overwriting saved data with [] on mount. */
   const loadCompletedForProjectRef = useRef<string | null>(null);
@@ -1037,9 +966,10 @@ function ImageGenPageInner() {
             activeTab === "characters" ||
             isGenerating ||
             isEditImageGenerating) && (
-            <ImageGenGenerateActivityBox
+            <StudioActivityBox
               activity={generateActivity}
               working={isGenerating || isEditImageGenerating}
+              idleMessage="Ready — enter a prompt and click Generate."
             />
           )}
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>

@@ -35,6 +35,7 @@ from routers.settings import settings_router
 from routers.tools import tools_router
 from routers.usage_routes import usage_router
 from routers.user_profile_routes import user_profile_router
+from routers.inworld_routes import inworld_router
 
 logger = logging.getLogger(__name__)
 
@@ -95,3 +96,4 @@ app.include_router(settings_router, dependencies=[Depends(get_current_user)])
 app.include_router(usage_router, dependencies=[Depends(get_current_user)])
 app.include_router(user_profile_router)
 app.include_router(tools_router, dependencies=[Depends(get_current_user)])
+app.include_router(inworld_router)

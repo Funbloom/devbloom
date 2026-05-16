@@ -215,6 +215,7 @@ debug_prompts.txt
 .local_data/
 docs
 web/.env.local
+web/env.local
 deploy/staging
 deploy/*.zip
 local_agent/.local_agent/approved_roots.json
