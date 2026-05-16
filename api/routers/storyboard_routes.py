@@ -81,6 +81,10 @@ class TilesReorder(BaseModel):
 
 class TileGenerateRequest(BaseModel):
     model: Optional[str] = None
+    size_preset: Optional[str] = Field(
+        default=None,
+        description="square, landscape, or portrait (default square).",
+    )
 
 
 class LocationCreate(BaseModel):
@@ -417,7 +421,13 @@ def api_generate_tile(
         model_key = resolve_image_model("storyboard", body.model if body else None)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    result = generate_tile_image(tile_id, current_user_id=user.get("id"), model=model_key)
+    size_preset = body.size_preset if body else None
+    result = generate_tile_image(
+        tile_id,
+        current_user_id=user.get("id"),
+        model=model_key,
+        size_preset=size_preset,
+    )
     increment_usage(user.get("id") or "", 1)
     provider = str((IMAGE_MODEL_REGISTRY.get(model_key) or {}).get("provider") or "unknown")
     record_provider_usage(user.get("id") or "", provider, service="image_generation", requests_count=1)

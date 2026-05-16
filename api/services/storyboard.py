@@ -13,6 +13,25 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_STORYBOARD_TILE_SIZE_PRESETS = frozenset({"square", "landscape", "portrait"})
+
+
+def storyboard_tile_dimensions(size_preset: Optional[str] = None) -> tuple[int, int]:
+    """Match Image Gen presets: 1024 base, 16:9 landscape, 9:16 portrait."""
+    preset = (size_preset or "square").strip().lower()
+    if preset not in _STORYBOARD_TILE_SIZE_PRESETS:
+        raise HTTPException(
+            status_code=400,
+            detail="size_preset must be square, landscape, or portrait.",
+        )
+    base = 1024
+    if preset == "landscape":
+        return base, max(1, round(base * 9 / 16))
+    if preset == "portrait":
+        return max(1, round(base * 9 / 16)), base
+    return base, base
+
+
 def list_storyboards(
     project_key: Optional[str] = None,
     user_id: Optional[str] = None,
@@ -623,6 +642,7 @@ def generate_tile_image(
     tile_id: str,
     current_user_id: Optional[str] = None,
     model: Optional[str] = None,
+    size_preset: Optional[str] = None,
 ) -> Dict[str, Any]:
     tid = (tile_id or "").strip()
     if not tid:
@@ -745,11 +765,14 @@ def generate_tile_image(
             _add_reference_image(char.get("image"))
 
         model_key = resolve_image_model("storyboard", model)
+        width, height = storyboard_tile_dimensions(size_preset)
         gen_result = generate_image(
             prompt=full_prompt,
             project_key=project_key or None,
             reference_image_filenames=reference_sources or None,
             model=model_key,
+            width=width,
+            height=height,
         )
         images = gen_result.get("images") or []
         if not images:

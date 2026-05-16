@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import type { Character, Location, Storyboard, Tile } from "./types";
+import { TILE_IMAGE_SIZE_OPTIONS, type TileImageSizePreset } from "./tileImageSize";
 
 import { API_BASE } from "../lib/api";
 
@@ -35,6 +36,8 @@ type Props = {
   model: string;
   modelOptions: { value: string; label: string }[];
   onModelChange: (value: string) => void;
+  sizePreset: TileImageSizePreset;
+  onSizePresetChange: (value: TileImageSizePreset) => void;
   tilesPerRow: number;
   onTilesPerRowChange: (n: number) => void;
   status: string | null;
@@ -67,6 +70,8 @@ export function TilesPanel(props: Props) {
     model,
     modelOptions,
     onModelChange,
+    sizePreset,
+    onSizePresetChange,
     tilesPerRow,
     onTilesPerRowChange,
     status,
@@ -133,6 +138,24 @@ export function TilesPanel(props: Props) {
                   onChange={(e) => onModelChange(e.target.value)}
                 >
                   {modelOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="edit-actions" style={{ alignItems: "center", gap: 8 }}>
+                <label style={{ fontSize: 14 }} htmlFor="storyboard-image-size">
+                  Image size:
+                </label>
+                <select
+                  id="storyboard-image-size"
+                  value={sizePreset}
+                  onChange={(e) => onSizePresetChange(e.target.value as TileImageSizePreset)}
+                  disabled={isSaving || generatingTileId !== null}
+                  title="Aspect ratio used when generating tile images"
+                >
+                  {TILE_IMAGE_SIZE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

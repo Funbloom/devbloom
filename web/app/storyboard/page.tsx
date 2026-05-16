@@ -8,6 +8,7 @@ import { TilesPanel } from "./TilesPanel";
 import { fetchApi, API_BASE } from "../lib/api";
 import { confirmGeminiImageIfNeeded, isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../lib/imageModels";
+import type { TileImageSizePreset } from "./tileImageSize";
 const STORAGE_KEY_PROJECT = "activeProjectKey";
 const STORAGE_KEY_STORYBOARD = "storyboardSelectedId";
 
@@ -49,6 +50,7 @@ export default function StoryboardPage() {
   const [generatingTileId, setGeneratingTileId] = useState<string | null>(null);
   const [tilesPerRow, setTilesPerRow] = useState(3);
   const [tileModel, setTileModel] = useState(DEFAULT_IMAGE_MODEL);
+  const [tileSizePreset, setTileSizePreset] = useState<TileImageSizePreset>("square");
 
   const activeStoryboard = storyboards.find((s) => s.id === selectedId) ?? null;
 
@@ -494,7 +496,7 @@ export default function StoryboardPage() {
       const response = await fetchApi(`/storyboard/tiles/${tile.id}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: tileModel }),
+        body: JSON.stringify({ model: tileModel, size_preset: tileSizePreset }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -642,6 +644,8 @@ export default function StoryboardPage() {
             model={tileModel}
             modelOptions={IMAGE_MODEL_OPTIONS}
             onModelChange={setTileModel}
+            sizePreset={tileSizePreset}
+            onSizePresetChange={setTileSizePreset}
             tilesPerRow={tilesPerRow}
             onTilesPerRowChange={setTilesPerRow}
             status={status}
