@@ -20,7 +20,52 @@ import {
   resolveVoiceIdByName,
   type NarrationBatchClip,
 } from "./voiceBatch";
+import { reloadVoiceGenBatchFromDisk } from "./voiceGenBatchDisk";
+import { clearVoiceGenBatch, readVoiceGenBatch } from "./voiceGenBatchStorage";
+import {
+  batchClipNeedsGeneration,
+  buildBatchClipContentSignature,
+  emptyVoiceGenBatchLog,
+  readVoiceGenBatchLog,
+  upsertVoiceGenBatchLogEntry,
+  VOICE_GEN_BATCH_LOG_FILE,
+  writeVoiceGenBatchLog,
+  type VoiceGenBatchLog,
+  type VoiceGenBatchLogEntry,
+} from "./voiceGenBatchLog";
+import {
+  readVoiceGenBatchMp3Mode,
+  writeVoiceGenBatchMp3Mode,
+  type BatchExistingMp3Mode,
+} from "./voiceGenBatchMode";
 import { readVoiceGenOutputDir, writeVoiceGenOutputDir } from "./voiceGenOutputDir";
+
+function loadPersistedBatch(): {
+  fileName: string;
+  clips: NarrationBatchClip[];
+  parseError: string | null;
+} {
+  const saved = readVoiceGenBatch();
+  if (!saved) {
+    return { fileName: "", clips: [], parseError: null };
+  }
+  try {
+    const clips = parseNarrationBatchJson(saved.jsonText);
+    return { fileName: saved.fileName, clips, parseError: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { fileName: saved.fileName, clips: [], parseError: message };
+  }
+}
+
+let initialBatchCache: ReturnType<typeof loadPersistedBatch> | undefined;
+
+function getInitialBatch(): ReturnType<typeof loadPersistedBatch> {
+  if (initialBatchCache === undefined) {
+    initialBatchCache = loadPersistedBatch();
+  }
+  return initialBatchCache;
+}
 
 type TtsModelOption = { id: string; label: string };
 
@@ -53,8 +98,6 @@ function slugForFilename(text: string, maxLen: number): string {
 }
 
 export default function VoiceGenPage(): ReactElement {
-  const batchFileInputRef = useRef<HTMLInputElement>(null);
-
   const [leftTab, setLeftTab] = useState<LeftPaneTab>("single");
   const [scriptText, setScriptText] = useState<string>("");
   const [voiceOptions, setVoiceOptions] = useState<InworldVoiceOption[]>([]);
@@ -67,9 +110,12 @@ export default function VoiceGenPage(): ReactElement {
   const [activity, setActivity] = useState<StudioActivity>(null);
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
 
-  const [batchJsonName, setBatchJsonName] = useState<string>("");
-  const [batchParseError, setBatchParseError] = useState<string | null>(null);
-  const [batchClips, setBatchClips] = useState<NarrationBatchClip[]>([]);
+  const [batchJsonName, setBatchJsonName] = useState<string>(() => getInitialBatch().fileName);
+  const [batchParseError, setBatchParseError] = useState<string | null>(() => getInitialBatch().parseError);
+  const [batchClips, setBatchClips] = useState<NarrationBatchClip[]>(() => getInitialBatch().clips);
+  const [batchExistingMp3Mode, setBatchExistingMp3Mode] = useState<BatchExistingMp3Mode>(() =>
+    readVoiceGenBatchMp3Mode()
+  );
 
   const [eligibleLocalAgent, setEligibleLocalAgent] = useState<boolean>(false);
   const [localAgentOk, setLocalAgentOk] = useState<boolean>(false);
@@ -290,21 +336,32 @@ export default function VoiceGenPage(): ReactElement {
     }
   }
 
-  async function handleBatchJsonPicked(files: FileList | null): Promise<void> {
-    setBatchParseError(null);
-    setBatchClips([]);
-    setBatchJsonName("");
-    const file = files?.[0];
-    if (!file) {
+  async function handlePickBatchJsonFile(): Promise<void> {
+    if (!eligibleLocalAgent || !localAgentOk) {
+      setActivity({
+        message: "Pick batch JSON via the local agent — run on localhost with the agent up.",
+        isError: true,
+      });
       return;
     }
-    setBatchJsonName(file.name);
+    setBatchParseError(null);
     try {
-      const text: string = await file.text();
-      const clips: NarrationBatchClip[] = parseNarrationBatchJson(text);
+      const pick = await localAgent.pickFile({
+        title: "Pick narration batch JSON",
+        filetypes: [
+          ["JSON", "*.json"],
+          ["All files", "*.*"],
+        ],
+      });
+      if (pick.cancelled || !pick.path) {
+        return;
+      }
+      const clips: NarrationBatchClip[] = await reloadVoiceGenBatchFromDisk(pick.path);
+      const saved = readVoiceGenBatch();
+      setBatchJsonName(saved?.fileName ?? pick.path);
       setBatchClips(clips);
       setActivity({
-        message: `Loaded ${clips.length} clip(s) from ${file.name}.`,
+        message: `Loaded ${clips.length} clip(s) from disk.`,
         isError: false,
       });
     } catch (err) {
@@ -314,9 +371,21 @@ export default function VoiceGenPage(): ReactElement {
     }
   }
 
+  function handleClearBatchJson(): void {
+    clearVoiceGenBatch();
+    setBatchJsonName("");
+    setBatchClips([]);
+    setBatchParseError(null);
+    setActivity({ message: "Batch JSON cleared.", isError: false });
+  }
+
   async function handleGenerateBatch(): Promise<void> {
-    if (batchClips.length === 0) {
-      setActivity({ message: "Pick a valid JSON batch file first.", isError: true });
+    const savedBatch = readVoiceGenBatch();
+    if (!savedBatch?.filePath) {
+      setActivity({
+        message: "Pick a batch JSON file on disk first (required so Generate can reload the latest file).",
+        isError: true,
+      });
       return;
     }
     if (voiceOptions.length === 0) {
@@ -337,27 +406,93 @@ export default function VoiceGenPage(): ReactElement {
 
     setWorking(true);
     const errors: string[] = [];
+    const skipped: string[] = [];
+    const generatedNew: string[] = [];
+    const regenerated: string[] = [];
     const root = outputDir.trim();
+    const mode = batchExistingMp3Mode;
 
     try {
       await localAgent.approveProjectRoot(root);
 
-      for (let index = 0; index < batchClips.length; index++) {
-        const clip = batchClips[index];
+      setActivity({ message: "Reloading batch JSON from disk…", isError: false });
+      let clipsForRun: NarrationBatchClip[];
+      try {
+        clipsForRun = await reloadVoiceGenBatchFromDisk(savedBatch.filePath);
+        const refreshed = readVoiceGenBatch();
+        setBatchClips(clipsForRun);
+        if (refreshed?.fileName) {
+          setBatchJsonName(refreshed.fileName);
+        }
+        setBatchParseError(null);
+      } catch (reloadErr) {
+        const message: string = reloadErr instanceof Error ? reloadErr.message : String(reloadErr);
+        setActivity({ message: `Could not reload batch JSON: ${message}`, isError: true });
+        return;
+      }
+
+      if (clipsForRun.length === 0) {
+        setActivity({ message: "Batch JSON has no clips.", isError: true });
+        return;
+      }
+
+      let batchLog: VoiceGenBatchLog =
+        mode === "auto" || mode === "overwrite" ? await readVoiceGenBatchLog(root) : emptyVoiceGenBatchLog();
+
+      const existingMp3Lower = new Set<string>();
+      if (mode === "skip") {
+        const listing = await localAgent.listDir(root, ".");
+        for (const entry of listing.entries) {
+          if (entry.is_file && isMp3FileName(entry.name)) {
+            existingMp3Lower.add(entry.name.toLowerCase());
+          }
+        }
+      }
+
+      for (let index = 0; index < clipsForRun.length; index++) {
+        const clip = clipsForRun[index];
         const resolved = resolveVoiceIdByName(clip.voice_name, voiceOptions);
         if (!resolved) {
           errors.push(`Clip "${clip.id}": no voice match for "${clip.voice_name}".`);
           continue;
         }
+        const fileName = `${slugForFilename(clip.id, 120)}.mp3`;
         const deliveryFromMood: string | undefined = moodAsDeliveryMode(clip.mood);
         const synthText: string = applyMoodSteering(clip.script_text, clip.mood, modelId);
         const synthDelivery =
           modelId === "inworld-tts-2"
             ? deliveryFromMood ?? "BALANCED"
             : undefined;
+        const signature = buildBatchClipContentSignature(
+          clip,
+          resolved,
+          modelId,
+          synthText,
+          synthDelivery
+        );
+        const priorEntry = batchLog.entries[clip.id];
 
+        if (mode === "skip" && existingMp3Lower.has(fileName.toLowerCase())) {
+          skipped.push(clip.id);
+          setActivity({
+            message: `Batch: skipping ${clip.id} — ${fileName} already exists (${index + 1}/${clipsForRun.length})…`,
+            isError: false,
+          });
+          continue;
+        }
+
+        if (mode === "auto" && !batchClipNeedsGeneration(priorEntry, signature)) {
+          skipped.push(clip.id);
+          setActivity({
+            message: `Batch: skipping ${clip.id} — unchanged (${index + 1}/${clipsForRun.length})…`,
+            isError: false,
+          });
+          continue;
+        }
+
+        const isNew = mode === "auto" && !priorEntry;
         setActivity({
-          message: `Batch: ${clip.id} (${clip.character_name}) — synthesizing clip ${index + 1}/${batchClips.length} (${resolved})…`,
+          message: `Batch: ${clip.id} (${clip.character_name}) — ${isNew ? "new" : "regenerating"} clip ${index + 1}/${clipsForRun.length} (${resolved})…`,
           isError: false,
         });
 
@@ -368,23 +503,73 @@ export default function VoiceGenPage(): ReactElement {
             modelId,
             deliveryMode: synthDelivery,
           });
-          const idSlug = slugForFilename(clip.id, 40);
-          const charSlug = slugForFilename(clip.character_name, 24);
-          const voiceSlug = slugForFilename(resolved, 20);
-          const fileName = `batch_${idSlug}_${charSlug}_${voiceSlug}.mp3`;
           const b64 = await blobToRawBase64(blob);
           await localAgent.writeBinary(root, fileName, b64);
+
+          if (mode === "skip") {
+            existingMp3Lower.add(fileName.toLowerCase());
+          }
+
+          if (mode === "auto" || mode === "overwrite") {
+            const logEntry: VoiceGenBatchLogEntry = {
+              id: clip.id,
+              mp3_file_name: fileName,
+              character_name: clip.character_name,
+              voice_name: clip.voice_name,
+              voice_id: resolved,
+              script_text: clip.script_text,
+              mood: clip.mood,
+              synth_text: synthText,
+              model_id: modelId,
+              delivery_mode: synthDelivery ?? null,
+              content_signature: signature,
+              generated_at: new Date().toISOString(),
+            };
+            batchLog = upsertVoiceGenBatchLogEntry(batchLog, logEntry);
+          }
+
+          if (mode === "auto") {
+            if (isNew) {
+              generatedNew.push(clip.id);
+            } else {
+              regenerated.push(clip.id);
+            }
+          }
         } catch (oneErr) {
           const detail: string = oneErr instanceof Error ? oneErr.message : String(oneErr);
           errors.push(`Clip "${clip.id}" (${clip.character_name}): ${detail}`);
         }
       }
 
-      const okCount = batchClips.length - errors.length;
-      const summary =
-        errors.length === 0
-          ? `Batch finished: wrote ${okCount} MP3 file(s) to:\n${root}`
-          : `Batch partial: ${okCount} succeeded, ${errors.length} failed.\n\n${errors.join("\n")}`;
+      if (mode === "auto" || mode === "overwrite") {
+        await writeVoiceGenBatchLog(root, batchLog);
+      }
+
+      const wroteCount = clipsForRun.length - errors.length - skipped.length;
+      const summaryParts: string[] = [];
+      if (errors.length === 0) {
+        summaryParts.push(`Batch finished: wrote ${wroteCount} MP3 file(s) to:\n${root}`);
+      } else {
+        summaryParts.push(`Batch partial: ${wroteCount} wrote, ${errors.length} failed.`);
+      }
+      if (mode === "auto") {
+        if (generatedNew.length > 0) {
+          summaryParts.push(`New: ${generatedNew.length} clip(s).`);
+        }
+        if (regenerated.length > 0) {
+          summaryParts.push(`Regenerated (text changed): ${regenerated.length} clip(s).`);
+        }
+        if (skipped.length > 0) {
+          summaryParts.push(`Skipped unchanged: ${skipped.length} clip(s).`);
+        }
+        summaryParts.push(`Log: ${VOICE_GEN_BATCH_LOG_FILE}`);
+      } else if (skipped.length > 0) {
+        summaryParts.push(`Skipped ${skipped.length} clip(s) (MP3 already exists).`);
+      }
+      if (errors.length > 0) {
+        summaryParts.push(errors.join("\n"));
+      }
+      const summary = summaryParts.join("\n\n");
 
       setActivity({
         message: summary,
@@ -402,7 +587,7 @@ export default function VoiceGenPage(): ReactElement {
 
   function idleHint(): string {
     if (leftTab === "batch") {
-      return "Batch: pick JSON (id, character_name, voice_name, script_text, mood), set output folder, Generate all.";
+      return "Batch: pick JSON, output folder, Auto mode generates new/changed lines only (see voice_gen_batch_log.json).";
     }
     return "Ready — load voices, optionally pick an output folder, enter script, Generate.";
   }
@@ -411,20 +596,6 @@ export default function VoiceGenPage(): ReactElement {
     <div className="imagegen-panel">
       <h2 className="imagegen-panel-title">Voice Gen</h2>
       <div className="imagegen-panel-body">
-        <p style={{ margin: "0 0 0.75rem", fontSize: 13, color: "#9aa3b2", lineHeight: 1.45 }}>
-          Inworld{' '}
-          <a href="https://docs.inworld.ai/api-reference/introduction" rel="noopener noreferrer" target="_blank">
-            Text-to-Speech
-          </a>
-          {' '}
-          — MP3 synthesis. Put your Basic token in the Python API env as{' '}
-          <strong>INWORLD_API_KEY</strong>{' '}
-          (never in browser code — see{' '}
-          <a href="https://docs.inworld.ai/api-reference/introduction" rel="noopener noreferrer" target="_blank">
-            Inworld authentication
-          </a>
-          ).
-        </p>
 
         {voicesError ? (
           <p style={{ margin: "0 0 0.75rem", fontSize: 12, color: "#f87171", whiteSpace: "pre-wrap" }}>
@@ -586,13 +757,45 @@ export default function VoiceGenPage(): ReactElement {
               {working ? "Working…" : "Generate MP3"}
             </button>
           ) : (
-            <button
-              type="button"
-              disabled={working || batchClips.length === 0 || !outputDir.trim() || !eligibleLocalAgent || !localAgentOk}
-              onClick={() => void handleGenerateBatch()}
-            >
-              {working ? "Working…" : "Generate all MP3"}
-            </button>
+            <>
+              <label className="imagegen-label" htmlFor="batch-existing-mp3-mode" style={{ display: "block", marginBottom: 6 }}>
+                Batch generation
+              </label>
+              <select
+                id="batch-existing-mp3-mode"
+                value={batchExistingMp3Mode}
+                disabled={working}
+                onChange={(event) => {
+                  const next = event.target.value as BatchExistingMp3Mode;
+                  setBatchExistingMp3Mode(next);
+                  writeVoiceGenBatchMp3Mode(next);
+                }}
+                style={{ width: "100%", marginBottom: 4 }}
+              >
+                <option value="auto">Auto (new + changed text only)</option>
+                <option value="skip">Skip if MP3 already exists</option>
+                <option value="overwrite">Overwrite all</option>
+              </select>
+              <p style={{ margin: "0 0 0.75rem", fontSize: 11, color: "#64748b", lineHeight: 1.35 }}>
+                Auto compares each clip to <code style={{ fontSize: 10 }}>{VOICE_GEN_BATCH_LOG_FILE}</code> in the
+                output folder (script, mood, voice, model). New lines are generated; changed lines are regenerated;
+                unchanged lines are skipped.
+              </p>
+              <button
+                type="button"
+                disabled={
+                  working ||
+                  batchClips.length === 0 ||
+                  !readVoiceGenBatch()?.filePath ||
+                  !outputDir.trim() ||
+                  !eligibleLocalAgent ||
+                  !localAgentOk
+                }
+                onClick={() => void handleGenerateBatch()}
+              >
+                {working ? "Working…" : "Generate all MP3"}
+              </button>
+            </>
           )}
 
           {leftTab === "batch" ? (
@@ -606,34 +809,26 @@ export default function VoiceGenPage(): ReactElement {
                 borderTop: "1px solid #2a2f3a",
               }}
             >
-              <input
-                ref={batchFileInputRef}
-                type="file"
-                accept=".json,application/json"
-                className="imagegen-hidden-file-input"
-                aria-hidden
-                tabIndex={-1}
-                onChange={(event) => {
-                  void handleBatchJsonPicked(event.target.files).finally(() => {
-                    if (event.target) {
-                      event.target.value = "";
-                    }
-                  });
-                }}
-              />
               <button
                 type="button"
-                disabled={working}
-                onClick={() => {
-                  batchFileInputRef.current?.click();
-                }}
+                disabled={working || !eligibleLocalAgent || !localAgentOk}
+                onClick={() => void handlePickBatchJsonFile()}
               >
                 Pick JSON batch file…
               </button>
               {batchJsonName ? (
-                <span style={{ fontSize: 12, color: "#94a3b8", wordBreak: "break-word" }} title={batchJsonName}>
-                  {batchJsonName} — {batchClips.length} clip(s)
-                </span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                  <span
+                    style={{ fontSize: 12, color: "#94a3b8", wordBreak: "break-word" }}
+                    title={readVoiceGenBatch()?.filePath ?? batchJsonName}
+                  >
+                    {batchJsonName} — {batchClips.length} clip(s)
+                    {readVoiceGenBatch()?.filePath ? " (on disk)" : ""}
+                  </span>
+                  <button type="button" disabled={working} onClick={handleClearBatchJson} style={{ fontSize: 12 }}>
+                    Clear batch
+                  </button>
+                </div>
               ) : (
                 <span style={{ fontSize: 12, color: "#64748b" }}>No batch file loaded.</span>
               )}

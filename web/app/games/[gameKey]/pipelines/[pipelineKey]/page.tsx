@@ -492,6 +492,8 @@ function PipelinePageContent({
   const [locationUpdateImageStyleId, setLocationUpdateImageStyleId] = useState("");
   /** Same pattern as ImageGen Image tab: hydrate from localStorage once, then persist dropdown changes. */
   const locationUpdateImageStyleHydrated = useRef(false);
+  const [createGiftStyleId, setCreateGiftStyleId] = useState("");
+  const createGiftStyleHydrated = useRef(false);
   const [pipelineGenerationLog, setPipelineGenerationLog] = useState("");
   const [citiesToolTab, setCitiesToolTab] = useState<"create" | "updates" | "pipelines">("create");
   const [missingGiftsPipelineStatus, setMissingGiftsPipelineStatus] = useState<string | null>(null);
@@ -1052,6 +1054,23 @@ function PipelinePageContent({
   }, [pipelineKey, giftStyles, locationUpdateImageStyleId]);
 
   useEffect(() => {
+    if (pipelineKey !== "gift_images") {
+      createGiftStyleHydrated.current = false;
+      return;
+    }
+    if (giftStyles.length === 0) return;
+    if (!createGiftStyleHydrated.current) {
+      createGiftStyleHydrated.current = true;
+      const saved = readImagegenMainStyleId();
+      if (saved && giftStyles.some((s) => s.id === saved)) {
+        setCreateGiftStyleId(saved);
+        return;
+      }
+    }
+    writeImagegenMainStyleId(createGiftStyleId || "");
+  }, [pipelineKey, giftStyles, createGiftStyleId]);
+
+  useEffect(() => {
     if (pipelineKey !== "gift_images") return;
     if (giftImagesDeepLinkQ) {
       setGiftSearch(giftImagesDeepLinkQ);
@@ -1325,9 +1344,18 @@ function PipelinePageContent({
     return styleObj?.prompt?.trim() ?? "";
   };
 
+  const getCreateGiftStylePrompt = (): string => {
+    if (pipelineKey !== "gift_images") {
+      return "";
+    }
+    const styleObj = giftStyles.find((s) => s.id === createGiftStyleId);
+    return styleObj?.prompt?.trim() ?? "";
+  };
+
   const buildGiftImagePrompt = (base: string): string => {
     const promptParts = [base.trim()];
-    const stylePrompt = getCitiesSharedStylePrompt();
+    const stylePrompt =
+      pipelineKey === "cities" ? getCitiesSharedStylePrompt() : getCreateGiftStylePrompt();
     if (stylePrompt) {
       promptParts.push(stylePrompt);
     }
@@ -2539,6 +2567,20 @@ function PipelinePageContent({
                 </div>
                 {giftToolTab === "create" && (
                   <div style={{ display: "grid", gap: "0.75rem" }}>
+                    <label style={{ display: "grid", gap: "0.25rem" }}>
+                      <span>Style</span>
+                      <select
+                        value={createGiftStyleId}
+                        onChange={(e) => setCreateGiftStyleId(e.target.value)}
+                      >
+                        <option value="">None</option>
+                        {giftStyles.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <button
                       type="button"
                       onClick={() => {
@@ -3639,6 +3681,19 @@ function PipelinePageContent({
                 />
               </label>
             </div>
+            {pipelineKey === "gift_images" && (
+              <label style={{ display: "grid", gap: "0.25rem" }}>
+                <span>Style (used when generating image)</span>
+                <select value={createGiftStyleId} onChange={(e) => setCreateGiftStyleId(e.target.value)}>
+                  <option value="">None</option>
+                  {giftStyles.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div style={{ display: "grid", gap: "0.5rem" }}>
               <span style={{ fontSize: 13, color: "var(--muted, #94a3b8)" }}>Image</span>
               <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
