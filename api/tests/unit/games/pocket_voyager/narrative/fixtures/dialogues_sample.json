@@ -1,0 +1,46 @@
+{
+  "clips": [
+    {
+      "id": "000_DOG_INTRO_01",
+      "character_name": "Dog",
+      "voice_name": "Mark",
+      "script_text": "Hello traveler!",
+      "mood": "EXCITED"
+    },
+    {
+      "id": "000_DOG_INTRO_02",
+      "character_name": "Dog",
+      "voice_name": "Mark",
+      "script_text": "Lets go.",
+      "mood": "EXCITED"
+    },
+    {
+      "id": "000_DOG_INTRO_RETURN_01",
+      "character_name": "Dog",
+      "voice_name": "Mark",
+      "script_text": "Welcome back.",
+      "mood": null
+    },
+    {
+      "id": "SHARED_CONGRATS",
+      "character_name": "Dog",
+      "voice_name": "Mark",
+      "script_text": "Congrats!",
+      "mood": "HAPPY"
+    },
+    {
+      "id": "001_RETURN_01",
+      "character_name": "Dog",
+      "voice_name": "Mark",
+      "script_text": "See you soon.",
+      "mood": null
+    },
+    {
+      "id": "ORPHAN_LINE",
+      "character_name": "Dog",
+      "voice_name": "Mark",
+      "script_text": "Unused.",
+      "mood": null
+    }
+  ]
+}

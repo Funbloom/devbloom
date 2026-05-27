@@ -5,6 +5,15 @@ GPT_MODEL_DEFAULT = "gpt-5-mini"
 CONDENSE_MODEL = "gpt-4o-mini"
 IMAGE_PROMPT_MODEL = "gpt-5-mini"
 
+# Text chat registry (Gemini + ChatGPT/OpenAI). Provider selects API client.
+CHAT_MODEL_REGISTRY: dict[str, dict[str, str]] = {
+    "gemini-2.5-flash": {"provider": "gemini", "label": "Gemini 2.5 Flash"},
+    "gpt-5-mini": {"provider": "openai", "label": "ChatGPT (gpt-5-mini)"},
+    "gpt-4o-mini": {"provider": "openai", "label": "ChatGPT (gpt-4o-mini)"},
+}
+
+CHAT_MODEL_DEFAULT = "gemini-2.5-flash"
+
 # RAG / embeddings
 EMBEDDING_MODEL = "text-embedding-3-small"
 RAG_MAX_TOP_K = 20
@@ -62,6 +71,21 @@ GEMINI_TOKEN_QUOTA_ENV_BY_PERIOD: dict[str, str] = {
 OPENAI_TOKEN_BUDGET_DEFAULT_BY_PERIOD: dict[str, int] = {
     "month": 1_000_000,
 }
+
+
+def resolve_chat_model(requested: str | None) -> str:
+    if requested:
+        if requested not in CHAT_MODEL_REGISTRY:
+            raise ValueError(f"Unsupported chat model: {requested}")
+        return requested
+    return CHAT_MODEL_DEFAULT
+
+
+def chat_model_provider(model: str) -> str:
+    entry = CHAT_MODEL_REGISTRY.get(model)
+    if not entry:
+        raise ValueError(f"Unsupported chat model: {model}")
+    return entry["provider"]
 
 
 def resolve_image_model(feature: str, requested: str | None) -> str:

@@ -13,6 +13,11 @@
           "key": "cities",
           "name": "Cities",
           "description": "Load and inspect city data from a cities JSON file."
+        },
+        {
+          "key": "narrative",
+          "name": "Narrative",
+          "description": "Edit story missions and dialogue clips for Pocket Voyager."
         }
       ]
     },

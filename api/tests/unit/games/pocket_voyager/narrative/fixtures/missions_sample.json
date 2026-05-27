@@ -1,0 +1,18 @@
+{
+  "missions": [
+    {
+      "id": "000_travel_first_trip",
+      "title": "My first adventure",
+      "dialogueLineIds": ["000_DOG_INTRO_01", "000_DOG_INTRO_02"],
+      "returnDialogueLineIds": ["000_DOG_INTRO_RETURN_01"],
+      "objectives": []
+    },
+    {
+      "id": "001_travel_second",
+      "title": "Second trip",
+      "dialogueLineIds": ["SHARED_CONGRATS"],
+      "returnDialogueLineIds": ["SHARED_CONGRATS", "001_RETURN_01"],
+      "objectives": []
+    }
+  ]
+}

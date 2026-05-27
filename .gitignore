@@ -220,3 +220,4 @@ deploy/staging
 deploy/*.zip
 local_agent/.local_agent/approved_roots.json
 models/sam_vit_b_01ec64.pth
+api/Gen

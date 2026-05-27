@@ -165,7 +165,7 @@ def read_json_file(request: Request, body: FileJsonReadRequest) -> dict[str, Any
     root = ensure_root_approved(body.project_root)
     path = resolve_under_root(root, body.relative_path)
     if not path.is_file():
-        raise HTTPException(status_code=404, detail="File not found.")
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
     try:
         data = path.read_text(encoding="utf-8")
         return {"path": str(path), "data": json_loads(data)}

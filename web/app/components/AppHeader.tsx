@@ -6,6 +6,10 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import {
+  renderRegisteredGameHeaderMenu,
+  resolveRegisteredGamePageLabel,
+} from "../games/gameHeaderRegistry";
+import {
   dispatchActiveProjectChanged,
   persistActiveProjectToProfile,
   STORAGE_KEY_ACTIVE_PROJECT,
@@ -13,6 +17,7 @@ import {
 } from "../lib/activeProject";
 import { API_BASE, fetchApi } from "../lib/api";
 import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
+import { HeaderMenu } from "./HeaderMenu";
 
 const STUDIO_LINKS: { path: string; label: string }[] = [
   { path: "/storyboard", label: "Storyboard" },
@@ -39,13 +44,17 @@ function getCurrentPageLabel(pathname: string): string {
   if (pathname.startsWith("/imageResize")) return "Image Resize";
   if (pathname.startsWith("/meshgen")) return "Mesh Gen";
   if (pathname.startsWith("/uiBuilder")) return "UI Builder";
+
+  const registeredLabel = resolveRegisteredGamePageLabel(pathname);
+  if (registeredLabel) {
+    return registeredLabel;
+  }
+
   const gamesPath = pathname.match(/^\/games\/([^/]+)(?:\/pipelines\/([^/]+))?/);
   if (gamesPath) {
     const gameKey = gamesPath[1];
     const pipelineKey = gamesPath[2];
     if (gameKey === "solitaire" && pipelineKey === "cards") return "Cards";
-    if (pipelineKey === "gift_images") return "Gifts";
-    if (pipelineKey === "cities") return "Cities";
     if (pipelineKey) return humanizeSegment(pipelineKey);
     return humanizeSegment(gamesPath[1]);
   }
@@ -65,25 +74,6 @@ type PipelineInfo = { key: string; name: string; description?: string };
 type GameRegistryEntry = { key: string; name: string; project_keys: string[] };
 type ProjectItem = { project_key: string; display_name: string };
 
-function HeaderMenu({
-  label,
-  children,
-  summaryClassName = "",
-  wide,
-}: {
-  label: ReactNode;
-  children: ReactNode;
-  summaryClassName?: string;
-  wide?: boolean;
-}) {
-  return (
-    <details className="app-header-menu">
-      <summary className={`app-header-menu-summary app-header-link ${summaryClassName}`.trim()}>{label}</summary>
-      <div className={`app-header-dropdown${wide ? " app-header-dropdown--wide" : ""}`}>{children}</div>
-    </details>
-  );
-}
-
 export function AppHeader() {
   const pathname = usePathname();
   const currentLabel = getCurrentPageLabel(pathname ?? "");
@@ -94,7 +84,6 @@ export function AppHeader() {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [pipelinesByGameKey, setPipelinesByGameKey] = useState<Record<string, PipelineInfo[]>>({});
   const [localAgentOk, setLocalAgentOk] = useState(false);
-  /** This tab’s hostname may call the agent on 127.0.0.1 (localhost or NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS). */
   const [localAgentEligible, setLocalAgentEligible] = useState(false);
   const [apiServerOk, setApiServerOk] = useState(false);
 
@@ -103,10 +92,21 @@ export function AppHeader() {
   }, []);
 
   useEffect(() => {
+    if (loading) {
+      return;
+    }
+
     const refreshProject = async () => {
       const stored = window.localStorage.getItem(STORAGE_KEY_ACTIVE_PROJECT) || "";
       const storedName = window.localStorage.getItem(STORAGE_KEY_ACTIVE_PROJECT_NAME) || "";
       setActiveProjectKey(stored);
+
+      if (!authUser && !user) {
+        setProjects([]);
+        setActiveProjectName("");
+        return;
+      }
+
       try {
         const response = await fetchApi("/projects");
         if (!response.ok) {
@@ -115,7 +115,8 @@ export function AppHeader() {
           return;
         }
         const data = (await response.json()) as ProjectItem[];
-        setProjects(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : [];
+        setProjects(list);
         if (!stored) {
           setActiveProjectName("");
           return;
@@ -124,7 +125,7 @@ export function AppHeader() {
           setActiveProjectName(storedName);
           return;
         }
-        const match = data.find((project) => project.project_key === stored);
+        const match = list.find((project) => project.project_key === stored);
         const name = match?.display_name || stored;
         setActiveProjectName(name);
         window.localStorage.setItem(STORAGE_KEY_ACTIVE_PROJECT_NAME, name);
@@ -133,6 +134,7 @@ export function AppHeader() {
         setActiveProjectName(storedName || stored);
       }
     };
+
     void refreshProject();
     const handleProjectChange = () => {
       void refreshProject();
@@ -143,7 +145,7 @@ export function AppHeader() {
       window.removeEventListener("activeProjectChanged", handleProjectChange);
       window.removeEventListener("storage", handleProjectChange);
     };
-  }, []);
+  }, [loading, authUser, user]);
 
   const selectProject = (project: ProjectItem) => {
     const key = project.project_key.trim();
@@ -205,7 +207,7 @@ export function AppHeader() {
 
   const visibleGames = useMemo(
     () => gamesRegistry.filter((g) => activeProjectKey && g.project_keys.includes(activeProjectKey)),
-    [gamesRegistry, activeProjectKey],
+    [gamesRegistry, activeProjectKey]
   );
 
   useEffect(() => {
@@ -229,7 +231,7 @@ export function AppHeader() {
           } catch {
             next[g.key] = [];
           }
-        }),
+        })
       );
       if (!cancelled) setPipelinesByGameKey(next);
     };
@@ -282,13 +284,18 @@ export function AppHeader() {
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target;
       if (!(t instanceof Element)) return;
+      if (t.closest("details.app-header-submenu")) {
+        return;
+      }
       const menu = t.closest("details.app-header-menu");
       if (!menu) {
         closeAllHeaderMenus();
         return;
       }
       document.querySelectorAll("header.app-header details.app-header-menu").forEach((node) => {
-        if (node !== menu) (node as HTMLDetailsElement).open = false;
+        if (node !== menu) {
+          (node as HTMLDetailsElement).open = false;
+        }
       });
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -300,7 +307,7 @@ export function AppHeader() {
     : "DevBloom Studio (select a project...)";
 
   const studioActive = STUDIO_LINKS.some(
-    ({ path }) => path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path))),
+    ({ path }) => path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path)))
   );
   const gamesPathMatch = pathname?.match(/^\/games\/([^/]+)/);
   const activeGameKeyFromPath = gamesPathMatch?.[1] ?? "";
@@ -326,7 +333,7 @@ export function AppHeader() {
                 ? localAgentOk
                   ? "Local agent online (this PC, port 8765)"
                   : "Local agent offline — start it on this machine (e.g. local_agent/run.bat)"
-                : "Gift/cities file tools use a small app on your PC (127.0.0.1:8765). On this host the UI does not call it — use localhost or set NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS when building the web app."
+                : "Project file tools use a small app on your PC (127.0.0.1:8765). On this host the UI does not call it — use localhost or set NEXT_PUBLIC_LOCAL_AGENT_PAGE_HOSTS when building the web app."
             }
           >
             <span
@@ -385,7 +392,20 @@ export function AppHeader() {
 
           {visibleGames.map((game) => {
             const pipelines = pipelinesByGameKey[game.key] ?? [];
-            if (pipelines.length === 0) return null;
+            if (pipelines.length === 0) {
+              return null;
+            }
+
+            const registeredMenu = renderRegisteredGameHeaderMenu(game.key, {
+              pathname: pathname ?? "",
+              activeGameKeyFromPath,
+              gameName: game.name,
+              pipelines,
+            });
+            if (registeredMenu) {
+              return <span key={game.key}>{registeredMenu}</span>;
+            }
+
             const gameHrefPrefix = `/games/${game.key}`;
             const thisGameActive = activeGameKeyFromPath === game.key;
             return (
@@ -435,11 +455,11 @@ export function AppHeader() {
             >
               Usage
             </Link>
-            <details className="app-header-submenu app-header-submenu--side">
+            <details className="app-header-submenu">
               <summary className="app-header-dropdown-link app-header-submenu-summary">
                 Projects
               </summary>
-              <div className="app-header-submenu-list app-header-submenu-list--side">
+              <div className="app-header-submenu-list app-header-submenu-list--projects">
                 {projects.length === 0 ? (
                   <div className="app-header-dropdown-muted">No projects found.</div>
                 ) : (
@@ -478,7 +498,14 @@ export function AppHeader() {
                     type="button"
                     onClick={() => signOut()}
                     className="app-header-dropdown-link"
-                    style={{ cursor: "pointer", width: "100%", textAlign: "left", border: "none", font: "inherit", background: "none" }}
+                    style={{
+                      cursor: "pointer",
+                      width: "100%",
+                      textAlign: "left",
+                      border: "none",
+                      font: "inherit",
+                      background: "none",
+                    }}
                   >
                     Log out
                   </button>

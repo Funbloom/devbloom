@@ -58,18 +58,20 @@ def _resolve_root(project_root: str) -> Path:
         raise HTTPException(status_code=400, detail="project_root is required.")
     root = Path(raw).expanduser().resolve()
     if not root.exists() or not root.is_dir():
-        raise HTTPException(status_code=404, detail="Project root not found.")
+        raise HTTPException(status_code=404, detail=f"Project root not found: {root}")
     return root
 
 
 def resolve_under_root(root: Path, relative_path: str) -> Path:
-    rel = (relative_path or "").strip()
+    rel = (relative_path or "").strip().replace("\\", "/")
     if not rel:
         raise HTTPException(status_code=400, detail="relative_path is required.")
-    # Normalize and prevent traversal
-    target = (root / rel).resolve()
-    if root not in target.parents and target != root:
-        raise HTTPException(status_code=400, detail="Path traversal is not allowed.")
+    root_resolved = root.resolve()
+    target = (root_resolved / rel).resolve()
+    try:
+        target.relative_to(root_resolved)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Path traversal is not allowed.") from exc
     return target
 
 
