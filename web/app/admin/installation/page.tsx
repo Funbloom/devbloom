@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { API_BASE } from "../../lib/api";
-import { isLocalAgentContext, localAgent, localAgentDownloadUrl, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
+import { isLocalAgentContext, localAgent, localAgentDownloadUrl, fetchLocalAgentLatestVersion, getCachedLocalAgentInstalledVersion, setCachedLocalAgentInstalledVersion, LOCAL_AGENT_UPDATE_UNZIP_PATH, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
+
+type InstallTab = "basic" | "advanced";
 
 type StatusState = "checking" | "ok" | "missing" | "unknown";
 type ActionResultState = "success" | "error";
@@ -87,50 +89,50 @@ export default function AdminInstallationPage() {
   const [lastTextureInstallLog, setLastTextureInstallLog] = useState<string>("");
   const [instructionTopic, setInstructionTopic] = useState<InstructionTopic | null>(null);
   const [agentInfo, setAgentInfo] = useState<LocalAgentInfo | null>(null);
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const [cachedInstalledVersion, setCachedInstalledVersion] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<InstallTab>("basic");
   const downloadUrl = localAgentDownloadUrl();
 
-  const localAgentActionButtons = () => {
-    if (!isLocalAgentContext()) {
-      return null;
-    }
-    const buttons: ReactNode[] = [];
-    if (downloadUrl) {
-      buttons.push(
-        <a
-          key="download"
-          href={downloadUrl}
-          download
-          target="_blank"
-          rel="noreferrer"
-          style={{ fontSize: 13 }}
-        >
-          Download Local Agent
-        </a>,
-      );
-    }
-    if (localAgentState !== "ok") {
-      buttons.push(
-        <a key="install" href="devbloom-agent-install://" style={{ fontSize: 13 }}>
-          Install / Repair
-        </a>,
-        <a key="start" href="devbloom-agent://start" style={{ fontSize: 13 }}>
-          Start Local Agent
-        </a>,
-      );
-    }
-    return buttons.length > 0 ? (
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>{buttons}</div>
-    ) : null;
+  const installedVersion = agentInfo?.version || cachedInstalledVersion;
+  const isInstalledOnDisk = Boolean(installedVersion);
+  const updateAvailable = Boolean(
+    latestVersion && installedVersion && latestVersion !== installedVersion,
+  );
+  const showDownloadInstall = !isInstalledOnDisk || updateAvailable;
+  const agentRunning = localAgentState === "ok";
+
+  const actionButtonStyle: React.CSSProperties = {
+    fontSize: 13,
+    padding: "6px 12px",
+    borderRadius: 8,
+    border: "1px solid #475569",
+    background: "#1e293b",
+    color: "var(--color-text, #f1f5f9)",
+    textDecoration: "none",
+    cursor: "pointer",
   };
+
+  const tabButtonStyle = (active: boolean): React.CSSProperties => ({
+    padding: "8px 16px",
+    borderRadius: 8,
+    border: active ? "1px solid #64748b" : "1px solid #334155",
+    background: active ? "#1e293b" : "transparent",
+    color: active ? "#f1f5f9" : "#94a3b8",
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: active ? 600 : 400,
+  });
 
   const instructionByTopic: Record<InstructionTopic, { title: string; body: string }> = {
     local_agent: {
       title: "Local Agent",
       body:
         "Windows (artists):\n" +
-        "1. Settings → Installation → Download Local Agent (or use the public zip from your studio).\n" +
-        "2. Unzip and double-click install.bat once (installs to %LOCALAPPDATA%\\DevBloom\\LocalAgent).\n" +
-        "3. Click Start Local Agent on this page (or double-click run.bat). Keep the window open.\n" +
+        "1. Settings → Installation → Basic → Download (if needed).\n" +
+        "2. Unzip to %LOCALAPPDATA%\\DevBloom\\LocalAgentUpdate\\DevBloomLocalAgent\n" +
+        "3. Click Install (or run install.bat from the unzipped folder).\n" +
+        "4. Click Run. Use Stop when finished.\n" +
         "\n" +
         "Developers (full repo):\n" +
         "- Clone https://github.com/FunBloomStudio/devbloom.git\n" +
@@ -231,6 +233,26 @@ export default function AdminInstallationPage() {
   }, [instructionTopic]);
 
   useEffect(() => {
+    setCachedInstalledVersion(getCachedLocalAgentInstalledVersion());
+  }, []);
+
+  useEffect(() => {
+    if (!isLocalAgentContext()) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const latest = await fetchLocalAgentLatestVersion();
+      if (!cancelled) {
+        setLatestVersion(latest);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const run = async () => {
       setLocalAgentState("checking");
@@ -278,6 +300,10 @@ export default function AdminInstallationPage() {
             const info = await localAgent.agentInfo();
             if (!cancelled) {
               setAgentInfo(info);
+              if (info.version) {
+                setCachedLocalAgentInstalledVersion(info.version);
+                setCachedInstalledVersion(info.version);
+              }
             }
           } catch {
             if (!cancelled) {
@@ -400,7 +426,99 @@ export default function AdminInstallationPage() {
         <div className="imagegen-right" style={{ minWidth: 0, width: "100%" }}>
           <section className="imagegen-panel" style={{ height: "100%", minHeight: "calc(100vh - 84px)" }}>
             <h2 className="imagegen-panel-title">Installation</h2>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button type="button" style={tabButtonStyle(activeTab === "basic")} onClick={() => setActiveTab("basic")}>
+                Basic
+              </button>
+              <button type="button" style={tabButtonStyle(activeTab === "advanced")} onClick={() => setActiveTab("advanced")}>
+                Advanced
+              </button>
+            </div>
             <div className="imagegen-panel-body" style={{ height: "100%", display: "grid", gap: 12, alignContent: "start" }}>
+              {activeTab === "basic" ? (
+                <section
+                  style={{
+                    border: "1px solid #2a2f3a",
+                    borderRadius: 12,
+                    padding: "12px",
+                    display: "grid",
+                    gap: 12,
+                  }}
+                >
+                  <h3 style={{ margin: 0, fontSize: 16 }}>Local Agent</h3>
+                  {!isLocalAgentContext() ? (
+                    <p style={{ margin: 0, color: "var(--muted, #94a3b8)", fontSize: 13 }}>
+                      Local Agent controls are only available when using this site from a supported host on your PC.
+                    </p>
+                  ) : (
+                    <>
+                      <StatusLine
+                        label="Local Agent"
+                        purpose="Runs on your PC so DevBloom can read/write project folders and open native file pickers."
+                        state={localAgentState}
+                        detail={
+                          localAgentState === "ok"
+                            ? "Running."
+                            : localAgentState === "checking"
+                              ? "Checking..."
+                              : isInstalledOnDisk
+                                ? "Installed but not running."
+                                : "Not installed."
+                        }
+                      />
+                      <div style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--muted, #94a3b8)" }}>
+                        <div>
+                          Installed version:{" "}
+                          <strong style={{ color: "#e2e8f0" }}>{installedVersion || "Not installed"}</strong>
+                        </div>
+                        <div>
+                          Latest version:{" "}
+                          <strong style={{ color: "#e2e8f0" }}>{latestVersion || "Unknown"}</strong>
+                        </div>
+                        {updateAvailable ? (
+                          <p style={{ margin: "4px 0 0", color: "#fbbf24" }}>
+                            An update is available. Download the new zip, unzip to {LOCAL_AGENT_UPDATE_UNZIP_PATH}, then
+                            click Install.
+                          </p>
+                        ) : null}
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {showDownloadInstall && downloadUrl ? (
+                          <a href={downloadUrl} download target="_blank" rel="noreferrer" style={actionButtonStyle}>
+                            Download
+                          </a>
+                        ) : null}
+                        {showDownloadInstall ? (
+                          <a href="devbloom-agent-install://" style={actionButtonStyle}>
+                            Install
+                          </a>
+                        ) : null}
+                        {isInstalledOnDisk && !agentRunning ? (
+                          <a href="devbloom-agent://start" style={actionButtonStyle}>
+                            Run
+                          </a>
+                        ) : null}
+                        {agentRunning ? (
+                          <a href="devbloom-agent-stop://" style={actionButtonStyle}>
+                            Stop
+                          </a>
+                        ) : null}
+                      </div>
+                      {showDownloadInstall ? (
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)", lineHeight: 1.45 }}>
+                          First install or update: unzip the download to{" "}
+                          <code style={{ fontSize: 11 }}>{LOCAL_AGENT_UPDATE_UNZIP_PATH}</code>, then click Install. The
+                          installer replaces everything in AppData before copying the new version.
+                        </p>
+                      ) : (
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+                          Installed at %LOCALAPPDATA%\DevBloom\LocalAgent. Use Run to start and Stop when done.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </section>
+              ) : (
               <section
                 style={{
                   border: "1px solid #2a2f3a",
@@ -437,12 +555,7 @@ export default function AdminInstallationPage() {
                   label="Local Agent"
                   purpose="Runs on your PC so the Studio can safely read/write your game project folders, spawn native folder pickers, and host heavy local tools."
                   state={localAgentState}
-                  action={
-                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-                      {localAgentActionButtons()}
-                      {instructionAction("local_agent")}
-                    </div>
-                  }
+                  action={instructionAction("local_agent")}
                   detail={
                     localAgentState === "ok"
                       ? agentInfo
@@ -452,9 +565,9 @@ export default function AdminInstallationPage() {
                         ? "Checking..."
                         : localAgentState === "unknown"
                           ? "Unavailable on this host."
-                          : downloadUrl
-                            ? "Not detected. Download the zip, run install.bat once, then click Start Local Agent."
-                            : "Not detected. Install the Local Agent on your PC, then click Start."
+                          : isInstalledOnDisk
+                            ? `Installed (v${installedVersion}) but not running. Use Basic tab to Run.`
+                            : "Not installed. Use Basic tab to Download and Install."
                   }
                 />
                 <StatusLine
@@ -609,6 +722,7 @@ export default function AdminInstallationPage() {
                   detail={samDetail}
                 />
               </section>
+              )}
             </div>
           </section>
         </div>

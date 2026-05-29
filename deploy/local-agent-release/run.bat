@@ -25,7 +25,7 @@ cd /d "%INSTALL_DIR%"
 if not defined LOCAL_AGENT_EXTRA_CORS_ORIGINS set "LOCAL_AGENT_EXTRA_CORS_ORIGINS=https://dev.funbloomstudio.com"
 
 title DevBloom Local Agent
-echo DevBloom Local Agent — http://127.0.0.1:8765
+echo DevBloom Local Agent - http://127.0.0.1:8765
 echo Keep this window open while using DevBloom Studio.
 echo CORS origins: %LOCAL_AGENT_EXTRA_CORS_ORIGINS%
 echo.

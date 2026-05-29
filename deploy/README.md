@@ -178,10 +178,13 @@ set AWS_PROFILE=your-sso-profile
 The script:
 
 1. Verifies AWS credentials
-2. Builds Next.js with production API URL
-3. Stages `web/`, `api/`, `games/`, root **`requirements.txt`**
-4. Zips as `devbloom/`
-5. Uploads to `s3://devbloom/releases/<timestamp>.zip` and **`latest.zip`**
+2. Builds and uploads **Local Agent** (`releases/local-agent/latest.zip` + `VERSION.txt`)
+3. Builds Next.js with production API URL
+4. Stages `web/`, `api/`, `games/`, root **`requirements.txt`**
+5. Zips as `devbloom/`
+6. Uploads to `s3://devbloom/releases/<timestamp>.zip` and **`latest.zip`**
+
+Skip Local Agent only: `set SkipLocalAgentBuild=1` before running.
 
 ### Step 2 — Deploy on EC2
 
@@ -364,6 +367,8 @@ Artists install a **standalone Windows zip** (no full repo). S3 stays **private*
 
 ### 1. Build and upload (your PC)
 
+**Included in [`build-and-upload.bat`](build-and-upload.bat)** (step 1). Or run alone:
+
 → **[`deploy/build-local-agent-release.bat`](build-local-agent-release.bat)**
 
 Optional:
@@ -380,17 +385,20 @@ Uploads to **private** S3:
 ```
 s3://devbloom/releases/local-agent/local-agent-<timestamp>.zip
 s3://devbloom/releases/local-agent/latest.zip
+s3://devbloom/releases/local-agent/VERSION.txt
 ```
 
 No public bucket policy required.
 
 ### 2. Sync to EC2 (on deploy)
 
-[`ec2-deploy.sh`](ec2-deploy.sh) automatically runs:
+[`ec2-deploy.sh`](ec2-deploy.sh) automatically syncs both files:
 
 ```bash
 aws s3 cp s3://devbloom/releases/local-agent/latest.zip \
   $APP_ROOT/downloads/local-agent/latest.zip
+aws s3 cp s3://devbloom/releases/local-agent/VERSION.txt \
+  $APP_ROOT/downloads/local-agent/VERSION.txt
 ```
 
 **Local-agent only** (without full app deploy):
@@ -399,6 +407,8 @@ aws s3 cp s3://devbloom/releases/local-agent/latest.zip \
 mkdir -p /home/ec2-user/github/devbloom/downloads/local-agent
 aws s3 cp s3://devbloom/releases/local-agent/latest.zip \
   /home/ec2-user/github/devbloom/downloads/local-agent/latest.zip
+aws s3 cp s3://devbloom/releases/local-agent/VERSION.txt \
+  /home/ec2-user/github/devbloom/downloads/local-agent/VERSION.txt
 ```
 
 ### 3. nginx

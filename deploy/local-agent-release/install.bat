@@ -1,39 +1,76 @@
 @echo off
 setlocal EnableDelayedExpansion
-:: One-time install: copy to AppData, create .venv, register devbloom-agent:// URL protocol.
-:: Can be re-run to repair (Install / Repair from DevBloom Settings).
+:: Install or update Local Agent into AppData. Wipes previous install first.
+:: Run from unzipped download folder, or via devbloom-agent-install:// after unzipping to the update folder.
 
-set "SOURCE_DIR=%~dp0"
-for %%I in ("%SOURCE_DIR%") do set "SOURCE_DIR=%%~fI"
 set "INSTALL_DIR=%LOCALAPPDATA%\DevBloom\LocalAgent"
+set "UPDATE_SOURCE=%LOCALAPPDATA%\DevBloom\LocalAgentUpdate\DevBloomLocalAgent"
 set "VENV_DIR=%INSTALL_DIR%\.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 
+cd /d "%~dp0"
+set "SCRIPT_DIR=%CD%"
+
+if /I "%SCRIPT_DIR%"=="%INSTALL_DIR%" (
+  if exist "%UPDATE_SOURCE%\local_agent\main.py" (
+    set "SOURCE_DIR=%UPDATE_SOURCE%"
+    echo [DevBloom Local Agent] Update source: %SOURCE_DIR%
+  ) else (
+    echo ERROR: Unzip the downloaded zip to:
+    echo   %UPDATE_SOURCE%
+    echo Then click Install again, or run install.bat from that folder.
+    exit /b 1
+  )
+) else (
+  set "SOURCE_DIR=%SCRIPT_DIR%"
+)
+
 echo [DevBloom Local Agent] Installing to %INSTALL_DIR% ...
+echo [DevBloom Local Agent] From: %SOURCE_DIR%
 
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-
-echo Copying files...
-robocopy "%SOURCE_DIR%" "%INSTALL_DIR%" /E /XD .venv __pycache__ tests /XF install.bat /NFL /NDL /NJH /NJS /NC /NS /NP >nul
-if errorlevel 8 (
-  echo ERROR: Failed to copy files to %INSTALL_DIR%
+if /I "%SOURCE_DIR%"=="%INSTALL_DIR%" (
+  echo ERROR: Invalid source folder.
   exit /b 1
 )
-:: Always refresh install.bat in AppData for protocol handler
-copy /Y "%SOURCE_DIR%install.bat" "%INSTALL_DIR%\install.bat" >nul
+
+:: Stop agent before wiping AppData
+if exist "%INSTALL_DIR%\stop.bat" call "%INSTALL_DIR%\stop.bat" >nul 2>&1
+taskkill /F /IM python.exe /FI "WINDOWTITLE eq DevBloom Local Agent*" >nul 2>&1
+
+if exist "%INSTALL_DIR%" (
+  echo Removing previous install...
+  rd /s /q "%INSTALL_DIR%" 2>nul
+  if exist "%INSTALL_DIR%" (
+    echo ERROR: Could not remove %INSTALL_DIR%
+    echo Close any DevBloom Local Agent window and run install.bat again.
+    exit /b 1
+  )
+)
+mkdir "%INSTALL_DIR%"
+
+echo Copying files...
+robocopy "%SOURCE_DIR%" "%INSTALL_DIR%" /E /XD .venv __pycache__ tests /XF install.bat /R:2 /W:2
+set "ROBOCOPY_RC=!ERRORLEVEL!"
+if !ROBOCOPY_RC! GEQ 8 (
+  echo.
+  echo ERROR: Copy failed ^(robocopy exit !ROBOCOPY_RC!^).
+  exit /b 1
+)
+
+copy /Y "%SOURCE_DIR%\install.bat" "%INSTALL_DIR%\install.bat" >nul
+copy /Y "%SOURCE_DIR%\stop.bat" "%INSTALL_DIR%\stop.bat" >nul
+copy /Y "%SOURCE_DIR%\run.bat" "%INSTALL_DIR%\run.bat" >nul
 
 cd /d "%INSTALL_DIR%"
 
 call :find_python
 if errorlevel 1 exit /b 1
 
-if not exist "%VENV_PY%" (
-  echo Creating Python virtual environment...
-  !PY_RUN! -m venv "%VENV_DIR%"
-  if errorlevel 1 (
-    echo ERROR: Could not create venv.
-    exit /b 1
-  )
+echo Creating Python virtual environment...
+!PY_RUN! -m venv "%VENV_DIR%"
+if errorlevel 1 (
+  echo ERROR: Could not create venv.
+  exit /b 1
 )
 
 echo Installing dependencies...
@@ -55,20 +92,25 @@ call :register_protocol
 echo.
 echo Installation complete.
 echo   Location: %INSTALL_DIR%
-echo   Next: open DevBloom Studio -^> Settings -^> Installation -^> Start Local Agent
+for /f "usebackq delims=" %%v in ("%INSTALL_DIR%\VERSION.txt") do echo   Version: %%v
+echo   Next: DevBloom Studio -^> Settings -^> Installation -^> Run
 echo.
 exit /b 0
 
 :register_protocol
 set "RUN_BAT=%INSTALL_DIR%\run.bat"
 set "INSTALL_BAT=%INSTALL_DIR%\install.bat"
+set "STOP_BAT=%INSTALL_DIR%\stop.bat"
 reg add "HKCU\Software\Classes\devbloom-agent" /ve /d "URL:DevBloom Local Agent" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent" /v "URL Protocol" /d "" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent\shell\open\command" /ve /d "\"%RUN_BAT%\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent-install" /ve /d "URL:DevBloom Local Agent Install" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent-install" /v "URL Protocol" /d "" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent-install\shell\open\command" /ve /d "\"%INSTALL_BAT%\"" /f >nul
-echo Registered devbloom-agent:// and devbloom-agent-install:// URL handlers.
+reg add "HKCU\Software\Classes\devbloom-agent-stop" /ve /d "URL:DevBloom Local Agent Stop" /f >nul
+reg add "HKCU\Software\Classes\devbloom-agent-stop" /v "URL Protocol" /d "" /f >nul
+reg add "HKCU\Software\Classes\devbloom-agent-stop\shell\open\command" /ve /d "\"%STOP_BAT%\"" /f >nul
+echo Registered devbloom-agent:// devbloom-agent-install:// devbloom-agent-stop://
 exit /b 0
 
 :find_python
@@ -87,5 +129,4 @@ if not errorlevel 1 (
 if defined PY_RUN exit /b 0
 echo.
 echo Python 3.10+ is required. Install from https://www.python.org/downloads/
-echo Check "Add python.exe to PATH" during setup.
 exit /b 1

@@ -94,6 +94,65 @@ export function localAgentDownloadUrl(): string {
   return LOCAL_AGENT_DOWNLOAD_URL.trim();
 }
 
+const LOCAL_AGENT_INSTALLED_VERSION_KEY = "devbloom_local_agent_installed_version";
+
+/** Cached after a successful agent_info call (persists when agent is stopped). */
+export function getCachedLocalAgentInstalledVersion(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const v = window.localStorage.getItem(LOCAL_AGENT_INSTALLED_VERSION_KEY);
+    return v && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedLocalAgentInstalledVersion(version: string): void {
+  if (typeof window === "undefined" || !version.trim()) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(LOCAL_AGENT_INSTALLED_VERSION_KEY, version.trim());
+  } catch {
+    // ignore
+  }
+}
+
+export function localAgentVersionUrl(): string {
+  const download = localAgentDownloadUrl();
+  if (!download) {
+    return "";
+  }
+  if (download.toLowerCase().endsWith("latest.zip")) {
+    return download.replace(/latest\.zip$/i, "VERSION.txt");
+  }
+  return "";
+}
+
+export async function fetchLocalAgentLatestVersion(): Promise<string | null> {
+  const url = localAgentVersionUrl();
+  if (!url) {
+    return null;
+  }
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      return null;
+    }
+    const text = (await res.text()).trim();
+    const firstLine = text.split(/\r?\n/)[0]?.trim();
+    return firstLine || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Where to unzip before clicking Install (Windows). */
+export const LOCAL_AGENT_UPDATE_UNZIP_PATH =
+  "%LOCALAPPDATA%\\DevBloom\\LocalAgentUpdate\\DevBloomLocalAgent";
+
 function localAgentWrongServerHint(status: number): string {
   if (status !== 404) return "";
   return (

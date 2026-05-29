@@ -126,12 +126,19 @@ fi
 
 LOCAL_AGENT_S3_PREFIX="${LOCAL_AGENT_S3_PREFIX:-releases/local-agent}"
 LOCAL_AGENT_DOWNLOAD_DIR="${APP_ROOT}/downloads/local-agent"
-echo "Syncing Local Agent artist zip from s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip ..."
 mkdir -p "${LOCAL_AGENT_DOWNLOAD_DIR}"
+
+echo "Syncing Local Agent downloads to ${LOCAL_AGENT_DOWNLOAD_DIR} ..."
 if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip" "${LOCAL_AGENT_DOWNLOAD_DIR}/latest.zip"; then
-  echo "Local Agent zip: ${LOCAL_AGENT_DOWNLOAD_DIR}/latest.zip (nginx /downloads/local-agent/latest.zip)"
+  echo "  latest.zip -> ${LOCAL_AGENT_DOWNLOAD_DIR}/latest.zip"
 else
-  echo "WARNING: Local Agent zip not in S3 yet. Run deploy/build-local-agent-release.bat on your PC."
+  echo "WARNING: s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip not found."
+  echo "         Run deploy/build-and-upload.bat on your PC (includes Local Agent build)."
+fi
+if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/VERSION.txt" "${LOCAL_AGENT_DOWNLOAD_DIR}/VERSION.txt"; then
+  echo "  VERSION.txt -> ${LOCAL_AGENT_DOWNLOAD_DIR}/VERSION.txt"
+else
+  echo "WARNING: s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/VERSION.txt not found."
 fi
 
 if [[ "${RESTART_SERVICES}" == "1" ]]; then
