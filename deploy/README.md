@@ -311,6 +311,43 @@ sudo journalctl -u devbloom-web -n 50 --no-pager
 sudo tail -n 30 /var/log/nginx/error.log
 ```
 
+### Diagnose site down (services green, domain unreachable)
+
+```bash
+bash deploy/diagnose-site.sh
+```
+
+**Most common:** `devbloom-api` and `devbloom-web` listen on **127.0.0.1** only. **nginx** must be running to expose them on ports **80/443**.
+
+1. **Install nginx config** (once):
+   ```bash
+   sudo cp /home/ec2-user/github/devbloom/deploy/nginx-devbloom-dev.conf.example /etc/nginx/conf.d/devbloom.conf
+   sudo nginx -t
+   sudo systemctl enable --now nginx
+   ```
+
+2. **Verify upstreams respond on the server:**
+   ```bash
+   curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/
+   curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/docs
+   ```
+   Expect **200** (or **307** for web). If these fail, fix api/web first.
+
+3. **Verify nginx proxies locally:**
+   ```bash
+   curl -sS -o /dev/null -w "%{http_code}\n" -H "Host: dev.funbloomstudio.com" http://127.0.0.1/
+   ```
+
+4. **HTTPS** (if you use https:// in the browser):
+   ```bash
+   sudo certbot --nginx -d dev.funbloomstudio.com
+   ```
+   After certbot, confirm the **443** `server { }` block still has `location /api/` → port 8000 (see comment in nginx example).
+
+5. **EC2 security group:** inbound **TCP 80** and **443** from `0.0.0.0/0` (or your IP range).
+
+6. **DNS:** `dev.funbloomstudio.com` A record → this EC2 public IP.
+
 ### Diagnose 502 on `/api/...`
 
 ```bash
@@ -328,6 +365,7 @@ nginx proxies `/api/` → `127.0.0.1:8000`. A **502** means the API is down or n
 | [`build-and-upload.bat`](build-and-upload.bat) | Windows build + S3 upload |
 | [`ec2-deploy.sh`](ec2-deploy.sh) | EC2 pull from S3 + venv + restart |
 | [`diagnose-api.sh`](diagnose-api.sh) | Troubleshoot API / 502 |
+| [`diagnose-site.sh`](diagnose-site.sh) | Site down while api/web are green |
 | [`devbloom-api.service.example`](devbloom-api.service.example) | systemd — API (root `.venv`) |
 | [`devbloom-web-standalone.service.example`](devbloom-web-standalone.service.example) | systemd — Next standalone |
 | [`nginx-devbloom-dev.conf.example`](nginx-devbloom-dev.conf.example) | nginx for dev.funbloomstudio.com |
