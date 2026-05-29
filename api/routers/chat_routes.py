@@ -10,9 +10,9 @@ from openai import OpenAI
 from core.auth import get_current_user
 from core.chat_schemas import ChatRequest, CondensePayload, HistoryPayload
 from core.sse_utils import sse_event
-from services.chat_condense import condense_messages
-from services.chat_history import clear_history, read_history_messages, save_history
-from services.chat_stream import chat_stream_generator
+from services.chat.chat_condense import condense_messages
+from services.chat.chat_history import clear_history, read_history_messages, save_history
+from services.chat.chat_stream import chat_stream_generator
 
 chat_router = APIRouter()
 

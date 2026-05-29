@@ -8,8 +8,8 @@ import requests
 
 from core.chat_debug import log_unexpected_path
 from core.chat_helpers import extract_users_from_response, user_row
-from services.rag import get_supabase_client
-from services.usage import get_usage_for_users
+from services.core.rag import get_supabase_client
+from services.core.usage import get_usage_for_users
 
 logger = logging.getLogger(__name__)
 

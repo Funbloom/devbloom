@@ -6,7 +6,7 @@ from typing import Any
 
 from PIL import Image, ImageOps
 
-from services.image_tool import resolve_project_root_relative_file
+from services.image.image_tool import resolve_project_root_relative_file
 
 _CARD_IMAGE_SUFFIXES: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 

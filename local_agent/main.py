@@ -311,6 +311,14 @@ def read_binary_file(request: Request, body: FileBinaryReadRequest) -> Response:
     return Response(content=data, media_type=media_type)
 
 
+@app.post("/files/binary/exists")
+def binary_file_exists(request: Request, body: FileBinaryReadRequest) -> dict[str, Any]:
+    ensure_localhost(request)
+    root = ensure_root_approved(body.project_root)
+    path = resolve_under_root(root, body.relative_path)
+    return {"exists": path.is_file()}
+
+
 @app.post("/ui_breakdown/sam")
 async def ui_breakdown_sam(request: Request, body: UiBreakdownSamRequest) -> dict[str, Any]:
     """Run Segment Anything in-process (same venv as this agent). Requires SAM checkpoint + torch."""

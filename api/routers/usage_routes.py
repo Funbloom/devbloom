@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.auth import get_current_user
-from services.usage import get_provider_usage, get_usage_summary
+from services.core.usage import get_provider_usage, get_usage_summary
 
 usage_router = APIRouter()
 

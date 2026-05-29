@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
-from services.user_profile import get_user_profile, set_user_current_project
+from services.core.user_profile import get_user_profile, set_user_current_project
 
 user_profile_router = APIRouter()
 

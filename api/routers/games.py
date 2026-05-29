@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
-from services.games_registry import (
+from services.core.games_registry import (
     get_game,
     list_games,
     list_pipeline_inputs,

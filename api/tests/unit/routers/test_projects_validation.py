@@ -1,4 +1,4 @@
-"""Unit tests for project key rules without importing routers or services.rag."""
+"""Unit tests for project key rules without importing routers or services.core.rag."""
 
 import pytest
 from fastapi import HTTPException

@@ -6,11 +6,11 @@ from pydantic import BaseModel, Field
 from core.auth import get_current_user
 from core.code_settings import IMAGE_MODEL_REGISTRY, resolve_image_model
 
-from services.image_tool import build_image_filename, build_image_url, save_bytes_to_file
-from services.image_storage import upload_image_to_supabase
-from services.rag import get_supabase_client
-from services.usage import check_can_generate_images, increment_usage, record_provider_usage
-from services.storyboard import (
+from services.image.image_tool import build_image_filename, build_image_url, save_bytes_to_file
+from services.image.image_storage import upload_image_to_supabase
+from services.core.rag import get_supabase_client
+from services.core.usage import check_can_generate_images, increment_usage, record_provider_usage
+from services.image.storyboard import (
     add_character,
     add_location,
     add_style,

@@ -19,7 +19,7 @@ def upload_image_to_supabase(
     path: e.g. "tiles/<tile_id>/<filename>"
     """
     try:
-        from services.rag import get_supabase_client
+        from services.core.rag import get_supabase_client
         supabase = get_supabase_client()
     except Exception:
         return None

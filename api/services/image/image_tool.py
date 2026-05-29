@@ -15,7 +15,7 @@ from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from core.local_paths import require_local_project_path
-from services.rag import resolve_project_path
+from services.core.rag import resolve_project_path
 from core.local_settings import load_image_defaults
 from core.code_settings import (
     ALLOWED_IMAGE_DIMENSIONS,

@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 
 from core.auth import get_current_user
 from core.local_settings import load_image_generated, save_image_generated
-from services.image_tool import find_image_path, validate_image_filename
-from services.xlsx_jobs import enqueue_xlsx_job, get_xlsx_job
+from services.image.image_tool import find_image_path, validate_image_filename
+from services.export.xlsx_jobs import enqueue_xlsx_job, get_xlsx_job
 from core.code_settings import IMAGE_PROMPT_MODEL
 
 
@@ -118,7 +118,7 @@ def image_to_cloud_route(body: ImageToCloudBody) -> dict:
 
         # Lazy import so Supabase is only required when this endpoint is used.
         try:
-            from services.image_storage import upload_image_to_supabase
+            from services.image.image_storage import upload_image_to_supabase
         except Exception as exc:  # pragma: no cover - import-time failure
             raise HTTPException(status_code=500, detail=f"Cloud storage not configured: {exc}") from exc
 

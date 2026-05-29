@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from core.auth import require_admin
-from services.auth_users import list_users_for_admin
+from services.core.auth_users import list_users_for_admin
 
 admin_router = APIRouter()
 

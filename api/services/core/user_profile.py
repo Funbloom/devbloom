@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from services.rag import get_supabase_client, project_exists
+from services.core.rag import get_supabase_client, project_exists
 
 logger = logging.getLogger(__name__)
 

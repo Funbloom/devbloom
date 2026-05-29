@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from services.storyboard import storyboard_tile_dimensions
+from services.image.storyboard import storyboard_tile_dimensions
 
 
 def test_storyboard_tile_dimensions_square_default() -> None:

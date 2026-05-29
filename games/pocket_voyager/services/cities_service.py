@@ -9,7 +9,7 @@ from typing import Any
 from openai import OpenAI
 
 from core.code_settings import GPT_MODEL_DEFAULT
-from services.image_tool import generate_openai_image_to_dir
+from services.image.image_tool import generate_openai_image_to_dir
 from .gifts_service import (
     POCKET_VOYAGER_IMAGE_GENERATION_SIZE,
     downscale_pocket_voyager_image,

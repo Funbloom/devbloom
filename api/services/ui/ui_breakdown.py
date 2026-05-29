@@ -16,7 +16,7 @@ import requests
 from PIL import Image, ImageChops, ImageOps
 
 from core.code_settings import resolve_image_model
-from services.image_tool import (
+from services.image.image_tool import (
     ALLOWED_FILENAME_RE,
     build_image_filename,
     build_ui_canvas_nested_url,

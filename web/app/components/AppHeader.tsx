@@ -19,14 +19,40 @@ import { API_BASE, fetchApi } from "../lib/api";
 import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
 import { HeaderMenu } from "./HeaderMenu";
 
-const STUDIO_LINKS: { path: string; label: string }[] = [
-  { path: "/storyboard", label: "Storyboard" },
-  { path: "/imageGen", label: "Image Gen" },
-  { path: "/audio", label: "Voice Gen" },
-  { path: "/imageResize", label: "Image Resize" },
-  { path: "/meshgen", label: "Mesh Gen" },
-  { path: "/uiBuilder", label: "UI Builder" },
+type StudioLink = { path: string; label: string };
+
+type StudioCategory = { category: string; links: StudioLink[] };
+
+const STUDIO_CATEGORIES: StudioCategory[] = [
+  {
+    category: "Image",
+    links: [
+      { path: "/imageGen", label: "Image Gen" },
+      { path: "/imageResize", label: "Image Resize" },
+    ],
+  },
+  {
+    category: "Audio",
+    links: [
+      { path: "/audio", label: "Voice Gen" },
+      { path: "/audiobank", label: "Audiobank" },
+    ],
+  },
+  {
+    category: "UI",
+    links: [{ path: "/uiBuilder", label: "UI Builder" }],
+  },
+  {
+    category: "3D",
+    links: [{ path: "/meshgen", label: "Mesh Gen" }],
+  },
+  {
+    category: "Story",
+    links: [{ path: "/storyboard", label: "Storyboard" }],
+  },
 ];
+
+const STUDIO_LINKS: StudioLink[] = STUDIO_CATEGORIES.flatMap((group) => group.links);
 
 function humanizeSegment(segment: string): string {
   const s = segment.replace(/_/g, " ").trim();
@@ -41,6 +67,7 @@ function getCurrentPageLabel(pathname: string): string {
   if (pathname.startsWith("/storyboard")) return "Storyboard";
   if (pathname.startsWith("/imageGen")) return "Image Gen";
   if (pathname.startsWith("/audio")) return "Voice Gen";
+  if (pathname.startsWith("/audiobank")) return "Audiobank";
   if (pathname.startsWith("/imageResize")) return "Image Resize";
   if (pathname.startsWith("/meshgen")) return "Mesh Gen";
   if (pathname.startsWith("/uiBuilder")) return "UI Builder";
@@ -376,18 +403,24 @@ export function AppHeader() {
             summaryClassName={studioActive ? "app-header-link-active" : ""}
             wide
           >
-            {STUDIO_LINKS.map(({ path, label }) => {
-              const isActive = path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path)));
-              return (
-                <Link
-                  key={path}
-                  href={path}
-                  className={`app-header-dropdown-link ${isActive ? "app-header-link-active" : ""}`}
-                >
-                  {label}
-                </Link>
-              );
-            })}
+            {STUDIO_CATEGORIES.map((group) => (
+              <div key={group.category} className="app-header-dropdown-group">
+                <div className="app-header-dropdown-group-label">{group.category}</div>
+                {group.links.map(({ path, label }) => {
+                  const isActive =
+                    path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path)));
+                  return (
+                    <Link
+                      key={path}
+                      href={path}
+                      className={`app-header-dropdown-link ${isActive ? "app-header-link-active" : ""}`}
+                    >
+                      {label}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
           </HeaderMenu>
 
           {visibleGames.map((game) => {

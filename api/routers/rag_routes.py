@@ -1,7 +1,7 @@
 from fastapi import APIRouter, File, Form, UploadFile
 from uuid import UUID
 
-from services.rag import (
+from services.core.rag import (
     RetrieveRequest,
     RetrieveResponse,
     delete_source,

@@ -25,23 +25,23 @@ from core.llm_tools import BUILTIN_TOOL_NAMES, get_tools
 from core.skills_loader import build_available_skills_xml, get_skill_content
 from core.sse_utils import sse_event
 from core.personas import load_persona_description_prompt, load_persona_text
-from services.docx_export import run_export_docx_tool
-from services.image_tool import (
+from services.export.docx_export import run_export_docx_tool
+from services.image.image_tool import (
     run_convert_image_tool,
     run_crop_image_tool,
     run_generate_image_tool,
     run_resize_image_tool,
 )
-from services.pdf_export import get_gen_output_dir, run_export_pdf_tool
-from services.rag import (
+from services.export.pdf_export import get_gen_output_dir, run_export_pdf_tool
+from services.core.rag import (
     get_default_project_key_value,
     get_project_display_name,
     get_supabase_client,
     retrieve_chunks,
     resolve_scope_and_project_key,
 )
-from services.xlsx_jobs import enqueue_xlsx_job
-from services.usage import record_provider_usage
+from services.export.xlsx_jobs import enqueue_xlsx_job
+from services.core.usage import record_provider_usage
 
 try:
     from core.mcp_client import call_mcp_tool

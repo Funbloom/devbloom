@@ -190,6 +190,12 @@ export const localAgent = {
       body: JSON.stringify({ project_root: projectRoot, relative_path: relativePath }),
     });
   },
+  projectFileExists(projectRoot: string, relativePath: string): Promise<boolean> {
+    return requestLocalAgent("/files/binary/exists", {
+      method: "POST",
+      body: JSON.stringify({ project_root: projectRoot, relative_path: relativePath }),
+    }).then((result: { exists?: boolean }) => Boolean(result.exists));
+  },
   async readBinary(projectRoot: string, relativePath: string): Promise<Blob> {
     assertLocalAgentContext();
     const url = `${normalizedLocalAgentBase()}/files/binary/read`;

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from core.auth import require_admin
 from core.project_key import validate_project_key
-from services.rag import get_supabase_client
+from services.core.rag import get_supabase_client
 from games.pocket_voyager.services.gifts_service import load_gift_catalog
 from games.pocket_voyager.services.cities_service import load_cities_catalog
 from core.local_paths import delete_local_project_path, get_local_project_path, set_local_project_path

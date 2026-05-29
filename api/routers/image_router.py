@@ -14,9 +14,9 @@ from core.code_settings import (
     UI_CANVAS_POLISH_MAX_PROMPT_LEN,
     resolve_image_model,
 )
-from services.rag import resolve_project_path
-from services.usage import check_can_generate_images, increment_usage, record_provider_usage
-from services.image_tool import (
+from services.core.rag import resolve_project_path
+from services.core.usage import check_can_generate_images, increment_usage, record_provider_usage
+from services.image.image_tool import (
     convert_image,
     crop_image,
     delete_project_relative_file,
@@ -34,9 +34,9 @@ from services.image_tool import (
     validate_image_filename,
     generate_openai_image_bytes,
 )
-from services.storyboard import list_styles
-from services.ui_breakdown import detect_ui_breakdown, process_ui_breakdown, strip_text_ui_image
-from services.ui_canvas_prompt import (
+from services.image.storyboard import list_styles
+from services.ui.ui_breakdown import detect_ui_breakdown, process_ui_breakdown, strip_text_ui_image
+from services.ui.ui_canvas_prompt import (
     MAX_UI_STYLE_REFERENCE_IMAGES,
     build_ui_canvas_full_prompt,
 )

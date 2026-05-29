@@ -14,3 +14,4 @@ mcp
 PyJWT
 jwcrypto
 rembg[cpu]
+pymp3

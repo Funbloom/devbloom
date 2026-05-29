@@ -12,7 +12,7 @@ from core.code_settings import (
     OPENAI_TOKEN_BUDGET_DEFAULT_BY_PERIOD,
     OPENAI_TOKEN_BUDGET_ENV_BY_PERIOD,
 )
-from services.rag import get_supabase_client
+from services.core.rag import get_supabase_client
 
 MAX_IMAGES_PER_USER_PER_DAY = int(os.getenv("MAX_IMAGES_PER_USER_PER_DAY", "80"))
 logger = logging.getLogger(__name__)

@@ -7,7 +7,7 @@ from typing import Any
 
 from PIL import Image
 
-from services.image_tool import generate_openai_image_to_dir, sanitize_filename
+from services.image.image_tool import generate_openai_image_to_dir, sanitize_filename
 
 _GIFT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 POCKET_VOYAGER_IMAGE_GENERATION_SIZE = 1024
