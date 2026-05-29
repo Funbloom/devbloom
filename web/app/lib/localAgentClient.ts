@@ -131,6 +131,17 @@ export function localAgentVersionUrl(): string {
   return "";
 }
 
+export function localAgentWebInstallUrl(): string {
+  const download = localAgentDownloadUrl();
+  if (!download) {
+    return "";
+  }
+  if (download.toLowerCase().endsWith("latest.zip")) {
+    return download.replace(/latest\.zip$/i, "web-install.bat");
+  }
+  return "";
+}
+
 export async function fetchLocalAgentLatestVersion(): Promise<string | null> {
   const url = localAgentVersionUrl();
   if (!url) {

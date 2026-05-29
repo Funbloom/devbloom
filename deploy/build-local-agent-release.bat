@@ -69,6 +69,7 @@ if errorlevel 1 (
 )
 aws s3 cp "s3://%S3_BUCKET%/%S3_PREFIX%/%ZIPNAME%" "s3://%S3_BUCKET%/%S3_PREFIX%/latest.zip" --no-progress %AWS_PROFILE_ARG%
 aws s3 cp "%ROOT%\deploy\local-agent-release\VERSION.txt" "s3://%S3_BUCKET%/%S3_PREFIX%/VERSION.txt" --no-progress %AWS_PROFILE_ARG%
+aws s3 cp "%ROOT%\deploy\local-agent-release\web-install.bat" "s3://%S3_BUCKET%/%S3_PREFIX%/web-install.bat" --no-progress %AWS_PROFILE_ARG%
 
 echo [6/6] Cleaning staging...
 rd /s /q "%STAGING%" 2>nul
@@ -84,6 +85,7 @@ if /I not "%SkipUpload%"=="1" (
   echo Artists download via EC2/nginx ^(private S3, no public bucket policy^):
   echo   %PRODUCTION_SITE_URL%/downloads/local-agent/latest.zip
   echo   %PRODUCTION_SITE_URL%/downloads/local-agent/VERSION.txt
+  echo   %PRODUCTION_SITE_URL%/downloads/local-agent/web-install.bat
   echo.
   echo After upload, on EC2 sync to disk:
   echo   aws s3 cp s3://%S3_BUCKET%/%S3_PREFIX%/latest.zip APP_ROOT/downloads/local-agent/latest.zip

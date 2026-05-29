@@ -140,6 +140,11 @@ if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/VERSION.txt" "${LOCAL_A
 else
   echo "WARNING: s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/VERSION.txt not found."
 fi
+if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/web-install.bat" "${LOCAL_AGENT_DOWNLOAD_DIR}/web-install.bat"; then
+  echo "  web-install.bat -> ${LOCAL_AGENT_DOWNLOAD_DIR}/web-install.bat"
+else
+  echo "WARNING: s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/web-install.bat not found."
+fi
 
 if [[ "${RESTART_SERVICES}" == "1" ]]; then
   echo "Restarting services..."

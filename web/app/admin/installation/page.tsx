@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { API_BASE } from "../../lib/api";
-import { isLocalAgentContext, localAgent, localAgentDownloadUrl, fetchLocalAgentLatestVersion, getCachedLocalAgentInstalledVersion, setCachedLocalAgentInstalledVersion, LOCAL_AGENT_UPDATE_UNZIP_PATH, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
+import { isLocalAgentContext, localAgent, localAgentDownloadUrl, localAgentWebInstallUrl, fetchLocalAgentLatestVersion, getCachedLocalAgentInstalledVersion, setCachedLocalAgentInstalledVersion, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
 
 type InstallTab = "basic" | "advanced";
 
@@ -93,6 +93,7 @@ export default function AdminInstallationPage() {
   const [cachedInstalledVersion, setCachedInstalledVersion] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<InstallTab>("basic");
   const downloadUrl = localAgentDownloadUrl();
+  const webInstallUrl = localAgentWebInstallUrl();
 
   const installedVersion = agentInfo?.version || cachedInstalledVersion;
   const isInstalledOnDisk = Boolean(installedVersion);
@@ -101,6 +102,8 @@ export default function AdminInstallationPage() {
   );
   const showDownloadInstall = !isInstalledOnDisk || updateAvailable;
   const agentRunning = localAgentState === "ok";
+  /** After first install, one-click Install uses the registered URL protocol. */
+  const installViaProtocol = isInstalledOnDisk;
 
   const actionButtonStyle: React.CSSProperties = {
     fontSize: 13,
@@ -234,6 +237,18 @@ export default function AdminInstallationPage() {
 
   useEffect(() => {
     setCachedInstalledVersion(getCachedLocalAgentInstalledVersion());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get("agentInstalled")?.trim();
+    if (v) {
+      setCachedLocalAgentInstalledVersion(v);
+      setCachedInstalledVersion(v);
+    }
   }, []);
 
   useEffect(() => {
@@ -477,8 +492,7 @@ export default function AdminInstallationPage() {
                         </div>
                         {updateAvailable ? (
                           <p style={{ margin: "4px 0 0", color: "#fbbf24" }}>
-                            An update is available. Download the new zip, unzip to {LOCAL_AGENT_UPDATE_UNZIP_PATH}, then
-                            click Install.
+                            An update is available. Click Install to download and apply the latest version.
                           </p>
                         ) : null}
                       </div>
@@ -489,9 +503,23 @@ export default function AdminInstallationPage() {
                           </a>
                         ) : null}
                         {showDownloadInstall ? (
-                          <a href="devbloom-agent-install://" style={actionButtonStyle}>
-                            Install
-                          </a>
+                          installViaProtocol ? (
+                            <a href="devbloom-agent-install://" style={actionButtonStyle}>
+                              Install
+                            </a>
+                          ) : webInstallUrl ? (
+                            <a
+                              href={webInstallUrl}
+                              download="DevBloom-LocalAgent-Install.bat"
+                              style={actionButtonStyle}
+                            >
+                              Install
+                            </a>
+                          ) : (
+                            <a href="devbloom-agent-install://" style={actionButtonStyle}>
+                              Install
+                            </a>
+                          )
                         ) : null}
                         {isInstalledOnDisk && !agentRunning ? (
                           <a href="devbloom-agent://start" style={actionButtonStyle}>
@@ -506,9 +534,9 @@ export default function AdminInstallationPage() {
                       </div>
                       {showDownloadInstall ? (
                         <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)", lineHeight: 1.45 }}>
-                          First install or update: unzip the download to{" "}
-                          <code style={{ fontSize: 11 }}>{LOCAL_AGENT_UPDATE_UNZIP_PATH}</code>, then click Install. The
-                          installer replaces everything in AppData before copying the new version.
+                          {installViaProtocol
+                            ? "Install re-downloads the latest release and updates AppData automatically."
+                            : "Install downloads a small script — run it once (double-click). It downloads the zip, installs to AppData, and enables one-click Install next time."}
                         </p>
                       ) : (
                         <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>

@@ -104,13 +104,15 @@ set "STOP_BAT=%INSTALL_DIR%\stop.bat"
 reg add "HKCU\Software\Classes\devbloom-agent" /ve /d "URL:DevBloom Local Agent" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent" /v "URL Protocol" /d "" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent\shell\open\command" /ve /d "\"%RUN_BAT%\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\devbloom-agent-install" /ve /d "URL:DevBloom Local Agent Install" /f >nul
-reg add "HKCU\Software\Classes\devbloom-agent-install" /v "URL Protocol" /d "" /f >nul
-reg add "HKCU\Software\Classes\devbloom-agent-install\shell\open\command" /ve /d "\"%INSTALL_BAT%\"" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent-stop" /ve /d "URL:DevBloom Local Agent Stop" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent-stop" /v "URL Protocol" /d "" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent-stop\shell\open\command" /ve /d "\"%STOP_BAT%\"" /f >nul
-echo Registered devbloom-agent:// devbloom-agent-install:// devbloom-agent-stop://
+if exist "%LOCALAPPDATA%\DevBloom\web-install.bat" (
+  reg add "HKCU\Software\Classes\devbloom-agent-install" /ve /d "URL:DevBloom Local Agent Install" /f >nul
+  reg add "HKCU\Software\Classes\devbloom-agent-install" /v "URL Protocol" /d "" /f >nul
+  reg add "HKCU\Software\Classes\devbloom-agent-install\shell\open\command" /ve /d "\"%LOCALAPPDATA%\DevBloom\web-install.bat\"" /f >nul
+)
+echo Registered devbloom-agent:// and devbloom-agent-stop:// URL handlers.
 exit /b 0
 
 :find_python
