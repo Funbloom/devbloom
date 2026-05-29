@@ -164,6 +164,27 @@ export async function fetchLocalAgentLatestVersion(): Promise<string | null> {
 export const LOCAL_AGENT_UPDATE_UNZIP_PATH =
   "%LOCALAPPDATA%\\DevBloom\\LocalAgentUpdate\\DevBloomLocalAgent";
 
+/** Windows installer for Python 3.10+ (Settings → Installation → Basic). */
+export const PYTHON_WINDOWS_INSTALLER_URL =
+  "https://www.python.org/ftp/python/3.14.5/python-3.14.5-amd64.exe";
+
+export function isPythonVersion310Plus(version: string): boolean {
+  const trimmed = version.trim();
+  const match = trimmed.match(/^(\d+)\.(\d+)/);
+  if (!match) {
+    return false;
+  }
+  const major = Number.parseInt(match[1], 10);
+  const minor = Number.parseInt(match[2], 10);
+  if (major > 3) {
+    return true;
+  }
+  if (major === 3 && minor >= 10) {
+    return true;
+  }
+  return false;
+}
+
 function localAgentWrongServerHint(status: number): string {
   if (status !== 404) return "";
   return (

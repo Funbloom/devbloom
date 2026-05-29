@@ -392,7 +392,19 @@ No public bucket policy required.
 
 ### 2. Sync to EC2 (on deploy)
 
-[`ec2-deploy.sh`](ec2-deploy.sh) automatically syncs both files:
+[`ec2-deploy.sh`](ec2-deploy.sh) syncs `latest.zip`, `VERSION.txt`, and `web-install.bat` from S3. If a file is missing in S3 (403/404), it falls back to `deploy/local-agent-release/` in your **git clone** on EC2 — run `git pull` before deploy.
+
+**Upload to S3 from your PC first** (required for `latest.zip`):
+
+```bat
+deploy\build-and-upload.bat
+```
+
+Or Local Agent only:
+
+```bat
+deploy\build-local-agent-release.bat
+```
 
 ```bash
 aws s3 cp s3://devbloom/releases/local-agent/latest.zip \

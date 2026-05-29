@@ -52,7 +52,7 @@ async def installation_status(request: Request) -> dict[str, Any]:
         has_segment_anything = importlib.util.find_spec("segment_anything") is not None
         sam_installed = has_checkpoint_env and checkpoint_exists and has_torch and has_segment_anything
         py = sys.version_info
-        python_3_10_installed = py.major == 3 and py.minor == 10
+        python_3_10_installed = (py.major == 3 and py.minor >= 10) or py.major > 3
         torch_installed = has_torch
         hunyuan3d2_installed = importlib.util.find_spec("hy3dgen") is not None
         custom_rasterizer_installed = importlib.util.find_spec("custom_rasterizer") is not None

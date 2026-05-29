@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { API_BASE } from "../../lib/api";
-import { isLocalAgentContext, localAgent, localAgentDownloadUrl, localAgentWebInstallUrl, fetchLocalAgentLatestVersion, getCachedLocalAgentInstalledVersion, setCachedLocalAgentInstalledVersion, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
+import { isLocalAgentContext, localAgent, localAgentDownloadUrl, localAgentWebInstallUrl, fetchLocalAgentLatestVersion, getCachedLocalAgentInstalledVersion, setCachedLocalAgentInstalledVersion, isPythonVersion310Plus, PYTHON_WINDOWS_INSTALLER_URL, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
 
 type InstallTab = "basic" | "advanced";
 
@@ -65,6 +65,8 @@ function StatusLine({
   );
 }
 export default function AdminInstallationPage() {
+  const [pythonBasicState, setPythonBasicState] = useState<StatusState>("checking");
+  const [pythonBasicDetail, setPythonBasicDetail] = useState("Checking Python...");
   const [localAgentState, setLocalAgentState] = useState<StatusState>("checking");
   const [apiServerState, setApiServerState] = useState<StatusState>("checking");
   const [samState, setSamState] = useState<StatusState>("checking");
@@ -306,11 +308,15 @@ export default function AdminInstallationPage() {
       setHfHomeDetail("Checking HF_HOME...");
       setTextureExtState("checking");
       setTextureExtDetail("Checking texture extensions...");
+      setPythonBasicState("checking");
+      setPythonBasicDetail("Checking Python...");
       setAgentInfo(null);
 
       const localContext = isLocalAgentContext();
       if (!localContext) {
         if (!cancelled) {
+          setPythonBasicState("unknown");
+          setPythonBasicDetail("Not available on this host.");
           setLocalAgentState("unknown");
           setSamState("unknown");
           setSamDetail("Local Agent checks are disabled on this host.");
@@ -332,6 +338,23 @@ export default function AdminInstallationPage() {
           setLocalAgentState(localOk ? "ok" : "missing");
         }
         if (localOk) {
+          try {
+            const sam: LocalModelsInstallationStatus = await localAgent.installationStatus();
+            if (!cancelled) {
+              const pyOk = isPythonVersion310Plus(sam.python_version);
+              setPythonBasicState(pyOk ? "ok" : "missing");
+              setPythonBasicDetail(
+                pyOk
+                  ? `Installed (${sam.python_version}).`
+                  : `Found ${sam.python_version}; need Python 3.10 or newer.`,
+              );
+            }
+          } catch {
+            if (!cancelled) {
+              setPythonBasicState("unknown");
+              setPythonBasicDetail("Could not read Python version from Local Agent.");
+            }
+          }
           try {
             const info = await localAgent.agentInfo();
             if (!cancelled) {
@@ -379,11 +402,11 @@ export default function AdminInstallationPage() {
                   ? "Installed (needed for textured mesh generation)."
                   : `Missing: ${textureMissing.join(", ")} (only required for texturing).`,
               );
-              setPythonState(sam.python_3_10_installed ? "ok" : "missing");
+              setPythonState(isPythonVersion310Plus(sam.python_version) ? "ok" : "missing");
               setPythonDetail(
-                sam.python_3_10_installed
+                isPythonVersion310Plus(sam.python_version)
                   ? `Installed (${sam.python_version}).`
-                  : `Missing required version (found ${sam.python_version}, need 3.10.x).`,
+                  : `Found ${sam.python_version}; need Python 3.10 or newer.`,
               );
               if (sam.installed) {
                 setSamState("ok");
@@ -418,6 +441,10 @@ export default function AdminInstallationPage() {
             }
           }
         } else if (!cancelled) {
+          setPythonBasicState("missing");
+          setPythonBasicDetail(
+            "Python 3.10+ is required on your PC before installing the Local Agent. Install Python, then run Install.",
+          );
           setSamState("unknown");
           setSamDetail("Start Local Agent first, then SAM status can be checked.");
           setHunyuanState("unknown");
@@ -488,6 +515,24 @@ export default function AdminInstallationPage() {
                     </p>
                   ) : (
                     <>
+                      <StatusLine
+                        label="Python 3.10+"
+                        purpose="Required on your PC to run the Local Agent installer and service."
+                        state={pythonBasicState}
+                        detail={pythonBasicDetail}
+                        action={
+                          pythonBasicState === "missing" ? (
+                            <a
+                              href={PYTHON_WINDOWS_INSTALLER_URL}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={actionButtonStyle}
+                            >
+                              Install Python 3.10+
+                            </a>
+                          ) : undefined
+                        }
+                      />
                       <StatusLine
                         label="Local Agent"
                         purpose="Runs on your PC so DevBloom can read/write project folders and open native file pickers."
