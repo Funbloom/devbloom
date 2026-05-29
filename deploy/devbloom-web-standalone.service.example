@@ -10,7 +10,7 @@ After=network.target
 Type=simple
 User=ec2-user
 Group=ec2-user
-WorkingDirectory=/home/ec2-user/devbloom/web
+WorkingDirectory=/home/ec2-user/github/devbloom/web
 Environment=NODE_ENV=production
 Environment=NEXT_PUBLIC_API_URL_BASE=https://dev.funbloomstudio.com/api
 ExecStart=/usr/bin/node server.js

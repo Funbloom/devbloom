@@ -1,7 +1,7 @@
 # Example systemd unit for DevBloom API (FastAPI).
 # Copy to /etc/systemd/system/devbloom-api.service
-# Replace APP_ROOT with your app directory (e.g. /home/ec2-user/devbloom) and USER if not ec2-user.
-# Layout: APP_ROOT/api (this WorkingDirectory), APP_ROOT/games (manifest + game packages; required for imports).
+# Replace APP_ROOT with your app directory (e.g. /home/ec2-user/github/devbloom) and USER if not ec2-user.
+# Layout: APP_ROOT/api (WorkingDirectory), APP_ROOT/games, APP_ROOT/.venv (shared Python venv).
 # Then: sudo systemctl daemon-reload && sudo systemctl enable --now devbloom-api
 
 [Unit]
@@ -12,9 +12,9 @@ After=network.target
 Type=simple
 User=ec2-user
 Group=ec2-user
-WorkingDirectory=/home/ec2-user/devbloom/api
-EnvironmentFile=/home/ec2-user/devbloom/api/.env
-ExecStart=/home/ec2-user/devbloom/api/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+WorkingDirectory=/home/ec2-user/github/devbloom/api
+EnvironmentFile=/home/ec2-user/github/devbloom/api/.env
+ExecStart=/home/ec2-user/github/devbloom/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
 

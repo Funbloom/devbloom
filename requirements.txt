@@ -8,7 +8,6 @@
 #   - local_agent/requirements-sam.txt          (Segment Anything: torch + SAM)
 #   - util/requirements-meshgen.txt             (Hunyuan3D-2 smoke test deps)
 #
-# Production EC2 deploy is NOT affected: ec2-deploy.sh still creates api/.venv
-# from api/requirements.txt only.
+# Production EC2 uses the same shared root .venv as local dev (see deploy/ec2-deploy.sh).
 -r api/requirements.txt
 -r local_agent/requirements.txt
