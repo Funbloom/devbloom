@@ -13,10 +13,18 @@
 #   Fix: sudo nano /etc/nginx/conf.d/devbloom.conf — duplicate /api/ into the ssl server,
 #   then sudo nginx -t && sudo systemctl reload nginx
 
+#   If HTTPS returns 502 for /api/, duplicate location /api/ into the ssl server block.
+#   Same for location /downloads/ after certbot (artist Local Agent zip).
+
 # Same domain, path-based: web at dev.funbloomstudio.com/, API at dev.funbloomstudio.com/api/
 server {
     listen 80;
     server_name dev.funbloomstudio.com;
+
+    # Artist Local Agent zip (private S3 → synced to disk by ec2-deploy.sh)
+    location /downloads/ {
+        alias /home/ec2-user/github/devbloom/downloads/;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:3000;

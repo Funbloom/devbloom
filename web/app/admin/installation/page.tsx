@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { API_BASE } from "../../lib/api";
-import { isLocalAgentContext, localAgent, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
+import { isLocalAgentContext, localAgent, localAgentDownloadUrl, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
 
 type StatusState = "checking" | "ok" | "missing" | "unknown";
 type ActionResultState = "success" | "error";
@@ -86,16 +86,56 @@ export default function AdminInstallationPage() {
   } | null>(null);
   const [lastTextureInstallLog, setLastTextureInstallLog] = useState<string>("");
   const [instructionTopic, setInstructionTopic] = useState<InstructionTopic | null>(null);
+  const [agentInfo, setAgentInfo] = useState<LocalAgentInfo | null>(null);
+  const downloadUrl = localAgentDownloadUrl();
+
+  const localAgentActionButtons = () => {
+    if (!isLocalAgentContext()) {
+      return null;
+    }
+    const buttons: ReactNode[] = [];
+    if (downloadUrl) {
+      buttons.push(
+        <a
+          key="download"
+          href={downloadUrl}
+          download
+          target="_blank"
+          rel="noreferrer"
+          style={{ fontSize: 13 }}
+        >
+          Download Local Agent
+        </a>,
+      );
+    }
+    if (localAgentState !== "ok") {
+      buttons.push(
+        <a key="install" href="devbloom-agent-install://" style={{ fontSize: 13 }}>
+          Install / Repair
+        </a>,
+        <a key="start" href="devbloom-agent://start" style={{ fontSize: 13 }}>
+          Start Local Agent
+        </a>,
+      );
+    }
+    return buttons.length > 0 ? (
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>{buttons}</div>
+    ) : null;
+  };
 
   const instructionByTopic: Record<InstructionTopic, { title: string; body: string }> = {
     local_agent: {
       title: "Local Agent",
       body:
-        "- Clone the repository from https://github.com/FunBloomStudio/devbloom.git\n" +
-        "- Open a terminal at repo root.\n" +
-        "- Run: cd local_agent\n" +
-        "- Start: ./run.bat (Windows) or ./run.sh (macOS/Linux)\n" +
-        "- Keep this process running while using local file features.",
+        "Windows (artists):\n" +
+        "1. Settings → Installation → Download Local Agent (or use the public zip from your studio).\n" +
+        "2. Unzip and double-click install.bat once (installs to %LOCALAPPDATA%\\DevBloom\\LocalAgent).\n" +
+        "3. Click Start Local Agent on this page (or double-click run.bat). Keep the window open.\n" +
+        "\n" +
+        "Developers (full repo):\n" +
+        "- Clone https://github.com/FunBloomStudio/devbloom.git\n" +
+        "- From repo root run local_agent\\run.bat (Windows) or local_agent/run.sh (macOS).\n" +
+        "- Requires Python 3.10+ and root requirements.txt in .venv.",
     },
     api_server: {
       title: "API Server",
@@ -208,6 +248,7 @@ export default function AdminInstallationPage() {
       setHfHomeDetail("Checking HF_HOME...");
       setTextureExtState("checking");
       setTextureExtDetail("Checking texture extensions...");
+      setAgentInfo(null);
 
       const localContext = isLocalAgentContext();
       if (!localContext) {
@@ -233,6 +274,16 @@ export default function AdminInstallationPage() {
           setLocalAgentState(localOk ? "ok" : "missing");
         }
         if (localOk) {
+          try {
+            const info = await localAgent.agentInfo();
+            if (!cancelled) {
+              setAgentInfo(info);
+            }
+          } catch {
+            if (!cancelled) {
+              setAgentInfo(null);
+            }
+          }
           try {
             const sam: LocalModelsInstallationStatus = await localAgent.installationStatus();
             if (!cancelled) {
@@ -386,15 +437,24 @@ export default function AdminInstallationPage() {
                   label="Local Agent"
                   purpose="Runs on your PC so the Studio can safely read/write your game project folders, spawn native folder pickers, and host heavy local tools."
                   state={localAgentState}
-                  action={instructionAction("local_agent")}
+                  action={
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                      {localAgentActionButtons()}
+                      {instructionAction("local_agent")}
+                    </div>
+                  }
                   detail={
                     localAgentState === "ok"
-                      ? "Running."
+                      ? agentInfo
+                        ? `Running (v${agentInfo.version}). ${agentInfo.install_dir}`
+                        : "Running."
                       : localAgentState === "checking"
                         ? "Checking..."
                         : localAgentState === "unknown"
                           ? "Unavailable on this host."
-                          : "Not detected. Start local_agent/run.bat."
+                          : downloadUrl
+                            ? "Not detected. Download the zip, run install.bat once, then click Start Local Agent."
+                            : "Not detected. Install the Local Agent on your PC, then click Start."
                   }
                 />
                 <StatusLine

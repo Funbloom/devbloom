@@ -358,11 +358,85 @@ nginx proxies `/api/` → `127.0.0.1:8000`. A **502** means the API is down or n
 
 ---
 
+## Local Agent artist release (private S3 → EC2 download)
+
+Artists install a **standalone Windows zip** (no full repo). S3 stays **private** (same permissions as EC2 releases). EC2 pulls the zip and **nginx** serves it at `/downloads/`.
+
+### 1. Build and upload (your PC)
+
+→ **[`deploy/build-local-agent-release.bat`](build-local-agent-release.bat)**
+
+Optional:
+
+```bat
+set SkipUpload=1
+set S3_BUCKET=devbloom
+set S3_PREFIX=releases/local-agent
+deploy\build-local-agent-release.bat
+```
+
+Uploads to **private** S3:
+
+```
+s3://devbloom/releases/local-agent/local-agent-<timestamp>.zip
+s3://devbloom/releases/local-agent/latest.zip
+```
+
+No public bucket policy required.
+
+### 2. Sync to EC2 (on deploy)
+
+[`ec2-deploy.sh`](ec2-deploy.sh) automatically runs:
+
+```bash
+aws s3 cp s3://devbloom/releases/local-agent/latest.zip \
+  $APP_ROOT/downloads/local-agent/latest.zip
+```
+
+**Local-agent only** (without full app deploy):
+
+```bash
+mkdir -p /home/ec2-user/github/devbloom/downloads/local-agent
+aws s3 cp s3://devbloom/releases/local-agent/latest.zip \
+  /home/ec2-user/github/devbloom/downloads/local-agent/latest.zip
+```
+
+### 3. nginx
+
+[`nginx-devbloom-dev.conf.example`](nginx-devbloom-dev.conf.example) includes:
+
+```nginx
+location /downloads/ {
+    alias /home/ec2-user/github/devbloom/downloads/;
+}
+```
+
+After **certbot**, add the same `location /downloads/` block to the **443 ssl** server (like `/api/`).
+
+Artist download URL:
+
+```
+https://dev.funbloomstudio.com/downloads/local-agent/latest.zip
+```
+
+Baked into web build (`build-and-upload.bat`):
+
+```
+NEXT_PUBLIC_LOCAL_AGENT_DOWNLOAD_URL=https://dev.funbloomstudio.com/downloads/local-agent/latest.zip
+```
+
+Artist flow: **Download zip** → unzip → run **`install.bat`** once → **Settings → Installation → Start Local Agent**.
+
+Templates live in [`deploy/local-agent-release/`](local-agent-release/).
+
+---
+
 ## Config files in this folder
 
 | File | Purpose |
 |------|---------|
 | [`build-and-upload.bat`](build-and-upload.bat) | Windows build + S3 upload |
+| [`build-local-agent-release.bat`](build-local-agent-release.bat) | Artist Local Agent zip → private S3 |
 | [`ec2-deploy.sh`](ec2-deploy.sh) | EC2 pull from S3 + venv + restart |
 | [`diagnose-api.sh`](diagnose-api.sh) | Troubleshoot API / 502 |
 | [`diagnose-site.sh`](diagnose-site.sh) | Site down while api/web are green |

@@ -110,6 +110,28 @@ async def installation_status(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=f"Installation status failed: {exc}") from exc
 
 
+def _read_release_version() -> str:
+    """VERSION.txt lives in the install root (parent of local_agent/), if present."""
+    version_file = _agent_dir.parent / "VERSION.txt"
+    if version_file.is_file():
+        text = version_file.read_text(encoding="utf-8").strip()
+        if text:
+            return text.splitlines()[0].strip()
+    return "dev"
+
+
+@router.get("/installation/agent_info")
+async def agent_info(request: Request) -> dict[str, Any]:
+    """Release metadata for Settings → Installation (version, install directory)."""
+    ensure_localhost(request)
+    install_dir = str(_agent_dir.parent.resolve())
+    return {
+        "version": _read_release_version(),
+        "install_dir": install_dir,
+        "service": "local_agent",
+    }
+
+
 @router.post("/meshgen/install_texture_extensions")
 async def meshgen_install_texture_extensions(request: Request) -> dict[str, Any]:
     """Install Hunyuan texture extensions (custom_rasterizer + differentiable_renderer) in current venv."""

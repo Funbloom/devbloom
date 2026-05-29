@@ -81,6 +81,19 @@ export type LocalModelsInstallationStatus = {
   python_version: string;
 };
 
+export type LocalAgentInfo = {
+  version: string;
+  install_dir: string;
+  service: string;
+};
+
+const LOCAL_AGENT_DOWNLOAD_URL =
+  process.env.NEXT_PUBLIC_LOCAL_AGENT_DOWNLOAD_URL || "";
+
+export function localAgentDownloadUrl(): string {
+  return LOCAL_AGENT_DOWNLOAD_URL.trim();
+}
+
 function localAgentWrongServerHint(status: number): string {
   if (status !== 404) return "";
   return (
@@ -135,6 +148,9 @@ export const localAgent = {
   },
   installationStatus(): Promise<LocalModelsInstallationStatus> {
     return requestLocalAgent("/installation_status", { method: "GET", body: undefined });
+  },
+  agentInfo(): Promise<LocalAgentInfo> {
+    return requestLocalAgent("/installation/agent_info", { method: "GET", body: undefined });
   },
   approveProjectRoot(projectRoot: string): Promise<{ ok: boolean; project_root: string }> {
     return requestLocalAgent("/projects/approve", {

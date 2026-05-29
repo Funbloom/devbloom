@@ -8,6 +8,7 @@
 #   APP_ROOT          App directory (default: parent of deploy/ — the repo you cloned)
 #   S3_BUCKET         S3 bucket (default: devbloom)
 #   S3_PREFIX         Key prefix under bucket (default: releases)
+#   LOCAL_AGENT_S3_PREFIX  Local Agent zip prefix (default: releases/local-agent)
 #   RESTART_SERVICES  Set to 0 to skip systemctl restart (default: 1)
 #
 # Prereqs on EC2: AWS CLI configured (or instance role), unzip, rsync, Node for web (standalone), Python 3.10+ venv.
@@ -121,6 +122,16 @@ if ! "${VENV_DIR}/bin/pip" install -r "${REQ_FILE}"; then
   echo "Install failed. The 'mcp' package requires Python 3.10+. Current: $("${VENV_DIR}/bin/python3" --version 2>/dev/null || echo 'unknown')"
   echo "On Amazon Linux 2: sudo dnf install python3.11  then run this script again."
   exit 1
+fi
+
+LOCAL_AGENT_S3_PREFIX="${LOCAL_AGENT_S3_PREFIX:-releases/local-agent}"
+LOCAL_AGENT_DOWNLOAD_DIR="${APP_ROOT}/downloads/local-agent"
+echo "Syncing Local Agent artist zip from s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip ..."
+mkdir -p "${LOCAL_AGENT_DOWNLOAD_DIR}"
+if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip" "${LOCAL_AGENT_DOWNLOAD_DIR}/latest.zip"; then
+  echo "Local Agent zip: ${LOCAL_AGENT_DOWNLOAD_DIR}/latest.zip (nginx /downloads/local-agent/latest.zip)"
+else
+  echo "WARNING: Local Agent zip not in S3 yet. Run deploy/build-local-agent-release.bat on your PC."
 fi
 
 if [[ "${RESTART_SERVICES}" == "1" ]]; then
