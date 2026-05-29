@@ -1,6 +1,6 @@
 from datetime import date
 
-from services import usage
+from services.core import usage
 from core.code_settings import (
     GEMINI_TOKEN_QUOTA_ENV_BY_PERIOD,
     OPENAI_TOKEN_BUDGET_ENV_BY_PERIOD,

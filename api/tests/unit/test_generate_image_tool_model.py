@@ -1,6 +1,6 @@
 """Chat agent generate_image tool: normalize LLM placeholder model strings."""
 
-from services import image_tool
+from services.image import image_tool
 
 
 def test_run_generate_image_tool_default_placeholder_uses_server_default(monkeypatch):

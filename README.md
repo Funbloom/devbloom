@@ -1,150 +1,230 @@
 # DevBloom
-## Multi agents to assist game developers on one project.
-## Developped by Andy Fire Studio LLC.
 
-This repo contains:
-- `web/` — Next.js App Router frontend (TypeScript) — uses `web/node_modules/` (npm)
-- `api/` — FastAPI backend that streams tokens over SSE
-- `local_agent/` — local-only FastAPI service (file picker, Mesh Gen, SAM, etc.)
-- `util/` — small one-off Python utilities (e.g. Hunyuan smoke test)
+Multi-agent studio for game developers — chat, image gen, storyboard, audiobank, UI tools, and more.
 
-All Python services share **one virtual environment at the repo root** (`.venv/`). The frontend uses npm under `web/`.
+**Developed by Andy Fire Studio LLC.**
 
-## Prereqs
-- Node.js 18+
-- Python 3.10+
+DevBloom runs as **three local services**. Install each once, then start all three whenever you work.
 
-## Setup
+| Service | Folder | Port | What it does |
+|---------|--------|------|--------------|
+| **API** | [`api/`](api/) | `8000` | Backend (FastAPI, Supabase, OpenAI, storage) |
+| **Local agent** | [`local_agent/`](local_agent/) | `8765` | Your PC only — folder picker, file copy, mesh gen, SAM |
+| **Web** | [`web/`](web/) | `3000` | Next.js UI in your browser |
 
-### Backend (one venv for everything Python)
+Python services share **one virtual environment** at the repo root (`.venv/`). The API and local agent batch files create it for you on first run.
 
-The repo uses a single `.venv` at the repo root for both `api` and `local_agent`. The `run.bat` / `run.sh` scripts create it automatically on first run, but you can also bootstrap it yourself:
+---
+
+## Prerequisites
+
+Install these **before** you start:
+
+- **Git** — clone this repository
+- **Python 3.10+** — [python.org/downloads](https://www.python.org/downloads/) (check **Add python.exe to PATH** on Windows)
+- **Node.js 18+** — [nodejs.org](https://nodejs.org/) (includes `npm`)
+
+---
+
+## Initial setup (one time)
+
+Do this once after cloning the repo.
+
+### 1. Get the code
 
 ```bash
-# from the repo root
-python -m venv .venv
-#Mac
-python3 -m venv .venv
-
-# Windows (PowerShell)
-.\.venv\Scripts\Activate.ps1
-# Windows (cmd)
-.\.venv\Scripts\activate.bat
-# macOS / Linux
-source .venv/bin/activate
-
-python -m pip install --upgrade pip
-python3.10 -m pip install -r requirements.txt -r requirements-dev.txt
-
-cp api/.env.example api/.env   # Windows: copy api\.env.example api\.env
-# add your OpenAI / Supabase keys in api/.env
+git clone <your-repo-url>
+cd devbloom
 ```
 
-Run the API server:
+### 2. Configure the API
+
+- Copy the example env file:
+  - **Windows:** `copy api\.env.example api\.env`
+  - **macOS / Linux:** `cp api/.env.example api/.env`
+- Open [`api/.env`](api/.env) and set at minimum:
+  - `OPENAI_API_KEY` — required for AI features
+  - `SUPABASE_URL` — your Supabase project URL
+  - `SUPABASE_SERVICE_ROLE_KEY` — Supabase Dashboard → Project Settings → API
+  - `SUPABASE_JWT_SECRET` — same page, **JWT Secret**
+  - `ALLOWED_EMAIL_DOMAINS` — e.g. `funbloomstudio.com`
+  - `ADMIN_EMAILS` — comma-separated admin addresses
+
+### 3. Configure the web app
+
+- Copy the example env file:
+  - **Windows:** `copy web\.env.example web\.env.local`
+  - **macOS / Linux:** `cp web/.env.example web/.env.local`
+- Open [`web/.env.local`](web/.env.local) and set:
+  - `NEXT_PUBLIC_API_URL_BASE=http://localhost:8000`
+  - `NEXT_PUBLIC_SUPABASE_URL` — same project as the API
+  - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase **anon / public** key (never the service role key)
+
+### 4. (Optional) Local agent extras
+
+Only needed for **Mesh Gen** or **UI Breakdown (SAM)**. See [`local_agent/README.md`](local_agent/README.md).
+
+- Copy [`local_agent/.env.example`](local_agent/.env.example) to `local_agent/.env` if you use SAM.
+
+### 5. Bootstrap Python (automatic)
+
+You do **not** need to create `.venv` manually. Running [`api/run.bat`](api/run.bat) or [`local_agent/run.bat`](local_agent/run.bat) once will:
+
+- Create `.venv` at the repo root
+- Install Python dependencies from [`requirements.txt`](requirements.txt)
+
+---
+
+## Start the three services
+
+Use **three separate terminals** (or three double-clicks on the batch files). Leave each running while you work.
+
+### 1 — API server
+
+**Easiest (Windows):** double-click or run:
+
+→ **[`api/run.bat`](api/run.bat)**
+
+- Creates/uses the shared `.venv` if needed
+- Installs Python deps on first run
+- Starts the API at **http://127.0.0.1:8000**
+
+<details>
+<summary>Manual start (macOS / Linux / any shell)</summary>
+
 ```bash
 cd api
+python -m venv ../.venv
+source ../.venv/bin/activate   # Windows: ..\.venv\Scripts\activate
+pip install -r ../requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-Or just double‑click / run `api\run.bat` (Windows) — it activates the root `.venv`, installs deps, and starts uvicorn for you.
+</details>
 
-#### Optional ML add-ons (local agent)
-These are heavy and CUDA-specific, so they are **opt-in** on top of the root venv:
+---
 
-| Feature | Install |
-|---|---|
-| **Mesh Gen (Hunyuan3D-2)** | After installing a CUDA PyTorch wheel from [pytorch.org](https://pytorch.org/get-started/locally/), run `.\scripts\install-meshgen.ps1 -HunyuanPath <your-Hunyuan3D-2-clone>` (e.g. `D:\FunBloom\models\Hunyuan3D-2`). The script installs `util/requirements-meshgen.txt`, Hunyuan's own `requirements.txt`, the editable `hy3dgen` package, and the two texture extensions in one shot. Add `-SkipTextureExtensions` to skip the slow MSVC build if you only want untextured meshes. |
-| **UI Breakdown SAM** | `pip install -r local_agent/requirements-sam.txt` (also installs torch CPU; for CUDA install the matching torch wheel first) |
+### 2 — Local agent
 
-See `local_agent/README.md` and `local_agent/README-SAM.md` for full details.
+**Easiest (Windows):** double-click or run:
 
-#### TECH
-Supabase is the database that is currently used. Configure your Supabase project URL and keys in `api/.env` for this DevBloom deployment.
+→ **[`local_agent/run.bat`](local_agent/run.bat)**
 
-### Frontend
+- Uses the same root `.venv`
+- Starts the agent at **http://127.0.0.1:8765**
+- Required for: **Pick / Browse** project folders, **Use In Project**, mesh gen, SAM, image resize to disk
+
+The web header shows a **Local Agent** status dot (green = online).
+
+<details>
+<summary>From repo root (PowerShell)</summary>
+
+```powershell
+.\runlocalagent.ps1
+```
+
+</details>
+
+---
+
+### 3 — Web app
+
+**Easiest (Windows):** double-click or run:
+
+→ **[`web/run.bat`](web/run.bat)**
+
+- Runs `npm install` on first launch if `node_modules` is missing
+- Starts the UI at **http://localhost:3000**
+
+<details>
+<summary>Manual start</summary>
+
 ```bash
 cd web
 npm install
 npm run dev
 ```
 
-Open: http://localhost:3000
+Or from repo root: `.\runweb.ps1` (PowerShell)
 
-## Test
+</details>
 
-### Automated checks (CI)
+---
 
-**GitHub Actions** runs on every **push** and **pull request** to `main` or `master`:
+## Verify everything works
 
-- **Web** (`web/`): `npm ci`, `npm run lint` (TypeScript `tsc --noEmit`), `npm run build`
-- **API** (`api/`): install `requirements.txt` + `requirements-dev.txt`, then `pytest` on `api/tests/`
+1. Open **http://localhost:3000** in your browser.
+2. Sign in (Google OAuth via Supabase).
+3. In the header, check:
+   - **API Server** — green dot
+   - **Local Agent** — green dot (when running on this PC)
+4. Send a chat message or open a studio tool (e.g. **Studio → Image → Image Gen**).
 
-Run the **same checks locally** before you commit (from the **repository root**):
+---
 
-| Environment | Command |
-|-------------|---------|
-| **Windows** (PowerShell) | `.\scripts\ci-local.ps1` |
-| **macOS / Linux / Git Bash / WSL** | `chmod +x scripts/ci-local.sh && ./scripts/ci-local.sh` |
+## Quick reference
 
-**Manual equivalent** (if you prefer not to use the scripts — activate the root `.venv` first so pytest finds the deps):
+| Action | Command / file |
+|--------|----------------|
+| Start API | [`api/run.bat`](api/run.bat) |
+| Start local agent | [`local_agent/run.bat`](local_agent/run.bat) |
+| Start web | [`web/run.bat`](web/run.bat) |
+| API env | [`api/.env`](api/.env) |
+| Web env | [`web/.env.local`](web/.env.local) |
+| Run tests locally | `.\scripts\ci-local.ps1` (Windows) or `./scripts/ci-local.sh` |
 
-```bash
-cd web && npm ci && npm run lint && npm run build && cd ../api && python -m pip install -r requirements.txt -r requirements-dev.txt && python -m pytest tests -q
+---
+
+## Optional setup
+
+### Supabase Storage buckets
+
+Create **public** buckets in Supabase Dashboard → **Storage** if you use:
+
+| Bucket | Used for |
+|--------|----------|
+| `storyboard-images` | Storyboard tiles, character/location images |
+| `audiobank-sounds` | Audiobank SFX library |
+
+Set bucket names in `api/.env` if you use different names (`STORYBOARD_IMAGES_BUCKET`, `AUDIOBANK_BUCKET`).
+
+### Google Sign-In
+
+If you see **redirect_uri_mismatch**:
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → **Credentials** → your OAuth client
+2. Add redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`
+3. Supabase Dashboard → **Authentication** → **URL Configuration** → set **Site URL** (`http://localhost:3000`) and **Redirect URLs** (`http://localhost:3000/**`)
+
+### Mesh Gen & SAM (advanced)
+
+Heavy, GPU-specific add-ons. See:
+
+- [`local_agent/README.md`](local_agent/README.md) — Hunyuan3D-2 mesh generation
+- [`local_agent/README-SAM.md`](local_agent/README-SAM.md) — Segment Anything for UI Breakdown
+
+---
+
+## Production / EC2
+
+See [`deploy/README.md`](deploy/README.md) for building and deploying to a server.
+
+---
+
+## Repo layout
+
+```
+devbloom/
+├── api/           FastAPI backend
+├── local_agent/   Local-only tools (port 8765)
+├── web/           Next.js frontend
+├── games/         Game-specific pipelines (Pocket Voyager, etc.)
+├── scripts/       CI and install helpers
+└── requirements.txt   Shared Python deps (api + local_agent)
 ```
 
-API-only tests and layout are described in [api/tests/README.md](api/tests/README.md).
+---
 
-### Test chat (manual)
+## Previous documentation
 
-1. Start API server (port 8000)
-2. Start Web app (port 3000)
-3. Send a message and watch the assistant stream back
-
-## Storyboard images (sync across computers)
-
-**Tile images** are uploaded to **Supabase Storage** when you generate them, so they work from any machine. The tile’s `image` field stores the Storage URL (e.g. `https://...supabase.co/storage/v1/object/public/storyboard-images/...`).
-
-**Setup (one-time):** In [Supabase Dashboard](https://supabase.com/dashboard) → your project → **Storage** → **New bucket**:
-- Name: `storyboard-images`
-- **Public bucket**: ON (so the app can load images without auth)
-- Create the bucket
-
-Optional: set `STORYBOARD_IMAGES_BUCKET` in `api/.env` if you use a different bucket name.
-
-If the bucket is missing or upload fails, the API still saves the image locally and stores the local URL; images will then only work on that machine until you regenerate with Storage configured.
-
-## Google Sign-In (OAuth)
-
-If you see **Error 400: redirect_uri_mismatch** when using “Sign in with Google”, add Supabase’s callback URL in Google Cloud Console:
-
-1. Open [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services** → **Credentials**.
-2. Edit your **OAuth 2.0 Client ID** (Web application) used by Supabase.
-3. Under **Authorized redirect URIs**, add:
-   - `https://<your-project-ref>.supabase.co/auth/v1/callback`  
-   Example: `https://slxhjrdnaundthsjfrkm.supabase.co/auth/v1/callback`
-4. Save.
-
-In **Supabase Dashboard** → **Authentication** → **URL Configuration**, set **Site URL** (e.g. `http://localhost:3000`) and add **Redirect URLs** (e.g. `http://localhost:3000/**`) so Supabase can send users back to your app after login.
-
-**Character and location images** (uploaded in the storyboard sidebar) are also uploaded to the same bucket under `characters/<storyboard_id>/...` and `locations/<storyboard_id>/...`, so they work from any machine too.
-
-## EC2 / Production
-
-To run the API on EC2 (or any host):
-
-1. **Backend (`api/env`)**  
-   Set `CORS_ORIGINS` to your frontend URL(s), comma-separated, e.g.  
-   `CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com`  
-   (If unset, it defaults to localhost for local dev.)
-
-2. **Frontend (`web/.env.local` or build env)**  
-   Set `NEXT_PUBLIC_API_URL_BASE` to your API base URL, e.g.  
-   `NEXT_PUBLIC_API_URL_BASE=https://api.yourdomain.com`
-
-3. **Supabase**  
-   In Dashboard → Authentication → URL Configuration, set **Site URL** and add **Redirect URLs** for your production frontend (e.g. `https://yourdomain.com/**`).
-
-4. **Run the API** (e.g. on EC2):  
-   `uvicorn main:app --host 0.0.0.0 --port 8000`  
-   Use a process manager (systemd, supervisord) or reverse proxy (nginx) in front. Serve the Next.js app separately (e.g. `npm run build && npm start`, or static export behind nginx).
-
+The full older README (CI details, EC2 env vars, storyboard notes) is preserved in [`Old_Readme.md`](Old_Readme.md).
