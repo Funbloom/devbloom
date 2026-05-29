@@ -100,10 +100,32 @@ export default function AdminInstallationPage() {
   const updateAvailable = Boolean(
     latestVersion && installedVersion && latestVersion !== installedVersion,
   );
-  const showDownloadInstall = !isInstalledOnDisk || updateAvailable;
+  const showInstallButton = !isInstalledOnDisk || updateAvailable;
   const agentRunning = localAgentState === "ok";
-  /** After first install, one-click Install uses the registered URL protocol. */
+  /** Installed: Install uses URL protocol (re-runs web-install.bat). First time: download zip + bat. */
   const installViaProtocol = isInstalledOnDisk;
+
+  function triggerInstallDownloads(): void {
+    if (!downloadUrl || !webInstallUrl) {
+      return;
+    }
+    const zipLink = document.createElement("a");
+    zipLink.href = downloadUrl;
+    zipLink.download = "latest.zip";
+    zipLink.rel = "noreferrer";
+    document.body.appendChild(zipLink);
+    zipLink.click();
+    document.body.removeChild(zipLink);
+    window.setTimeout(() => {
+      const batLink = document.createElement("a");
+      batLink.href = webInstallUrl;
+      batLink.download = "DevBloom-LocalAgent-Install.bat";
+      batLink.rel = "noreferrer";
+      document.body.appendChild(batLink);
+      batLink.click();
+      document.body.removeChild(batLink);
+    }, 400);
+  }
 
   const actionButtonStyle: React.CSSProperties = {
     fontSize: 13,
@@ -132,10 +154,9 @@ export default function AdminInstallationPage() {
       title: "Local Agent",
       body:
         "Windows (artists):\n" +
-        "1. Settings → Installation → Basic → Download (if needed).\n" +
-        "2. Unzip to %LOCALAPPDATA%\\DevBloom\\LocalAgentUpdate\\DevBloomLocalAgent\n" +
-        "3. Click Install (or run install.bat from the unzipped folder).\n" +
-        "4. Click Run. Use Stop when finished.\n" +
+        "1. Settings → Installation → Basic → Install.\n" +
+        "2. Open your Downloads folder and run DevBloom-LocalAgent-Install.bat.\n" +
+        "3. Click Run. Use Stop when finished.\n" +
         "\n" +
         "Developers (full repo):\n" +
         "- Clone https://github.com/FunBloomStudio/devbloom.git\n" +
@@ -497,28 +518,15 @@ export default function AdminInstallationPage() {
                         ) : null}
                       </div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        {showDownloadInstall && downloadUrl ? (
-                          <a href={downloadUrl} download target="_blank" rel="noreferrer" style={actionButtonStyle}>
-                            Download
-                          </a>
-                        ) : null}
-                        {showDownloadInstall ? (
+                        {showInstallButton ? (
                           installViaProtocol ? (
                             <a href="devbloom-agent-install://" style={actionButtonStyle}>
                               Install
                             </a>
-                          ) : webInstallUrl ? (
-                            <a
-                              href={webInstallUrl}
-                              download="DevBloom-LocalAgent-Install.bat"
-                              style={actionButtonStyle}
-                            >
-                              Install
-                            </a>
                           ) : (
-                            <a href="devbloom-agent-install://" style={actionButtonStyle}>
+                            <button type="button" style={actionButtonStyle} onClick={triggerInstallDownloads}>
                               Install
-                            </a>
+                            </button>
                           )
                         ) : null}
                         {isInstalledOnDisk && !agentRunning ? (
@@ -532,11 +540,11 @@ export default function AdminInstallationPage() {
                           </a>
                         ) : null}
                       </div>
-                      {showDownloadInstall ? (
+                      {showInstallButton ? (
                         <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)", lineHeight: 1.45 }}>
                           {installViaProtocol
-                            ? "Install re-downloads the latest release and updates AppData automatically."
-                            : "Install downloads a small script — run it once (double-click). It downloads the zip, installs to AppData, and enables one-click Install next time."}
+                            ? "Install downloads the latest release and updates AppData (uses zip in Downloads if you saved it there)."
+                            : "Install saves latest.zip and DevBloom-LocalAgent-Install.bat to Downloads. Run the .bat file, then click Run here."}
                         </p>
                       ) : (
                         <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>

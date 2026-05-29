@@ -1,12 +1,13 @@
 @echo off
 setlocal EnableDelayedExpansion
-:: One-click installer from the web UI: download latest.zip, unzip, run install.bat, register URL handlers.
-:: Served at /downloads/local-agent/web-install.bat — user clicks Install, runs this file once.
+:: Run after clicking Install in DevBloom (downloads latest.zip + this file to your Downloads folder).
+:: Uses the zip from Downloads when present; otherwise downloads from the server.
 
 set "DOWNLOAD_URL=https://dev.funbloomstudio.com/downloads/local-agent/latest.zip"
+set "DOWNLOADS_DIR=%USERPROFILE%\Downloads"
 set "UPDATE_ROOT=%LOCALAPPDATA%\DevBloom\LocalAgentUpdate"
 set "EXTRACT_DIR=%UPDATE_ROOT%\DevBloomLocalAgent"
-set "TEMP_ZIP=%UPDATE_ROOT%\latest.zip"
+set "WORK_ZIP=%UPDATE_ROOT%\latest.zip"
 set "INSTALL_DIR=%LOCALAPPDATA%\DevBloom\LocalAgent"
 set "SELF_DEST=%LOCALAPPDATA%\DevBloom\web-install.bat"
 
@@ -19,28 +20,49 @@ if exist "%INSTALL_DIR%\stop.bat" call "%INSTALL_DIR%\stop.bat" >nul 2>&1
 
 if not exist "%UPDATE_ROOT%" mkdir "%UPDATE_ROOT%"
 
-echo [1/4] Downloading %DOWNLOAD_URL% ...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ProgressPreference='SilentlyContinue';" ^
-  "try { Invoke-WebRequest -Uri '%DOWNLOAD_URL%' -OutFile '%TEMP_ZIP%' -UseBasicParsing } catch { Write-Host $_.Exception.Message; exit 1 }"
-if errorlevel 1 (
-  echo ERROR: Download failed. Check your internet connection.
-  pause
-  exit /b 1
+set "SOURCE_ZIP="
+if exist "%DOWNLOADS_DIR%\latest.zip" set "SOURCE_ZIP=%DOWNLOADS_DIR%\latest.zip"
+
+if not defined SOURCE_ZIP (
+  for /f "delims=" %%f in ('dir /b /o-d "%DOWNLOADS_DIR%\local-agent*.zip" 2^>nul') do (
+    set "SOURCE_ZIP=%DOWNLOADS_DIR%\%%f"
+    goto :found_zip
+  )
+)
+:found_zip
+
+if defined SOURCE_ZIP (
+  echo [1/4] Using zip from Downloads: %SOURCE_ZIP%
+  copy /Y "%SOURCE_ZIP%" "%WORK_ZIP%" >nul
+  if errorlevel 1 (
+    echo ERROR: Could not copy zip from Downloads.
+    pause
+    exit /b 1
+  )
+) else (
+  echo [1/4] No zip in Downloads — downloading %DOWNLOAD_URL% ...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ProgressPreference='SilentlyContinue';" ^
+    "try { Invoke-WebRequest -Uri '%DOWNLOAD_URL%' -OutFile '%WORK_ZIP%' -UseBasicParsing } catch { Write-Host $_.Exception.Message; exit 1 }"
+  if errorlevel 1 (
+    echo ERROR: Download failed. Click Install in DevBloom again to save latest.zip to Downloads.
+    pause
+    exit /b 1
+  )
 )
 
 echo [2/4] Extracting...
 if exist "%EXTRACT_DIR%" rd /s /q "%EXTRACT_DIR%" 2>nul
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "try { Expand-Archive -Path '%TEMP_ZIP%' -DestinationPath '%UPDATE_ROOT%' -Force } catch { Write-Host $_.Exception.Message; exit 1 }"
+  "try { Expand-Archive -Path '%WORK_ZIP%' -DestinationPath '%UPDATE_ROOT%' -Force } catch { Write-Host $_.Exception.Message; exit 1 }"
 if errorlevel 1 (
-  echo ERROR: Could not unzip. The download may be corrupt — try Download again.
+  echo ERROR: Could not unzip. Delete the zip in Downloads and click Install again.
   pause
   exit /b 1
 )
 
 if not exist "%EXTRACT_DIR%\install.bat" (
-  echo ERROR: Zip layout unexpected — missing install.bat in DevBloomLocalAgent folder.
+  echo ERROR: Zip layout unexpected — missing DevBloomLocalAgent\install.bat
   pause
   exit /b 1
 )
@@ -53,7 +75,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [4/4] Registering one-click handlers for Run / Install / Stop...
+echo [4/4] Registering one-click handlers...
 copy /Y "%~f0" "%SELF_DEST%" >nul
 reg add "HKCU\Software\Classes\devbloom-agent-install" /ve /d "URL:DevBloom Local Agent Install" /f >nul
 reg add "HKCU\Software\Classes\devbloom-agent-install" /v "URL Protocol" /d "" /f >nul
@@ -70,8 +92,7 @@ echo   Installation complete!
 echo   Location: %INSTALL_DIR%
 echo ========================================
 echo.
-echo You can close this window and click Run in DevBloom Settings -^> Installation.
-echo Future Install clicks will re-download and update automatically.
+echo Click Run in DevBloom Settings -^> Installation.
 echo.
 pause
 exit /b 0
