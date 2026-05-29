@@ -126,25 +126,34 @@ fi
 
 LOCAL_AGENT_S3_PREFIX="${LOCAL_AGENT_S3_PREFIX:-releases/local-agent}"
 LOCAL_AGENT_DOWNLOAD_DIR="${APP_ROOT}/downloads/local-agent"
+LOCAL_AGENT_REPO_DIR="${APP_ROOT}/deploy/local-agent-release"
 mkdir -p "${LOCAL_AGENT_DOWNLOAD_DIR}"
 
+sync_local_agent_file() {
+  local name="$1"
+  local dest="${LOCAL_AGENT_DOWNLOAD_DIR}/${name}"
+  if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/${name}" "${dest}" 2>/dev/null; then
+    echo "  ${name} <- s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/${name}"
+    return 0
+  fi
+  if [[ -f "${LOCAL_AGENT_REPO_DIR}/${name}" ]]; then
+    cp "${LOCAL_AGENT_REPO_DIR}/${name}" "${dest}"
+    echo "  ${name} <- ${LOCAL_AGENT_REPO_DIR}/${name} (S3 missing; using repo copy — run build-and-upload.bat on PC to upload)"
+    return 0
+  fi
+  echo "WARNING: ${name} not in S3 and not in ${LOCAL_AGENT_REPO_DIR}/"
+  return 1
+}
+
 echo "Syncing Local Agent downloads to ${LOCAL_AGENT_DOWNLOAD_DIR} ..."
-if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip" "${LOCAL_AGENT_DOWNLOAD_DIR}/latest.zip"; then
-  echo "  latest.zip -> ${LOCAL_AGENT_DOWNLOAD_DIR}/latest.zip"
+if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip" "${LOCAL_AGENT_DOWNLOAD_DIR}/latest.zip" 2>/dev/null; then
+  echo "  latest.zip <- s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip"
 else
-  echo "WARNING: s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip not found."
-  echo "         Run deploy/build-and-upload.bat on your PC (includes Local Agent build)."
+  echo "WARNING: s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/latest.zip not available."
+  echo "         Run deploy/build-and-upload.bat on your PC (step 1 builds Local Agent + uploads to S3)."
 fi
-if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/VERSION.txt" "${LOCAL_AGENT_DOWNLOAD_DIR}/VERSION.txt"; then
-  echo "  VERSION.txt -> ${LOCAL_AGENT_DOWNLOAD_DIR}/VERSION.txt"
-else
-  echo "WARNING: s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/VERSION.txt not found."
-fi
-if aws s3 cp "s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/web-install.bat" "${LOCAL_AGENT_DOWNLOAD_DIR}/web-install.bat"; then
-  echo "  web-install.bat -> ${LOCAL_AGENT_DOWNLOAD_DIR}/web-install.bat"
-else
-  echo "WARNING: s3://${S3_BUCKET}/${LOCAL_AGENT_S3_PREFIX}/web-install.bat not found."
-fi
+sync_local_agent_file "VERSION.txt" || true
+sync_local_agent_file "web-install.bat" || true
 
 if [[ "${RESTART_SERVICES}" == "1" ]]; then
   echo "Restarting services..."
