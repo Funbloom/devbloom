@@ -68,9 +68,13 @@ if not exist "%EXTRACT_DIR%\install.bat" (
 )
 
 echo [3/4] Installing to AppData...
+set "DEVBLOOM_INSTALL_FROM_WEB=1"
 call "%EXTRACT_DIR%\install.bat"
+set "DEVBLOOM_INSTALL_FROM_WEB="
 if errorlevel 1 (
-  echo ERROR: install.bat failed.
+  echo.
+  echo ERROR: Install failed. If you saw a popup about Python, install Python 3.10+ first.
+  echo Otherwise read the messages above, then try Install again in DevBloom Settings.
   pause
   exit /b 1
 )

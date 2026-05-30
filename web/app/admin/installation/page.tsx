@@ -337,24 +337,53 @@ export default function AdminInstallationPage() {
         if (!cancelled) {
           setLocalAgentState(localOk ? "ok" : "missing");
         }
-        if (localOk) {
+        let pythonBasicResolved = false;
+        try {
+          const host = await localAgent.hostPython();
+          if (!cancelled && host.python_version) {
+            const pyOk = host.python_3_10_plus || isPythonVersion310Plus(host.python_version);
+            setPythonBasicState(pyOk ? "ok" : "missing");
+            setPythonBasicDetail(
+              pyOk
+                ? `Installed on this PC (${host.python_version}).`
+                : `Found ${host.python_version}; need Python 3.10 or newer.`,
+            );
+            pythonBasicResolved = true;
+          }
+        } catch {
+          // Older agents without /installation/host_python — fall through
+        }
+        if (!pythonBasicResolved && localOk) {
           try {
             const sam: LocalModelsInstallationStatus = await localAgent.installationStatus();
             if (!cancelled) {
-              const pyOk = isPythonVersion310Plus(sam.python_version);
+              const pyOk =
+                sam.python_3_10_installed || isPythonVersion310Plus(sam.python_version);
               setPythonBasicState(pyOk ? "ok" : "missing");
               setPythonBasicDetail(
                 pyOk
                   ? `Installed (${sam.python_version}).`
                   : `Found ${sam.python_version}; need Python 3.10 or newer.`,
               );
+              pythonBasicResolved = true;
             }
           } catch {
             if (!cancelled) {
               setPythonBasicState("unknown");
               setPythonBasicDetail("Could not read Python version from Local Agent.");
+              pythonBasicResolved = true;
             }
           }
+        }
+        if (!pythonBasicResolved && !cancelled) {
+          setPythonBasicState("unknown");
+          setPythonBasicDetail(
+            localOk
+              ? "Could not detect Python on this PC."
+              : "Start Local Agent to verify Python 3.10+ on this PC (or install Python first if needed).",
+          );
+        }
+        if (localOk) {
           try {
             const info = await localAgent.agentInfo();
             if (!cancelled) {
@@ -402,9 +431,11 @@ export default function AdminInstallationPage() {
                   ? "Installed (needed for textured mesh generation)."
                   : `Missing: ${textureMissing.join(", ")} (only required for texturing).`,
               );
-              setPythonState(isPythonVersion310Plus(sam.python_version) ? "ok" : "missing");
+              const pyOkAdv =
+                sam.python_3_10_installed || isPythonVersion310Plus(sam.python_version);
+              setPythonState(pyOkAdv ? "ok" : "missing");
               setPythonDetail(
-                isPythonVersion310Plus(sam.python_version)
+                pyOkAdv
                   ? `Installed (${sam.python_version}).`
                   : `Found ${sam.python_version}; need Python 3.10 or newer.`,
               );
@@ -441,10 +472,6 @@ export default function AdminInstallationPage() {
             }
           }
         } else if (!cancelled) {
-          setPythonBasicState("missing");
-          setPythonBasicDetail(
-            "Python 3.10+ is required on your PC before installing the Local Agent. Install Python, then run Install.",
-          );
           setSamState("unknown");
           setSamDetail("Start Local Agent first, then SAM status can be checked.");
           setHunyuanState("unknown");

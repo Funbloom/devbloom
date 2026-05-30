@@ -87,6 +87,11 @@ export type LocalAgentInfo = {
   service: string;
 };
 
+export type HostPythonStatus = {
+  python_version: string;
+  python_3_10_plus: boolean;
+};
+
 const LOCAL_AGENT_DOWNLOAD_URL =
   process.env.NEXT_PUBLIC_LOCAL_AGENT_DOWNLOAD_URL || "";
 
@@ -239,6 +244,9 @@ export const localAgent = {
   },
   installationStatus(): Promise<LocalModelsInstallationStatus> {
     return requestLocalAgent("/installation_status", { method: "GET", body: undefined });
+  },
+  hostPython(): Promise<HostPythonStatus> {
+    return requestLocalAgent("/installation/host_python", { method: "GET", body: undefined });
   },
   agentInfo(): Promise<LocalAgentInfo> {
     return requestLocalAgent("/installation/agent_info", { method: "GET", body: undefined });

@@ -110,6 +110,77 @@ async def installation_status(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=f"Installation status failed: {exc}") from exc
 
 
+def _python_version_ge_310(version: str) -> bool:
+    trimmed = version.strip()
+    parts = trimmed.split(".")
+    if len(parts) < 2:
+        return False
+    try:
+        major = int(parts[0])
+        minor = int(parts[1])
+    except ValueError:
+        return False
+    return (major == 3 and minor >= 10) or major > 3
+
+
+def _probe_python_version(cmd: list[str]) -> str | None:
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    line = (proc.stdout or "").strip().splitlines()
+    if not line:
+        return None
+    version = line[0].strip()
+    if version and version[0].isdigit():
+        return version
+    return None
+
+
+def _detect_host_python_version() -> str | None:
+    """Best-effort Python on PATH (Windows py launcher, python, python3)."""
+    snippet = (
+        "import sys; "
+        "print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
+    )
+    commands: list[list[str]] = [
+        ["python", "-c", snippet],
+        ["py", "-3", "-c", snippet],
+        ["py", "-3.10", "-c", snippet],
+        ["python3", "-c", snippet],
+    ]
+    fallback: str | None = None
+    for cmd in commands:
+        version = _probe_python_version(cmd)
+        if not version:
+            continue
+        if _python_version_ge_310(version):
+            return version
+        if fallback is None:
+            fallback = version
+    return fallback
+
+
+@router.get("/installation/host_python")
+async def host_python(request: Request) -> dict[str, Any]:
+    """Python on the host PATH (for Settings before/alongside agent venv checks)."""
+    ensure_localhost(request)
+    version = await asyncio.to_thread(_detect_host_python_version)
+    ok = bool(version and _python_version_ge_310(version))
+    return {
+        "python_version": version or "",
+        "python_3_10_plus": ok,
+    }
+
+
 def _read_release_version() -> str:
     """VERSION.txt lives in the install root (parent of local_agent/), if present."""
     version_file = _agent_dir.parent / "VERSION.txt"

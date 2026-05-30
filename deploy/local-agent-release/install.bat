@@ -117,18 +117,62 @@ exit /b 0
 
 :find_python
 set "PY_RUN="
+set "PY_TOO_OLD="
 where python >nul 2>&1
 if not errorlevel 1 (
   python -c "import sys; raise SystemExit(0 if sys.version_info>=(3,10) else 1)" 2>nul
-  if not errorlevel 1 set "PY_RUN=python"
+  if not errorlevel 1 (
+    set "PY_RUN=python"
+    exit /b 0
+  )
+  set "PY_TOO_OLD=1"
 )
-if defined PY_RUN exit /b 0
 where py >nul 2>&1
 if not errorlevel 1 (
   py -3 -c "import sys; raise SystemExit(0 if sys.version_info>=(3,10) else 1)" 2>nul
-  if not errorlevel 1 set "PY_RUN=py -3"
+  if not errorlevel 1 (
+    set "PY_RUN=py -3"
+    exit /b 0
+  )
+  if not defined PY_TOO_OLD set "PY_TOO_OLD=1"
 )
-if defined PY_RUN exit /b 0
-echo.
-echo Python 3.10+ is required. Install from https://www.python.org/downloads/
+call :python_missing
 exit /b 1
+
+:python_missing
+echo.
+if defined PY_TOO_OLD (
+  echo ERROR: Python 3.10 or newer is required, but an older Python was found.
+) else (
+  echo ERROR: Python 3.10+ is not installed or not on your PATH.
+)
+echo.
+echo   1. Download Python 3.10+ from https://www.python.org/downloads/
+echo   2. During setup, check "Add python.exe to PATH"
+echo   3. Close this window, then click Install again in DevBloom Settings
+echo.
+if defined PY_TOO_OLD (
+  set "DEVBLOOM_MSGBOX_LINE1=Python 3.10 or newer is required, but an older Python was found on this PC."
+) else (
+  set "DEVBLOOM_MSGBOX_LINE1=Python 3.10 or newer was not found on this PC."
+)
+set "DEVBLOOM_MSGBOX_LINE2=Install Python 3.10+ from https://www.python.org/downloads/"
+set "DEVBLOOM_MSGBOX_LINE3=During setup, check Add python.exe to PATH."
+set "DEVBLOOM_MSGBOX_LINE4=Then click Install again in DevBloom Settings - Installation."
+call :message_box_error
+if not defined DEVBLOOM_INSTALL_FROM_WEB pause
+exit /b 1
+
+:message_box_error
+set "DEVBLOOM_MSGBOX_TITLE=DevBloom Local Agent - Install"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "Add-Type -AssemblyName System.Windows.Forms;" ^
+  "$parts = @($env:DEVBLOOM_MSGBOX_LINE1,$env:DEVBLOOM_MSGBOX_LINE2,$env:DEVBLOOM_MSGBOX_LINE3,$env:DEVBLOOM_MSGBOX_LINE4) | Where-Object { $_ };" ^
+  "$body = $parts -join [Environment]::NewLine;" ^
+  "[void][System.Windows.Forms.MessageBox]::Show($body, $env:DEVBLOOM_MSGBOX_TITLE, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)"
+set "DEVBLOOM_MSGBOX_LINE1="
+set "DEVBLOOM_MSGBOX_LINE2="
+set "DEVBLOOM_MSGBOX_LINE3="
+set "DEVBLOOM_MSGBOX_LINE4="
+set "DEVBLOOM_MSGBOX_TITLE="
+exit /b 0
