@@ -19,11 +19,11 @@ import { API_BASE, fetchApi } from "../lib/api";
 import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
 import { HeaderMenu } from "./HeaderMenu";
 
-type StudioLink = { path: string; label: string };
+type ToolsLink = { path: string; label: string };
 
-type StudioCategory = { category: string; links: StudioLink[] };
+type ToolsCategory = { category: string; links: ToolsLink[] };
 
-const STUDIO_CATEGORIES: StudioCategory[] = [
+const TOOLS_CATEGORIES: ToolsCategory[] = [
   {
     category: "Image",
     links: [
@@ -52,7 +52,8 @@ const STUDIO_CATEGORIES: StudioCategory[] = [
   },
 ];
 
-const STUDIO_LINKS: StudioLink[] = STUDIO_CATEGORIES.flatMap((group) => group.links);
+const TOOLS_LINKS: ToolsLink[] = TOOLS_CATEGORIES.flatMap((group) => group.links);
+const AGENTS_PATH = "/";
 
 function humanizeSegment(segment: string): string {
   const s = segment.replace(/_/g, " ").trim();
@@ -303,6 +304,12 @@ export function AppHeader() {
   }, []);
 
   useEffect(() => {
+    document.querySelectorAll("header.app-header details.app-header-menu").forEach((node) => {
+      (node as HTMLDetailsElement).open = false;
+    });
+  }, [pathname]);
+
+  useEffect(() => {
     const closeAllHeaderMenus = () => {
       document.querySelectorAll("header.app-header details.app-header-menu").forEach((node) => {
         (node as HTMLDetailsElement).open = false;
@@ -333,13 +340,15 @@ export function AppHeader() {
     ? `DevBloom Studio (${activeProjectName})`
     : "DevBloom Studio (select a project...)";
 
-  const studioActive = STUDIO_LINKS.some(
-    ({ path }) => path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path)))
-  );
+  const toolsActive =
+    pathname === AGENTS_PATH ||
+    pathname === "" ||
+    TOOLS_LINKS.some(
+      ({ path }) => path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path))),
+    );
   const gamesPathMatch = pathname?.match(/^\/games\/([^/]+)/);
   const activeGameKeyFromPath = gamesPathMatch?.[1] ?? "";
 
-  const isAgentsActive = pathname === "/" || pathname === "";
   const adminActive =
     pathname === "/admin" ||
     pathname?.startsWith("/admin/") ||
@@ -391,19 +400,21 @@ export function AppHeader() {
       </div>
       <nav className="app-header-nav" aria-label="Main">
         <div className="app-header-toolbar">
-          <Link
-            href="/"
-            className={`app-header-link ${isAgentsActive ? "app-header-link-active" : ""}`}
-          >
-            Agents
-          </Link>
-
           <HeaderMenu
-            label="Studio"
-            summaryClassName={studioActive ? "app-header-link-active" : ""}
+            label="Tools"
+            summaryClassName={toolsActive ? "app-header-link-active" : ""}
             wide
           >
-            {STUDIO_CATEGORIES.map((group) => (
+            <Link
+              href={AGENTS_PATH}
+              className={`app-header-dropdown-link ${
+                pathname === AGENTS_PATH || pathname === "" ? "app-header-link-active" : ""
+              }`}
+            >
+              Agents
+            </Link>
+            <div className="app-header-dropdown-divider" aria-hidden />
+            {TOOLS_CATEGORIES.map((group) => (
               <div key={group.category} className="app-header-dropdown-group">
                 <div className="app-header-dropdown-group-label">{group.category}</div>
                 {group.links.map(({ path, label }) => {

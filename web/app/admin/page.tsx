@@ -1389,6 +1389,9 @@ export default function AdminPage() {
             </div>
             <div className="admin-test-block">
               <div className="admin-test-title">Image Defaults</div>
+              <p style={{ margin: "0 0 10px", color: "var(--muted, #94a3b8)", fontSize: 13 }}>
+                Used by Image Gen when generating, editing, or importing images.
+              </p>
               <div className="admin-test-grid">
                 <label className="admin-field">
                   <span>Variations</span>
@@ -1422,7 +1425,7 @@ export default function AdminPage() {
                   </select>
                 </label>
                 <label className="admin-field">
-                  <span>ImageGen Location</span>
+                  <span>Default Storage for Images</span>
                   <select
                     value={imageDefaults.location}
                     onChange={(e) =>
@@ -1432,8 +1435,8 @@ export default function AdminPage() {
                       }))
                     }
                   >
-                    <option value="local">Local</option>
-                    <option value="cloud">Cloud</option>
+                    <option value="local">Local (API server disk)</option>
+                    <option value="cloud">Cloud (Supabase)</option>
                   </select>
                 </label>
                 <button onClick={() => void saveImageDefaults()}>Save Defaults</button>

@@ -12,6 +12,8 @@
 #   below. If 443 only proxies "/" to port 3000, /api/* hits Next (wrong) or fails → 502.
 #   Fix: sudo nano /etc/nginx/conf.d/devbloom.conf — duplicate /api/ into the ssl server,
 #   then sudo nginx -t && sudo systemctl reload nginx
+#   Also set client_max_body_size 32m; in each server { } block (HTTP + HTTPS) or image import → 413.
+#   Image generate/edit can exceed 60s — set proxy_read_timeout on location /api/ or edit → 504.
 
 #   If HTTPS returns 502 for /api/, duplicate location /api/ into the ssl server block.
 #   Same for location /downloads/ after certbot (artist Local Agent zip).
@@ -20,6 +22,9 @@
 server {
     listen 80;
     server_name dev.funbloomstudio.com;
+
+    # Image import and other uploads (API allows up to 25 MB; default nginx limit is 1 MB → 413).
+    client_max_body_size 32m;
 
     # Artist Local Agent zip (private S3 → synced to disk by ec2-deploy.sh)
     location /downloads/ {
@@ -45,5 +50,9 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
+        # Default read timeout is 60s; OpenAI/Gemini image gen+edit often takes longer.
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
     }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 type Props = {
   label: ReactNode;
@@ -9,11 +9,39 @@ type Props = {
   wide?: boolean;
 };
 
+function closeParentHeaderMenu(from: Element) {
+  const menu = from.closest("details.app-header-menu");
+  if (menu) {
+    (menu as HTMLDetailsElement).open = false;
+  }
+}
+
 export function HeaderMenu({ label, children, summaryClassName = "", wide }: Props) {
+  const onDropdownClick = (e: MouseEvent<HTMLDivElement>) => {
+    const target = e.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    if (target.closest("details.app-header-submenu")) {
+      return;
+    }
+    const actionable = target.closest(
+      "a.app-header-dropdown-link, button.app-header-dropdown-link, button.app-header-dropdown-action",
+    );
+    if (actionable) {
+      closeParentHeaderMenu(actionable);
+    }
+  };
+
   return (
     <details className="app-header-menu">
       <summary className={`app-header-menu-summary app-header-link ${summaryClassName}`.trim()}>{label}</summary>
-      <div className={`app-header-dropdown${wide ? " app-header-dropdown--wide" : ""}`}>{children}</div>
+      <div
+        className={`app-header-dropdown${wide ? " app-header-dropdown--wide" : ""}`}
+        onClick={onDropdownClick}
+      >
+        {children}
+      </div>
     </details>
   );
 }

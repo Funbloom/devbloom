@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { API_BASE } from "./config";
 import {
+  applyImageStorageDefaults,
   editImageNanobanana,
   normalizeImageUrl,
   resolveReferenceForEditApi,
@@ -134,13 +135,25 @@ export function RunEditImageEffect({
             location: defaultLocation,
           };
         });
-        setImages((prev) => [...newItems, ...prev]);
+        if (defaultLocation === "cloud" && !projectKey.trim()) {
+          throw new Error("Set an active project in Admin to store images in the cloud.");
+        }
+        if (defaultLocation === "cloud") {
+          setGenerateActivity({
+            message: "Uploading to cloud storage…",
+            isError: false,
+          });
+        }
+        const storedItems = await applyImageStorageDefaults(newItems, defaultLocation, projectKey);
+        setImages((prev) => [...storedItems, ...prev]);
         clearEditDraft(job.image.id);
         setGenerateActivity({
-          message: "Finished — edited image added to results.",
+          message: `Finished — edited image added to results${
+            defaultLocation === "cloud" ? " (cloud)" : ""
+          }.`,
           isError: false,
         });
-        setStatus("Image edited.");
+        setStatus(defaultLocation === "cloud" ? "Image edited (cloud)." : "Image edited.");
         const safeReturn =
           returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "";
         if (

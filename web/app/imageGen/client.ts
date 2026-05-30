@@ -3,7 +3,7 @@
 import { confirmGeminiImageIfNeeded } from "../lib/confirmGeminiImage";
 import { fetchApi } from "../lib/api";
 import type { Style } from "../storyboard/types";
-import type { GeneratedImage } from "./types";
+import type { GeneratedImage, ImageLocation } from "./types";
 import { API_BASE } from "./config";
 
 export type BackendImageResult = {
@@ -492,6 +492,45 @@ export async function putImageGenerated(
       private: options?.private ?? false,
     }),
   });
+}
+
+/** Admin → Settings → Default Storage for Images (local vs cloud). */
+export async function fetchImageDefaultStorage(): Promise<ImageLocation> {
+  try {
+    const response = await fetchApi("/settings/image_defaults");
+    if (!response.ok) {
+      return "local";
+    }
+    const data = (await response.json()) as { location?: string };
+    return data.location === "cloud" ? "cloud" : "local";
+  } catch {
+    return "local";
+  }
+}
+
+/** After API save, upload to Supabase when admin default storage is cloud. */
+export async function applyImageStorageDefaults(
+  items: GeneratedImage[],
+  storage: ImageLocation,
+  projectKey: string,
+): Promise<GeneratedImage[]> {
+  if (storage !== "cloud") {
+    return items;
+  }
+  const pk = projectKey.trim();
+  if (!pk) {
+    throw new Error("Set an active project in Admin to store images in the cloud.");
+  }
+  const out: GeneratedImage[] = [];
+  for (const item of items) {
+    const filename = item.filename?.trim();
+    if (!filename) {
+      throw new Error("Cannot upload to cloud: missing image filename.");
+    }
+    const cloudUrl = await uploadImageToCloud(pk, filename);
+    out.push({ ...item, url: cloudUrl, location: "cloud" });
+  }
+  return out;
 }
 
 export async function uploadImageToCloud(

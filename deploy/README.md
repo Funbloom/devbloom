@@ -359,6 +359,48 @@ bash deploy/diagnose-api.sh
 
 nginx proxies `/api/` → `127.0.0.1:8000`. A **502** means the API is down or nginx misconfigured on HTTPS.
 
+### Diagnose 413 on image import / large uploads
+
+**Symptom:** ImageGen **Import image** works on localhost but fails on EC2 with `Generate failed: 413`.
+
+**Cause:** nginx default upload limit is **1 MB**. The API accepts imports up to **25 MB**; nginx rejects the request before it reaches FastAPI.
+
+**Fix:** In `/etc/nginx/conf.d/devbloom.conf`, add inside **each** `server { }` block (port **80** and **443** after certbot):
+
+```nginx
+client_max_body_size 32m;
+```
+
+Then:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+See [`nginx-devbloom-dev.conf.example`](nginx-devbloom-dev.conf.example) for the full template.
+
+### Diagnose 504 on image generate / edit
+
+**Symptom:** ImageGen **Generate** or **Edit** works on localhost but fails on EC2 with `Generate failed: 504` (or “Edit failed”).
+
+**Cause:** nginx stops waiting for the API after **60 seconds** by default. Image generation and edits call OpenAI/Gemini and often take longer.
+
+**Fix:** In `/etc/nginx/conf.d/devbloom.conf`, inside **each** `location /api/ { ... }` block (HTTP **and** HTTPS):
+
+```nginx
+proxy_connect_timeout 60s;
+proxy_send_timeout 300s;
+proxy_read_timeout 300s;
+```
+
+Then:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+If jobs still time out, raise `proxy_read_timeout` (e.g. `600s`) or check `sudo journalctl -u devbloom-api -n 50` — the API may still be running after nginx gave up.
+
 ---
 
 ## Local Agent artist release (private S3 → EC2 download)

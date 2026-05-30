@@ -16,6 +16,7 @@ import {
   putImageGenerated,
   removeBackground,
   resolveReferenceForEditApi,
+  applyImageStorageDefaults,
   uploadImageToCloud,
 } from "./client";
 import { IMAGEGEN_EDIT_CONTEXT_KEY, IMAGEGEN_EDIT_RETURN_KEY } from "./editKeys";
@@ -356,9 +357,21 @@ function ImageGenPageInner() {
           location: defaultLocation,
         };
       });
-      setImages((prev) => [...newItems, ...prev]);
+      if (defaultLocation === "cloud" && !projectKey.trim()) {
+        throw new Error("Set an active project in Admin to store images in the cloud.");
+      }
+      if (defaultLocation === "cloud") {
+        setGenerateActivity({
+          message: "Uploading to cloud storage…",
+          isError: false,
+        });
+      }
+      const storedItems = await applyImageStorageDefaults(newItems, defaultLocation, projectKey);
+      setImages((prev) => [...storedItems, ...prev]);
       setGenerateActivity({
-        message: `Finished — added ${newItems.length} image(s) to results.`,
+        message: `Finished — added ${storedItems.length} image(s) to results${
+          defaultLocation === "cloud" ? " (cloud)" : ""
+        }.`,
         isError: false,
       });
     } catch (err) {
@@ -431,8 +444,17 @@ function ImageGenPageInner() {
           location: defaultLocation,
         };
       });
-      setImages((prev) => [...newItems, ...prev]);
-      setStatus("Character image generated.");
+      if (defaultLocation === "cloud" && !projectKey.trim()) {
+        throw new Error("Set an active project in Admin to store images in the cloud.");
+      }
+      if (defaultLocation === "cloud") {
+        setStatus("Uploading to cloud storage…");
+      }
+      const storedItems = await applyImageStorageDefaults(newItems, defaultLocation, projectKey);
+      setImages((prev) => [...storedItems, ...prev]);
+      setStatus(
+        defaultLocation === "cloud" ? "Character image generated (cloud)." : "Character image generated.",
+      );
     } catch (err) {
       if (isGeminiImageConfirmCancelled(err)) {
         setStatus(null);
@@ -499,8 +521,12 @@ function ImageGenPageInner() {
           location: defaultLocation,
         };
       });
-      setImages((prev) => [...newItems, ...prev]);
-      setStatus("Image imported.");
+      if (defaultLocation === "cloud") {
+        setStatus("Uploading to cloud storage…");
+      }
+      const storedItems = await applyImageStorageDefaults(newItems, defaultLocation, projectKey);
+      setImages((prev) => [...storedItems, ...prev]);
+      setStatus(defaultLocation === "cloud" ? "Image imported (cloud)." : "Image imported.");
     } catch (err) {
       setStatus(`Error importing image: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
