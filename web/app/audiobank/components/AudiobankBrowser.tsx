@@ -21,6 +21,7 @@ type Props = {
   onTagsChange: (clipId: string, tags: string[]) => void;
   onDelete: (clip: AudiobankClip) => void;
   deletingClipId: string;
+  canManage: boolean;
   showDownload: boolean;
   onDownload: (clip: AudiobankClip) => void;
   downloadingClipId: string;
@@ -40,6 +41,7 @@ export function AudiobankBrowser({
   onTagsChange,
   onDelete,
   deletingClipId,
+  canManage,
   showDownload,
   onDownload,
   downloadingClipId,
@@ -80,6 +82,7 @@ export function AudiobankBrowser({
                   onTagsChange={onTagsChange}
                   onDelete={onDelete}
                   deleting={clip.id === deletingClipId}
+                  canManage={canManage}
                   showDownload={showDownload}
                   onDownload={onDownload}
                   downloading={clip.id === downloadingClipId}

@@ -5,6 +5,7 @@ import type { ReactElement } from "react";
 import { StudioActivityBox } from "../components/studio/StudioActivityBox";
 import { StudioTwoColumnShell } from "../components/studio/StudioTwoColumnShell";
 import type { StudioActivity } from "../components/studio/types";
+import { useAuth } from "../contexts/AuthContext";
 import { STORAGE_KEY_ACTIVE_PROJECT } from "../lib/activeProject";
 import { getLocalProjectPath, isLocalAgentContext, localAgent } from "../lib/localAgentClient";
 import {
@@ -35,6 +36,8 @@ import {
 } from "./audiobankUtils";
 
 export function AudiobankPage(): ReactElement {
+  const { authUser } = useAuth();
+  const canManageAudiobank = Boolean(authUser?.is_admin);
   const [clips, setClips] = useState<AudiobankClip[]>([]);
   const [categories, setCategories] = useState<Array<{ category: string; clip_count: number }>>([]);
   const [filterQuery, setFilterQuery] = useState<string>("");
@@ -383,6 +386,7 @@ export function AudiobankPage(): ReactElement {
               void handleDeleteClip(clip);
             }}
             deletingClipId={deletingClipId}
+            canManage={canManageAudiobank}
             showDownload={!localAgentEligible || !localAgentOk}
             onDownload={(clip) => {
               void handleDownloadClip(clip);

@@ -12,6 +12,7 @@ type Props = {
   onTagsChange: (clipId: string, tags: string[]) => void;
   onDelete: (clip: AudiobankClip) => void;
   deleting: boolean;
+  canManage: boolean;
   showDownload: boolean;
   onDownload: (clip: AudiobankClip) => void;
   downloading: boolean;
@@ -26,6 +27,7 @@ export function AudiobankClipCard({
   onTagsChange,
   onDelete,
   deleting,
+  canManage,
   showDownload,
   onDownload,
   downloading,
@@ -108,19 +110,21 @@ export function AudiobankClipCard({
               {downloading ? "…" : "↓"}
             </button>
           )}
-          <button
-            type="button"
-            className="audiobank-delete-btn"
-            title="Delete clip"
-            aria-label={`Delete ${clip.filename}`}
-            disabled={deleting}
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete(clip);
-            }}
-          >
-            {deleting ? "…" : "×"}
-          </button>
+          {canManage && (
+            <button
+              type="button"
+              className="audiobank-delete-btn"
+              title="Delete clip"
+              aria-label={`Delete ${clip.filename}`}
+              disabled={deleting}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete(clip);
+              }}
+            >
+              {deleting ? "…" : "×"}
+            </button>
+          )}
         </div>
       </div>
       <div className="audiobank-clip-category">{clip.category}</div>
@@ -133,38 +137,42 @@ export function AudiobankClipCard({
         {localTags.map((tag) => (
           <span key={tag} className="audiobank-tag-chip">
             {tag}
-            <button
-              type="button"
-              className="audiobank-tag-remove"
-              aria-label={`Remove tag ${tag}`}
-              onClick={() => {
-                removeTag(tag);
-              }}
-            >
-              ×
-            </button>
+            {canManage && (
+              <button
+                type="button"
+                className="audiobank-tag-remove"
+                aria-label={`Remove tag ${tag}`}
+                onClick={() => {
+                  removeTag(tag);
+                }}
+              >
+                ×
+              </button>
+            )}
           </span>
         ))}
-        <input
-          type="text"
-          className="audiobank-tag-input"
-          placeholder="+ tag"
-          value={tagDraft}
-          onChange={(event) => {
-            setTagDraft(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              addTag();
-            }
-          }}
-          onBlur={() => {
-            if (tagDraft.trim()) {
-              addTag();
-            }
-          }}
-        />
+        {canManage && (
+          <input
+            type="text"
+            className="audiobank-tag-input"
+            placeholder="+ tag"
+            value={tagDraft}
+            onChange={(event) => {
+              setTagDraft(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                addTag();
+              }
+            }}
+            onBlur={() => {
+              if (tagDraft.trim()) {
+                addTag();
+              }
+            }}
+          />
+        )}
       </div>
     </div>
   );

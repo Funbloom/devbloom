@@ -91,7 +91,11 @@ def stream_audiobank_clip_audio(
 
 
 @audiobank_router.patch("/clips/{clip_id}")
-def patch_audiobank_clip(clip_id: str, body: AudiobankClipPatchBody) -> dict:
+def patch_audiobank_clip(
+    clip_id: str,
+    body: AudiobankClipPatchBody,
+    _admin: dict = Depends(require_admin),
+) -> dict:
     if body.tags is None and body.category is None:
         raise HTTPException(status_code=400, detail="No fields to update.")
     try:
@@ -103,7 +107,7 @@ def patch_audiobank_clip(clip_id: str, body: AudiobankClipPatchBody) -> dict:
 
 
 @audiobank_router.delete("/clips/{clip_id}")
-def remove_audiobank_clip(clip_id: str) -> dict:
+def remove_audiobank_clip(clip_id: str, _admin: dict = Depends(require_admin)) -> dict:
     try:
         delete_audio_clip(clip_id)
         return {"ok": True}
