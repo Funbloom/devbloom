@@ -18,8 +18,9 @@ import {
 import { API_BASE, fetchApi } from "../lib/api";
 import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
 import { HeaderMenu } from "./HeaderMenu";
+import { ToolMenuIcon, type ToolIconId } from "./ToolMenuIcon";
 
-type ToolsLink = { path: string; label: string };
+type ToolsLink = { path: string; label: string; icon: ToolIconId };
 
 type ToolsCategory = { category: string; links: ToolsLink[] };
 
@@ -27,28 +28,28 @@ const TOOLS_CATEGORIES: ToolsCategory[] = [
   {
     category: "Image",
     links: [
-      { path: "/imageGen", label: "Image Gen" },
-      { path: "/imageResize", label: "Image Resize" },
+      { path: "/imageGen", label: "Image Gen", icon: "imageGen" },
+      { path: "/imageResize", label: "Image Resize", icon: "imageResize" },
     ],
   },
   {
     category: "Audio",
     links: [
-      { path: "/audio", label: "Voice Gen" },
-      { path: "/audiobank", label: "Audiobank" },
+      { path: "/audio", label: "Voice Gen", icon: "voiceGen" },
+      { path: "/audiobank", label: "Audiobank", icon: "audiobank" },
     ],
   },
   {
     category: "UI",
-    links: [{ path: "/uiBuilder", label: "UI Builder" }],
+    links: [{ path: "/uiBuilder", label: "UI Builder", icon: "uiBuilder" }],
   },
   {
     category: "3D",
-    links: [{ path: "/meshgen", label: "Mesh Gen" }],
+    links: [{ path: "/meshgen", label: "Mesh Gen", icon: "meshGen" }],
   },
   {
     category: "Story",
-    links: [{ path: "/storyboard", label: "Storyboard" }],
+    links: [{ path: "/storyboard", label: "Storyboard", icon: "storyboard" }],
   },
 ];
 
@@ -411,13 +412,14 @@ export function AppHeader() {
                 pathname === AGENTS_PATH || pathname === "" ? "app-header-link-active" : ""
               }`}
             >
+              <ToolMenuIcon icon="agents" />
               Agents
             </Link>
             <div className="app-header-dropdown-divider" aria-hidden />
             {TOOLS_CATEGORIES.map((group) => (
               <div key={group.category} className="app-header-dropdown-group">
                 <div className="app-header-dropdown-group-label">{group.category}</div>
-                {group.links.map(({ path, label }) => {
+                {group.links.map(({ path, label, icon }) => {
                   const isActive =
                     path === pathname || (path !== "/" && Boolean(pathname?.startsWith(path)));
                   return (
@@ -426,6 +428,7 @@ export function AppHeader() {
                       href={path}
                       className={`app-header-dropdown-link ${isActive ? "app-header-link-active" : ""}`}
                     >
+                      <ToolMenuIcon icon={icon} />
                       {label}
                     </Link>
                   );
@@ -485,22 +488,26 @@ export function AppHeader() {
               href="/admin"
               className={`app-header-dropdown-link ${pathname === "/admin" ? "app-header-link-active" : ""}`}
             >
+              <ToolMenuIcon icon="admin" />
               Admin
             </Link>
             <Link
               href="/admin/installation"
               className={`app-header-dropdown-link ${pathname === "/admin/installation" ? "app-header-link-active" : ""}`}
             >
+              <ToolMenuIcon icon="installation" />
               Installation
             </Link>
             <Link
               href="/settings/usage"
               className={`app-header-dropdown-link ${pathname === "/settings/usage" ? "app-header-link-active" : ""}`}
             >
+              <ToolMenuIcon icon="usage" />
               Usage
             </Link>
             <details className="app-header-submenu">
               <summary className="app-header-dropdown-link app-header-submenu-summary">
+                <ToolMenuIcon icon="projects" />
                 Projects
               </summary>
               <div className="app-header-submenu-list app-header-submenu-list--projects">

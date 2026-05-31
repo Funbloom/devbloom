@@ -257,13 +257,27 @@ body {
 }
 
 .app-header-dropdown-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 10px;
   font-size: 14px;
   color: #9aa3b2;
   text-decoration: none;
   border-radius: 8px;
   transition: color 0.15s, background 0.15s;
+}
+
+.app-header-dropdown-link-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  opacity: 0.88;
+}
+
+.app-header-dropdown-link:hover .app-header-dropdown-link-icon,
+.app-header-dropdown-link.app-header-link-active .app-header-dropdown-link-icon {
+  opacity: 1;
 }
 
 .app-header-dropdown-link:hover {
@@ -294,6 +308,9 @@ body {
 .app-header-submenu > summary {
   list-style: none;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .app-header-submenu > summary::-webkit-details-marker {
