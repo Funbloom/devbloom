@@ -16,8 +16,17 @@ import {
   STORAGE_KEY_ACTIVE_PROJECT_NAME,
 } from "../lib/activeProject";
 import { API_BASE, fetchApi } from "../lib/api";
+import { projectKeyFromDisplayName } from "../lib/projectKey";
 import { localAgent, isLocalAgentContext } from "../lib/localAgentClient";
-import { HeaderMenu } from "./HeaderMenu";
+import {
+  gamesFromManifest,
+  parseGamesApiList,
+  pipelinesFromManifest,
+  visibleGamesForProject,
+  type GameNavEntry,
+  type GameNavPipeline,
+} from "../lib/gamesNav";
+import { closeAllHeaderMenus, HeaderMenu } from "./HeaderMenu";
 import { ToolMenuIcon, type ToolIconId } from "./ToolMenuIcon";
 
 type ToolsLink = { path: string; label: string; icon: ToolIconId };
@@ -98,9 +107,6 @@ function initials(email: string): string {
   return (part.slice(0, 2) || "?").toUpperCase();
 }
 
-type PipelineInfo = { key: string; name: string; description?: string };
-
-type GameRegistryEntry = { key: string; name: string; project_keys: string[] };
 type ProjectItem = { project_key: string; display_name: string };
 
 export function AppHeader() {
@@ -109,9 +115,9 @@ export function AppHeader() {
   const { authUser, user, signOut, loading } = useAuth();
   const [activeProjectKey, setActiveProjectKey] = useState("");
   const [activeProjectName, setActiveProjectName] = useState("");
-  const [gamesRegistry, setGamesRegistry] = useState<GameRegistryEntry[]>([]);
+  const [gamesRegistry, setGamesRegistry] = useState<GameNavEntry[]>(() => gamesFromManifest());
   const [projects, setProjects] = useState<ProjectItem[]>([]);
-  const [pipelinesByGameKey, setPipelinesByGameKey] = useState<Record<string, PipelineInfo[]>>({});
+  const [pipelinesByGameKey, setPipelinesByGameKey] = useState<Record<string, GameNavPipeline[]>>({});
   const [localAgentOk, setLocalAgentOk] = useState(false);
   const [localAgentEligible, setLocalAgentEligible] = useState(false);
   const [apiServerOk, setApiServerOk] = useState(false);
@@ -166,6 +172,8 @@ export function AppHeader() {
 
     void refreshProject();
     const handleProjectChange = () => {
+      const stored = window.localStorage.getItem(STORAGE_KEY_ACTIVE_PROJECT) || "";
+      setActiveProjectKey(stored);
       void refreshProject();
     };
     window.addEventListener("activeProjectChanged", handleProjectChange);
@@ -183,92 +191,116 @@ export function AppHeader() {
     }
     window.localStorage.setItem(STORAGE_KEY_ACTIVE_PROJECT, key);
     window.localStorage.setItem(STORAGE_KEY_ACTIVE_PROJECT_NAME, project.display_name || key);
+    setActiveProjectKey(key);
+    setActiveProjectName(project.display_name || key);
+    closeAllHeaderMenus();
     dispatchActiveProjectChanged();
     void persistActiveProjectToProfile(key);
   };
 
   useEffect(() => {
-    if (loading) return;
+    if (loading) {
+      return;
+    }
     if (!authUser && !user) {
-      setGamesRegistry([]);
+      setGamesRegistry(gamesFromManifest());
       return;
     }
     const loadGames = async () => {
+      const manifest = gamesFromManifest();
       try {
         const res = await fetchApi("/games");
-        if (!res.ok) {
-          setGamesRegistry([]);
-          return;
-        }
-        const raw = (await res.json()) as unknown;
-        if (!Array.isArray(raw)) {
-          setGamesRegistry([]);
-          return;
-        }
-        const parsed: GameRegistryEntry[] = [];
-        for (const item of raw) {
-          if (!item || typeof item !== "object") continue;
-          const rec = item as Record<string, unknown>;
-          const key = typeof rec.key === "string" ? rec.key.trim() : "";
-          const name = typeof rec.name === "string" ? rec.name.trim() : "";
-          const pkRaw = rec.project_keys;
-          const project_keys: string[] = [];
-          if (Array.isArray(pkRaw)) {
-            for (const p of pkRaw) {
-              if (typeof p === "string" && p.trim()) project_keys.push(p.trim());
-            }
-          }
-          if (key && name) {
-            parsed.push({
-              key,
-              name,
-              project_keys: project_keys.length > 0 ? project_keys : [key],
-            });
+        if (res.ok) {
+          const parsed = parseGamesApiList((await res.json()) as unknown);
+          if (parsed.length > 0) {
+            setGamesRegistry(parsed);
+            return;
           }
         }
-        setGamesRegistry(parsed);
       } catch {
-        setGamesRegistry([]);
+        // fall through to manifest
       }
+      setGamesRegistry(manifest);
     };
     void loadGames();
   }, [loading, authUser, user]);
 
+  const effectiveProjectKey = useMemo(() => {
+    const key = activeProjectKey.trim();
+    if (key) {
+      return key;
+    }
+    const name = activeProjectName.trim().toLowerCase();
+    if (!name) {
+      return "";
+    }
+    const byDisplay = projects.find(
+      (p) => (p.display_name || "").trim().toLowerCase() === name,
+    );
+    if (byDisplay?.project_key?.trim()) {
+      return byDisplay.project_key.trim();
+    }
+    return projectKeyFromDisplayName(activeProjectName);
+  }, [activeProjectKey, activeProjectName, projects]);
+
   const visibleGames = useMemo(
-    () => gamesRegistry.filter((g) => activeProjectKey && g.project_keys.includes(activeProjectKey)),
-    [gamesRegistry, activeProjectKey]
+    () => visibleGamesForProject(gamesRegistry, effectiveProjectKey),
+    [gamesRegistry, effectiveProjectKey],
+  );
+
+  const visibleGameKeys = useMemo(
+    () => visibleGames.map((g) => g.key).sort().join(","),
+    [visibleGames],
   );
 
   useEffect(() => {
-    if (!visibleGames.length) {
+    if (!visibleGameKeys) {
       setPipelinesByGameKey({});
       return;
     }
+    const keys = visibleGameKeys.split(",").filter(Boolean);
+    setPipelinesByGameKey((prev) => {
+      const next = { ...prev };
+      for (const key of keys) {
+        if (!(key in next)) {
+          const manifest = pipelinesFromManifest(key);
+          if (manifest.length > 0) {
+            next[key] = manifest;
+          }
+        }
+      }
+      return next;
+    });
+
     let cancelled = false;
     const load = async () => {
-      const next: Record<string, PipelineInfo[]> = {};
+      const next: Record<string, GameNavPipeline[]> = {};
       await Promise.all(
-        visibleGames.map(async (g) => {
+        keys.map(async (gameKey) => {
+          const fallback = pipelinesFromManifest(gameKey);
           try {
-            const res = await fetchApi(`/games/${encodeURIComponent(g.key)}/pipelines`);
+            const res = await fetchApi(`/games/${encodeURIComponent(gameKey)}/pipelines`);
             if (!res.ok) {
-              next[g.key] = [];
+              next[gameKey] = fallback;
               return;
             }
-            const list = (await res.json()) as PipelineInfo[];
-            next[g.key] = Array.isArray(list) && list.length > 0 ? list : [];
+            const list = (await res.json()) as GameNavPipeline[];
+            next[gameKey] =
+              Array.isArray(list) && list.length > 0 ? list : fallback;
           } catch {
-            next[g.key] = [];
+            next[gameKey] = fallback;
           }
-        })
+        }),
       );
-      if (!cancelled) setPipelinesByGameKey(next);
+      if (!cancelled) {
+        setPipelinesByGameKey((prev) => ({ ...prev, ...next }));
+      }
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [visibleGames]);
+  }, [visibleGameKeys]);
 
   useEffect(() => {
     if (!localAgentEligible) return;
@@ -305,20 +337,16 @@ export function AppHeader() {
   }, []);
 
   useEffect(() => {
-    document.querySelectorAll("header.app-header details.app-header-menu").forEach((node) => {
-      (node as HTMLDetailsElement).open = false;
-    });
+    closeAllHeaderMenus();
   }, [pathname]);
 
   useEffect(() => {
-    const closeAllHeaderMenus = () => {
-      document.querySelectorAll("header.app-header details.app-header-menu").forEach((node) => {
-        (node as HTMLDetailsElement).open = false;
-      });
-    };
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target;
       if (!(t instanceof Element)) return;
+      if (t.closest("button.app-header-dropdown-action")?.closest("details.app-header-submenu")) {
+        return;
+      }
       if (t.closest("details.app-header-submenu")) {
         return;
       }
@@ -438,7 +466,12 @@ export function AppHeader() {
           </HeaderMenu>
 
           {visibleGames.map((game) => {
-            const pipelines = pipelinesByGameKey[game.key] ?? [];
+            const pipelines =
+              pipelinesByGameKey[game.key]?.length
+                ? pipelinesByGameKey[game.key]
+                : game.pipelines.length
+                  ? game.pipelines
+                  : pipelinesFromManifest(game.key);
             if (pipelines.length === 0) {
               return null;
             }
@@ -480,6 +513,38 @@ export function AppHeader() {
           })}
 
           <HeaderMenu
+            label="Projects"
+            summaryClassName={effectiveProjectKey ? "app-header-link-active" : ""}
+            wide
+          >
+            {projects.length === 0 ? (
+              <div className="app-header-dropdown-muted">No projects found.</div>
+            ) : (
+              <div className="app-header-projects-list">
+                {projects.map((project) => {
+                  const isActiveProject =
+                    effectiveProjectKey === project.project_key ||
+                    activeProjectKey === project.project_key;
+                  return (
+                    <button
+                      key={project.project_key}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        selectProject(project);
+                      }}
+                      className={`app-header-dropdown-link app-header-dropdown-action ${isActiveProject ? "app-header-link-active" : ""}`}
+                      title={project.project_key}
+                    >
+                      {project.display_name || project.project_key}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </HeaderMenu>
+
+          <HeaderMenu
             label="Settings"
             summaryClassName={adminActive ? "app-header-link-active" : ""}
             wide
@@ -505,32 +570,6 @@ export function AppHeader() {
               <ToolMenuIcon icon="usage" />
               Usage
             </Link>
-            <details className="app-header-submenu">
-              <summary className="app-header-dropdown-link app-header-submenu-summary">
-                <ToolMenuIcon icon="projects" />
-                Projects
-              </summary>
-              <div className="app-header-submenu-list app-header-submenu-list--projects">
-                {projects.length === 0 ? (
-                  <div className="app-header-dropdown-muted">No projects found.</div>
-                ) : (
-                  projects.map((project) => {
-                    const isActiveProject = activeProjectKey === project.project_key;
-                    return (
-                      <button
-                        key={project.project_key}
-                        type="button"
-                        onClick={() => selectProject(project)}
-                        className={`app-header-dropdown-link app-header-dropdown-action ${isActiveProject ? "app-header-link-active" : ""}`}
-                        title={project.project_key}
-                      >
-                        {project.display_name || project.project_key}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </details>
           </HeaderMenu>
 
           <div className="app-header-user" style={{ display: "flex", alignItems: "center" }}>

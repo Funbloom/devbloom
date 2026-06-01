@@ -324,7 +324,10 @@ body {
   gap: 4px;
 }
 
-.app-header-submenu-list--projects {
+.app-header-submenu-list--projects,
+.app-header-projects-list {
+  display: grid;
+  gap: 4px;
   max-height: min(50vh, 320px);
   overflow-y: auto;
   padding-right: 4px;
