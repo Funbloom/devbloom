@@ -5,9 +5,10 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-GAMES_DIR = PROJECT_ROOT / "games"
-MANIFEST_PATH = GAMES_DIR / "manifest.json"
+_API_DIR = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = _API_DIR.parent
+GAMES_DIR = _REPO_ROOT / "games"
+MANIFEST_FILENAME = "manifest.json"
 
 _KEY_RE = re.compile(r"^[a-z0-9_-]+$")
 
@@ -19,18 +20,54 @@ def _safe_key(value: str, label: str) -> str:
     return cleaned
 
 
-def _load_manifest() -> dict:
-    if not MANIFEST_PATH.exists():
-        return {"games": []}
+def _manifest_path_for_game(game_key: str) -> Path:
+    return GAMES_DIR / game_key / MANIFEST_FILENAME
+
+
+def _discover_game_keys() -> list[str]:
+    """Game keys = subdirs of games/ that contain manifest.json."""
+    if not GAMES_DIR.is_dir():
+        return []
+    keys: list[str] = []
+    for child in sorted(GAMES_DIR.iterdir()):
+        if not child.is_dir():
+            continue
+        if child.name.startswith(".") or child.name.startswith("_"):
+            continue
+        if (child / MANIFEST_FILENAME).is_file():
+            keys.append(child.name)
+    return keys
+
+
+def _load_game_manifest(game_key: str) -> Optional[dict]:
+    path = _manifest_path_for_game(game_key)
+    if not path.is_file():
+        return None
     try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return {"games": []}
-        if not isinstance(data.get("games"), list):
-            data["games"] = []
+            return None
         return data
     except Exception:
-        return {"games": []}
+        return None
+
+
+def _load_all_game_manifests() -> list[dict]:
+    out: list[dict] = []
+    for dir_key in _discover_game_keys():
+        raw = _load_game_manifest(dir_key)
+        if not raw:
+            continue
+        manifest_key = (raw.get("key") or "").strip() or dir_key
+        try:
+            safe_key = _safe_key(manifest_key, "game")
+        except ValueError:
+            continue
+        if safe_key != dir_key:
+            # manifest key must match folder name
+            continue
+        out.append(raw)
+    return out
 
 
 def _project_keys_for_game(game: dict, game_key: str) -> list[str]:
@@ -53,12 +90,8 @@ def _project_keys_for_game(game: dict, game_key: str) -> list[str]:
 
 
 def list_games() -> list[dict]:
-    manifest = _load_manifest()
-    games = manifest.get("games") or []
     out: list[dict] = []
-    for g in games:
-        if not isinstance(g, dict):
-            continue
+    for g in _load_all_game_manifests():
         key = (g.get("key") or "").strip()
         name = (g.get("name") or "").strip()
         if key and name:
@@ -77,12 +110,14 @@ def list_games() -> list[dict]:
 
 
 def get_game(game_key: str) -> Optional[dict]:
-    manifest = _load_manifest()
     target = _safe_key(game_key, "game")
-    for g in manifest.get("games") or []:
-        if isinstance(g, dict) and (g.get("key") or "").strip() == target:
-            return g
-    return None
+    manifest = _load_game_manifest(target)
+    if not manifest:
+        return None
+    manifest_key = (manifest.get("key") or "").strip()
+    if manifest_key and manifest_key != target:
+        return None
+    return manifest
 
 
 def list_pipelines(game_key: str) -> list[dict]:

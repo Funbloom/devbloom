@@ -1,6 +1,13 @@
-import gamesManifest from "../../../games/manifest.json";
+import { GAME_MANIFESTS } from "./gameManifests";
 
 export type GameNavPipeline = { key: string; name: string; description?: string };
+
+export type GameManifest = {
+  key: string;
+  name: string;
+  project_keys?: string[];
+  pipelines: GameNavPipeline[];
+};
 
 export type GameNavEntry = {
   key: string;
@@ -9,52 +16,9 @@ export type GameNavEntry = {
   pipelines: GameNavPipeline[];
 };
 
-type ManifestGame = {
-  key?: string;
-  name?: string;
-  project_keys?: string[];
-  pipelines?: Array<{ key?: string; name?: string; description?: string }>;
-};
-
-function manifestGames(): ManifestGame[] {
-  return (gamesManifest as { games?: ManifestGame[] }).games ?? [];
-}
-
-/** All games from games/manifest.json — used when /games API is unavailable. */
-export function gamesFromManifest(): GameNavEntry[] {
-  const out: GameNavEntry[] = [];
-  for (const g of manifestGames()) {
-    const key = (g.key ?? "").trim();
-    const name = (g.name ?? "").trim();
-    if (!key || !name) {
-      continue;
-    }
-    const project_keys: string[] = [];
-    if (Array.isArray(g.project_keys)) {
-      for (const p of g.project_keys) {
-        if (typeof p === "string" && p.trim()) {
-          project_keys.push(p.trim());
-        }
-      }
-    }
-    out.push({
-      key,
-      name,
-      project_keys: project_keys.length > 0 ? project_keys : [key],
-      pipelines: pipelinesFromManifest(key),
-    });
-  }
-  return out;
-}
-
-/** Pipelines from games/manifest.json (works even if /games/{key}/pipelines fails). */
-export function pipelinesFromManifest(gameKey: string): GameNavPipeline[] {
-  const game = manifestGames().find((g) => (g.key ?? "").trim() === gameKey);
-  if (!game?.pipelines) {
-    return [];
-  }
+function parsePipelines(raw: GameManifest["pipelines"]): GameNavPipeline[] {
   const out: GameNavPipeline[] = [];
-  for (const p of game.pipelines) {
+  for (const p of raw ?? []) {
     const key = (p.key ?? "").trim();
     const name = (p.name ?? "").trim();
     if (key && name) {
@@ -62,6 +26,49 @@ export function pipelinesFromManifest(gameKey: string): GameNavPipeline[] {
     }
   }
   return out;
+}
+
+function manifestToEntry(m: GameManifest): GameNavEntry | null {
+  const key = (m.key ?? "").trim();
+  const name = (m.name ?? "").trim();
+  if (!key || !name) {
+    return null;
+  }
+  const project_keys: string[] = [];
+  if (Array.isArray(m.project_keys)) {
+    for (const p of m.project_keys) {
+      if (typeof p === "string" && p.trim()) {
+        project_keys.push(p.trim());
+      }
+    }
+  }
+  return {
+    key,
+    name,
+    project_keys: project_keys.length > 0 ? project_keys : [key],
+    pipelines: parsePipelines(m.pipelines),
+  };
+}
+
+/** All games from per-game manifests — used when /games API is unavailable. */
+export function gamesFromManifest(): GameNavEntry[] {
+  const out: GameNavEntry[] = [];
+  for (const m of GAME_MANIFESTS) {
+    const entry = manifestToEntry(m as GameManifest);
+    if (entry) {
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
+/** Pipelines from games/<game_key>/manifest.json (works even if /games/{key}/pipelines fails). */
+export function pipelinesFromManifest(gameKey: string): GameNavPipeline[] {
+  const game = (GAME_MANIFESTS as GameManifest[]).find((g) => (g.key ?? "").trim() === gameKey);
+  if (!game) {
+    return [];
+  }
+  return parsePipelines(game.pipelines);
 }
 
 export function parseGamesApiList(raw: unknown): GameNavEntry[] {
@@ -121,6 +128,5 @@ export function visibleGamesForProject(games: GameNavEntry[], activeProjectKey: 
   if (matched.length > 0) {
     return matched;
   }
-  // Project selected but no explicit mapping — show all games (studio default).
   return games;
 }

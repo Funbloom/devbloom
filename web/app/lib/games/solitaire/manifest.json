@@ -1,0 +1,12 @@
+{
+  "key": "solitaire",
+  "name": "Solitaire",
+  "project_keys": ["solitaire"],
+  "pipelines": [
+    {
+      "key": "cards",
+      "name": "Cards",
+      "description": "Generate playing card images in a chosen style from a reference image."
+    }
+  ]
+}
