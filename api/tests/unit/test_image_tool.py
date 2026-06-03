@@ -172,3 +172,113 @@ def test_remove_background_raises_when_filename_missing_and_no_input_url(monkeyp
         assert False, "Expected ValueError when both local file and input_url are unavailable."
     except ValueError as exc:
         assert "Input image not found." in str(exc)
+
+
+def test_resolve_openai_image_size_gpt_image_15_landscape_uses_legacy_preset():
+    assert image_tool.resolve_openai_image_size("gpt-image-1.5", 1024, 576) == "1536x1024"
+    assert image_tool.resolve_openai_image_size("gpt-image-1.5", 1024, 1024) == "1024x1024"
+    assert image_tool.resolve_openai_image_size("gpt-image-1.5", 576, 1024) == "1024x1536"
+
+
+def test_resolve_openai_image_size_gpt_image_2_uses_true_16_9_and_9_16():
+    assert image_tool.resolve_openai_image_size("gpt-image-2", 1024, 576) == "1088x612"
+    assert image_tool.resolve_openai_image_size("gpt-image-2", 576, 1024) == "612x1088"
+    assert image_tool.resolve_openai_image_size("gpt-image-2", 2048, 1152) == "2048x1152"
+    assert image_tool.resolve_openai_image_size("gpt-image-2", 1024, 1024) == "1024x1024"
+
+
+def test_generate_openai_image_bytes_gpt_image_2_edit_omits_input_fidelity(monkeypatch):
+    called: dict[str, object] = {}
+
+    class _DataItem:
+        b64_json = base64.b64encode(b"fake-png").decode("ascii")
+
+    class _Response:
+        data = [_DataItem()]
+
+    class _FakeImages:
+        def edit(self, **kwargs):
+            called["edit"] = kwargs
+            return _Response()
+
+        def generate(self, **kwargs):
+            called["generate"] = kwargs
+            return _Response()
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            self.images = _FakeImages()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(image_tool, "OpenAI", _FakeClient)
+
+    image_tool.generate_openai_image_bytes(
+        "edit this",
+        model_name="gpt-image-2",
+        reference_image_bytes=b"\x89PNG\r\n\x1a\nfake",
+    )
+
+    assert "edit" in called
+    assert "input_fidelity" not in called["edit"]
+
+
+def test_generate_openai_image_bytes_gpt_image_15_edit_sets_input_fidelity(monkeypatch):
+    called: dict[str, object] = {}
+
+    class _DataItem:
+        b64_json = base64.b64encode(b"fake-png").decode("ascii")
+
+    class _Response:
+        data = [_DataItem()]
+
+    class _FakeImages:
+        def edit(self, **kwargs):
+            called["edit"] = kwargs
+            return _Response()
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            self.images = _FakeImages()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(image_tool, "OpenAI", _FakeClient)
+
+    image_tool.generate_openai_image_bytes(
+        "edit this",
+        model_name="gpt-image-1.5",
+        reference_image_bytes=b"\x89PNG\r\n\x1a\nfake",
+    )
+
+    assert called["edit"]["input_fidelity"] == "high"
+
+
+def test_generate_openai_image_bytes_gpt_image_2_passes_custom_landscape_size(monkeypatch):
+    called: dict[str, object] = {}
+
+    class _DataItem:
+        b64_json = base64.b64encode(b"fake-png").decode("ascii")
+
+    class _Response:
+        data = [_DataItem()]
+
+    class _FakeImages:
+        def generate(self, **kwargs):
+            called["generate"] = kwargs
+            return _Response()
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            self.images = _FakeImages()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(image_tool, "OpenAI", _FakeClient)
+
+    image_tool.generate_openai_image_bytes(
+        "landscape scene",
+        width=1024,
+        height=576,
+        model_name="gpt-image-2",
+    )
+
+    assert called["generate"]["size"] == "1088x612"
+    assert called["generate"]["model"] == "gpt-image-2"

@@ -28,6 +28,75 @@ export function normalizeImageUrl(url: string): string {
   return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
+/** Canonical serve URL for a local (API disk) image in the active project. */
+export function buildLocalImageServeUrl(
+  img: Pick<GeneratedImage, "filename" | "nestedUiRelativePath" | "location">,
+  projectKey: string,
+): string | null {
+  const pk = projectKey.trim();
+  if (!pk || img.location === "cloud") {
+    return null;
+  }
+  const nested = img.nestedUiRelativePath?.trim();
+  if (nested) {
+    const qPk = encodeURIComponent(pk);
+    const qRel = encodeURIComponent(nested);
+    return normalizeImageUrl(`/images/ui_file?project_key=${qPk}&rel=${qRel}`);
+  }
+  const fn = img.filename?.trim();
+  if (fn) {
+    return normalizeImageUrl(`/images/${fn}?project_key=${encodeURIComponent(pk)}`);
+  }
+  return null;
+}
+
+/**
+ * URL for <img src>. Local images are rebuilt from filename + project_key so stale
+ * hosts (localhost vs EC2) or missing query params do not break thumbnails.
+ */
+export function resolveImageDisplayUrl(img: GeneratedImage, projectKey: string): string {
+  if (img.location === "cloud") {
+    const u = (img.url || "").trim();
+    return u.startsWith("http") ? u : normalizeImageUrl(u);
+  }
+
+  const canonical = buildLocalImageServeUrl(img, projectKey);
+  if (canonical) {
+    return canonical;
+  }
+
+  const raw = (img.url || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  if (!raw.startsWith("http")) {
+    const pk = projectKey.trim();
+    if (pk && raw.startsWith("/images/") && !raw.includes("project_key=")) {
+      const sep = raw.includes("?") ? "&" : "?";
+      return normalizeImageUrl(`${raw}${sep}project_key=${encodeURIComponent(pk)}`);
+    }
+    return normalizeImageUrl(raw);
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.pathname.includes("/images/")) {
+      const rebuilt = buildLocalImageServeUrl(img, projectKey);
+      if (rebuilt) {
+        return rebuilt;
+      }
+      const current = new URL(API_BASE);
+      if (parsed.host !== current.host || parsed.protocol !== current.protocol) {
+        return `${current.origin}${parsed.pathname}${parsed.search}`;
+      }
+    }
+  } catch {
+    // use raw below
+  }
+  return raw;
+}
+
 /**
  * Gen/Images/UI nested assets use `/images/ui_file?...&rel=<encoded>`.
  * Returns the decoded `rel` (e.g. `MyFolder/screen.png`) or null.

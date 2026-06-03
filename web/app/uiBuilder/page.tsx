@@ -526,7 +526,7 @@ export default function UIBuilderPage() {
     }
     try {
       const { images: raw } = await getImageGenerated(projectKey, { private: isPrivate });
-      const all = parseStoredImages(raw);
+      const all = parseStoredImages(raw, projectKey);
       setUiCanvasImages(all.filter((img) => img.tab === "ui_canvas"));
     } catch {
       setUiCanvasImages([]);
@@ -680,7 +680,7 @@ export default function UIBuilderPage() {
   const loadAllImages = useCallback(async (): Promise<GeneratedImage[]> => {
     if (!projectKey) return [];
     const { images: raw } = await getImageGenerated(projectKey, { private: isPrivate });
-    return parseStoredImages(raw);
+    return parseStoredImages(raw, projectKey);
   }, [projectKey, isPrivate]);
 
   /** Run edit jobs from /imageGen/edit when return target is UI Builder, so progress stays visible here. */
@@ -2285,6 +2285,7 @@ export default function UIBuilderPage() {
                 <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
                   <ResultsPanel
                     embedded
+                    projectKey={projectKey}
                     panelTitle="UI Canvas"
                     images={displayedUiCanvasImages}
                     imagesPerRow={imagesPerRow}

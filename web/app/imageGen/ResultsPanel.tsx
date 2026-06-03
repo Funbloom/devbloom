@@ -1,6 +1,7 @@
 "use client";
 
 import type { KeyboardEvent, MouseEvent } from "react";
+import { resolveImageDisplayUrl } from "./client";
 import type { GeneratedImage } from "./types";
 
 type Props = {
@@ -25,6 +26,8 @@ type Props = {
   onSketchSelectionChange?: (id: string, selected: boolean) => void;
   /** While true, sketch image click-selection is disabled (batch generation running). */
   sketchSelectionDisabled?: boolean;
+  /** Active project — used to rebuild local image URLs for display. */
+  projectKey?: string;
 };
 
 export function ResultsPanel({
@@ -44,6 +47,7 @@ export function ResultsPanel({
   selectedSketchIds = [],
   onSketchSelectionChange,
   sketchSelectionDisabled = false,
+  projectKey = "",
 }: Props) {
   const inner = (
     <>
@@ -137,7 +141,7 @@ export function ResultsPanel({
                   : {})}
               >
                 <img
-                  src={img.url}
+                  src={projectKey.trim() ? resolveImageDisplayUrl(img, projectKey) : img.url}
                   alt={img.prompt}
                   className={
                     sketchSelectable

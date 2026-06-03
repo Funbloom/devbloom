@@ -1,5 +1,5 @@
 import { API_BASE } from "./config";
-import { normalizeImageUrl, parseNestedUiRelFromUrl } from "./client";
+import { normalizeImageUrl, parseNestedUiRelFromUrl, resolveImageDisplayUrl } from "./client";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
 
 function parseTab(o: Record<string, unknown>): ImageTab {
@@ -10,7 +10,7 @@ function parseTab(o: Record<string, unknown>): ImageTab {
   return "image";
 }
 
-export function parseStoredImages(raw: unknown[]): GeneratedImage[] {
+export function parseStoredImages(raw: unknown[], projectKey?: string): GeneratedImage[] {
   return raw
     .filter(
       (img) =>
@@ -55,7 +55,7 @@ export function parseStoredImages(raw: unknown[]): GeneratedImage[] {
         if (fromUrl) nestedUiRelativePath = fromUrl;
       }
 
-      return {
+      const item: GeneratedImage = {
         id: String(o.id),
         url,
         filename: filename || undefined,
@@ -71,6 +71,10 @@ export function parseStoredImages(raw: unknown[]): GeneratedImage[] {
             : undefined,
         ...(nestedUiRelativePath ? { nestedUiRelativePath } : {}),
       };
+      if (projectKey?.trim()) {
+        item.url = resolveImageDisplayUrl(item, projectKey.trim());
+      }
+      return item;
     });
 }
 

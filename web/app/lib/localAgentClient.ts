@@ -100,6 +100,40 @@ export function localAgentDownloadUrl(): string {
 }
 
 const LOCAL_AGENT_INSTALLED_VERSION_KEY = "devbloom_local_agent_installed_version";
+const LOCAL_AGENT_APPDATA_INSTALLED_KEY = "devbloom_local_agent_appdata_installed";
+
+export type AppdataInstallStatus = {
+  installed: boolean;
+  install_dir: string;
+  version: string;
+};
+
+/** Cached when AppData install was confirmed or ?agentInstalled= was set after web-install. */
+export function getCachedLocalAgentAppdataInstalled(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(LOCAL_AGENT_APPDATA_INSTALLED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setCachedLocalAgentAppdataInstalled(installed: boolean): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (installed) {
+      window.localStorage.setItem(LOCAL_AGENT_APPDATA_INSTALLED_KEY, "1");
+    } else {
+      window.localStorage.removeItem(LOCAL_AGENT_APPDATA_INSTALLED_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
 
 /** Cached after a successful agent_info call (persists when agent is stopped). */
 export function getCachedLocalAgentInstalledVersion(): string | null {
@@ -115,11 +149,16 @@ export function getCachedLocalAgentInstalledVersion(): string | null {
 }
 
 export function setCachedLocalAgentInstalledVersion(version: string): void {
-  if (typeof window === "undefined" || !version.trim()) {
+  if (typeof window === "undefined") {
     return;
   }
   try {
-    window.localStorage.setItem(LOCAL_AGENT_INSTALLED_VERSION_KEY, version.trim());
+    const v = version.trim();
+    if (!v) {
+      window.localStorage.removeItem(LOCAL_AGENT_INSTALLED_VERSION_KEY);
+      return;
+    }
+    window.localStorage.setItem(LOCAL_AGENT_INSTALLED_VERSION_KEY, v);
   } catch {
     // ignore
   }
@@ -250,6 +289,9 @@ export const localAgent = {
   },
   agentInfo(): Promise<LocalAgentInfo> {
     return requestLocalAgent("/installation/agent_info", { method: "GET", body: undefined });
+  },
+  appdataInstall(): Promise<AppdataInstallStatus> {
+    return requestLocalAgent("/installation/appdata_install", { method: "GET", body: undefined });
   },
   approveProjectRoot(projectRoot: string): Promise<{ ok: boolean; project_root: string }> {
     return requestLocalAgent("/projects/approve", {

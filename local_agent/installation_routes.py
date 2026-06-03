@@ -191,6 +191,50 @@ def _read_release_version() -> str:
     return "dev"
 
 
+def _default_appdata_install_dir() -> Path:
+    local = (os.getenv("LOCALAPPDATA") or "").strip()
+    if local:
+        return Path(local) / "DevBloom" / "LocalAgent"
+    return Path.home() / "AppData" / "Local" / "DevBloom" / "LocalAgent"
+
+
+def _read_version_from_install_root(install_dir: Path) -> str:
+    version_file = install_dir / "VERSION.txt"
+    if version_file.is_file():
+        text = version_file.read_text(encoding="utf-8").strip()
+        if text:
+            return text.splitlines()[0].strip()
+    return ""
+
+
+def _is_appdata_install_complete(install_dir: Path) -> bool:
+    """True when the standard AppData install folder looks like a finished install."""
+    if not install_dir.is_dir():
+        return False
+    return (
+        (install_dir / "run.bat").is_file()
+        and (install_dir / "local_agent" / "main.py").is_file()
+        and (
+            (install_dir / ".venv" / "Scripts" / "python.exe").is_file()
+            or (install_dir / "VERSION.txt").is_file()
+        )
+    )
+
+
+@router.get("/installation/appdata_install")
+async def appdata_install(request: Request) -> dict[str, Any]:
+    """Whether %LOCALAPPDATA%\\DevBloom\\LocalAgent is installed (works even if SAM/models are not)."""
+    ensure_localhost(request)
+    install_dir = _default_appdata_install_dir()
+    installed = _is_appdata_install_complete(install_dir)
+    version = _read_version_from_install_root(install_dir) if installed else ""
+    return {
+        "installed": installed,
+        "install_dir": str(install_dir.resolve()),
+        "version": version,
+    }
+
+
 @router.get("/installation/agent_info")
 async def agent_info(request: Request) -> dict[str, Any]:
     """Release metadata for Settings → Installation (version, install directory)."""

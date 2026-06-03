@@ -33,6 +33,90 @@ ALLOWED_DIMENSIONS = ALLOWED_IMAGE_DIMENSIONS
 MAX_PROMPT_LEN = IMAGE_MAX_PROMPT_LEN
 MAX_IMAGES = IMAGE_MAX_IMAGES
 
+_OPENAI_GPT_IMAGE_2_MODEL = "gpt-image-2"
+_OPENAI_GPT_IMAGE_2_MIN_PIXELS = 655_360
+_OPENAI_GPT_IMAGE_2_MAX_PIXELS = 8_294_400
+_OPENAI_GPT_IMAGE_2_MAX_EDGE = 3840
+_OPENAI_GPT_IMAGE_2_MIN_ASPECT_N = 68
+
+
+def _is_gpt_image_2_model(model_name: str) -> bool:
+    cleaned = (model_name or "").strip()
+    if cleaned == _OPENAI_GPT_IMAGE_2_MODEL:
+        return True
+    registry_entry = IMAGE_MODEL_REGISTRY.get(cleaned)
+    if registry_entry:
+        return str(registry_entry.get("provider_model", cleaned)) == _OPENAI_GPT_IMAGE_2_MODEL
+    return False
+
+
+def _openai_edit_supports_input_fidelity(model_name: str) -> bool:
+    """gpt-image-2 rejects input_fidelity; only 1.x / 1.5 support it on images.edit."""
+    if _is_gpt_image_2_model(model_name):
+        return False
+    cleaned = (model_name or "").strip()
+    if cleaned in ("gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"):
+        return True
+    registry_entry = IMAGE_MODEL_REGISTRY.get(cleaned)
+    if registry_entry and registry_entry.get("provider") == "openai":
+        provider_model = str(registry_entry.get("provider_model", cleaned))
+        return provider_model in ("gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini")
+    return cleaned.startswith("gpt-image-1")
+
+
+def _openai_legacy_preset_size(width: int, height: int) -> str:
+    """GPT Image 1.x / 1.5 fixed presets (3:2 landscape, 2:3 portrait)."""
+    safe_width = max(256, int(width))
+    safe_height = max(256, int(height))
+    if safe_width == safe_height:
+        return "1024x1024"
+    if safe_width > safe_height:
+        return "1536x1024"
+    return "1024x1536"
+
+
+def _openai_gpt_image_2_size(width: int, height: int) -> str:
+    """gpt-image-2 custom size: true 16:9 landscape, 9:16 portrait, square; OpenAI constraints applied."""
+    w = max(16, int(width))
+    h = max(16, int(height))
+
+    if w == h:
+        side = max(256, ((w + 15) // 16) * 16)
+        while side * side < _OPENAI_GPT_IMAGE_2_MIN_PIXELS:
+            side += 16
+        while side > _OPENAI_GPT_IMAGE_2_MAX_EDGE or side * side > _OPENAI_GPT_IMAGE_2_MAX_PIXELS:
+            side -= 16
+        if side < 256:
+            side = 256
+        return f"{side}x{side}"
+
+    landscape = w >= h
+    if landscape:
+        n = max((w + 15) // 16, (h + 8) // 9)
+    else:
+        n = max((h + 15) // 16, (w + 8) // 9)
+    n = max(n, _OPENAI_GPT_IMAGE_2_MIN_ASPECT_N)
+    while n > 0:
+        if landscape:
+            out_w, out_h = 16 * n, 9 * n
+        else:
+            out_w, out_h = 9 * n, 16 * n
+        pixels = out_w * out_h
+        if (
+            out_w <= _OPENAI_GPT_IMAGE_2_MAX_EDGE
+            and out_h <= _OPENAI_GPT_IMAGE_2_MAX_EDGE
+            and _OPENAI_GPT_IMAGE_2_MIN_PIXELS <= pixels <= _OPENAI_GPT_IMAGE_2_MAX_PIXELS
+        ):
+            return f"{out_w}x{out_h}"
+        n -= 1
+    return "1088x612" if landscape else "612x1088"
+
+
+def resolve_openai_image_size(model_name: str, width: int, height: int) -> str:
+    if _is_gpt_image_2_model(model_name):
+        return _openai_gpt_image_2_size(width, height)
+    return _openai_legacy_preset_size(width, height)
+
 
 def _load_rembg():
     try:
@@ -874,12 +958,7 @@ def _generate_image_openai(
 
     safe_width = max(256, int(width))
     safe_height = max(256, int(height))
-    if safe_width == safe_height:
-        size = "1024x1024"
-    elif safe_width > safe_height:
-        size = "1536x1024"
-    else:
-        size = "1024x1536"
+    size = resolve_openai_image_size(model_name, safe_width, safe_height)
     if negative_prompt:
         prompt = f"{prompt}\nNegative prompt: {negative_prompt}"
 
@@ -914,7 +993,7 @@ def _generate_image_openai(
 
     if ref_files:
         params["image"] = ref_files
-        if model_name in ("gpt-image-1", "gpt-image-1.5", "gpt-image-2"):
+        if _openai_edit_supports_input_fidelity(model_name):
             params["input_fidelity"] = "high"
         # images.edit does not support quality="hd" (images.generate does).
         if params.get("quality") == "hd":
@@ -965,12 +1044,7 @@ def generate_openai_image_to_dir(
 
     safe_width = max(256, int(width))
     safe_height = max(256, int(height))
-    if safe_width == safe_height:
-        size = "1024x1024"
-    elif safe_width > safe_height:
-        size = "1536x1024"
-    else:
-        size = "1024x1536"
+    size = resolve_openai_image_size(model_name, safe_width, safe_height)
 
     client = OpenAI(api_key=api_key)
     params: dict = {
@@ -1015,15 +1089,10 @@ def generate_openai_image_bytes(
 
     safe_width = max(256, int(width))
     safe_height = max(256, int(height))
-    if safe_width == safe_height:
-        size = "1024x1024"
-    elif safe_width > safe_height:
-        size = "1536x1024"
-    else:
-        size = "1024x1536"
 
     registry_entry = IMAGE_MODEL_REGISTRY.get(model_name)
     openai_model = str(registry_entry.get("provider_model", model_name)) if registry_entry else model_name
+    size = resolve_openai_image_size(openai_model, safe_width, safe_height)
     if reference_image_bytes is not None and len(reference_image_bytes) > 0:
         if not registry_entry or registry_entry.get("provider") != "openai":
             raise ValueError(
@@ -1049,7 +1118,7 @@ def generate_openai_image_bytes(
     ref_bytes = reference_image_bytes if reference_image_bytes else None
     if ref_bytes:
         params["image"] = [("reference.png", ref_bytes)]
-        if openai_model in ("gpt-image-1", "gpt-image-1.5", "gpt-image-2"):
+        if _openai_edit_supports_input_fidelity(openai_model):
             params["input_fidelity"] = "high"
         if params.get("quality") == "hd":
             params["quality"] = "high"

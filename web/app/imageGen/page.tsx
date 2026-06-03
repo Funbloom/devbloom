@@ -204,7 +204,7 @@ function ImageGenPageInner() {
     getImageGenerated(projectKey, { private: isPrivate })
       .then(({ images: raw }) => {
         if (!cancelled) {
-          setImages(parseStoredImages(raw));
+          setImages(parseStoredImages(raw, projectKey));
           loadCompletedForProjectRef.current = projectKey;
         }
       })
@@ -1001,6 +1001,7 @@ function ImageGenPageInner() {
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <ResultsPanel
               embedded
+              projectKey={projectKey}
               images={visibleImages}
               imagesPerRow={imagesPerRow}
               onImagesPerRowChange={handleImagesPerRowChange}

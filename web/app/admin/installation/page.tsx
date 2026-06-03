@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { API_BASE } from "../../lib/api";
-import { isLocalAgentContext, localAgent, localAgentDownloadUrl, localAgentWebInstallUrl, fetchLocalAgentLatestVersion, getCachedLocalAgentInstalledVersion, setCachedLocalAgentInstalledVersion, isPythonVersion310Plus, PYTHON_WINDOWS_INSTALLER_URL, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
+import { isLocalAgentContext, localAgent, localAgentDownloadUrl, localAgentWebInstallUrl, fetchLocalAgentLatestVersion, getCachedLocalAgentAppdataInstalled, getCachedLocalAgentInstalledVersion, setCachedLocalAgentAppdataInstalled, setCachedLocalAgentInstalledVersion, isPythonVersion310Plus, PYTHON_WINDOWS_INSTALLER_URL, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
 
 type InstallTab = "basic" | "advanced";
 
@@ -93,19 +93,21 @@ export default function AdminInstallationPage() {
   const [agentInfo, setAgentInfo] = useState<LocalAgentInfo | null>(null);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [cachedInstalledVersion, setCachedInstalledVersion] = useState<string | null>(null);
+  const [appdataInstalled, setAppdataInstalled] = useState<boolean>(() => getCachedLocalAgentAppdataInstalled());
   const [activeTab, setActiveTab] = useState<InstallTab>("basic");
   const downloadUrl = localAgentDownloadUrl();
   const webInstallUrl = localAgentWebInstallUrl();
 
-  const installedVersion = agentInfo?.version || cachedInstalledVersion;
-  const isInstalledOnDisk = Boolean(installedVersion);
+  const isInstalledOnDisk = appdataInstalled;
+  const installedVersion = isInstalledOnDisk
+    ? agentInfo?.version || cachedInstalledVersion
+    : null;
   const updateAvailable = Boolean(
     latestVersion && installedVersion && latestVersion !== installedVersion,
   );
-  const showInstallButton = !isInstalledOnDisk || updateAvailable;
   const agentRunning = localAgentState === "ok";
-  /** Installed: Install uses URL protocol (re-runs web-install.bat). First time: download zip + bat. */
-  const installViaProtocol = isInstalledOnDisk;
+  const canInstallDownload = Boolean(downloadUrl && webInstallUrl);
+  const runEnabled = isInstalledOnDisk && !agentRunning;
 
   function triggerInstallDownloads(): void {
     if (!downloadUrl || !webInstallUrl) {
@@ -271,6 +273,8 @@ export default function AdminInstallationPage() {
     if (v) {
       setCachedLocalAgentInstalledVersion(v);
       setCachedInstalledVersion(v);
+      setCachedLocalAgentAppdataInstalled(true);
+      setAppdataInstalled(true);
     }
   }, []);
 
@@ -337,6 +341,31 @@ export default function AdminInstallationPage() {
         if (!cancelled) {
           setLocalAgentState(localOk ? "ok" : "missing");
         }
+        if (localOk) {
+          try {
+            const appdata = await localAgent.appdataInstall();
+            if (!cancelled) {
+              const onDisk = Boolean(appdata.installed);
+              setAppdataInstalled(onDisk);
+              setCachedLocalAgentAppdataInstalled(onDisk);
+              if (onDisk && appdata.version) {
+                setCachedLocalAgentInstalledVersion(appdata.version);
+                setCachedInstalledVersion(appdata.version);
+              }
+              if (!onDisk) {
+                setCachedLocalAgentInstalledVersion("");
+                setCachedInstalledVersion(null);
+                setAgentInfo(null);
+              }
+            }
+          } catch {
+            if (!cancelled && !getCachedLocalAgentAppdataInstalled()) {
+              setAppdataInstalled(false);
+            }
+          }
+        } else if (!cancelled && !getCachedLocalAgentAppdataInstalled()) {
+          setAppdataInstalled(false);
+        }
         let pythonBasicResolved = false;
         try {
           const host = await localAgent.hostPython();
@@ -391,6 +420,11 @@ export default function AdminInstallationPage() {
               if (info.version) {
                 setCachedLocalAgentInstalledVersion(info.version);
                 setCachedInstalledVersion(info.version);
+              }
+              const dir = (info.install_dir || "").replace(/\\/g, "/").toLowerCase();
+              if (dir.includes("/devbloom/localagent")) {
+                setAppdataInstalled(true);
+                setCachedLocalAgentAppdataInstalled(true);
               }
             }
           } catch {
@@ -590,21 +624,41 @@ export default function AdminInstallationPage() {
                         ) : null}
                       </div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        {showInstallButton ? (
-                          installViaProtocol ? (
-                            <a href="devbloom-agent-install://" style={actionButtonStyle}>
-                              Install
+                        <button
+                          type="button"
+                          style={{
+                            ...actionButtonStyle,
+                            opacity: canInstallDownload ? 1 : 0.5,
+                            cursor: canInstallDownload ? "pointer" : "not-allowed",
+                          }}
+                          disabled={!canInstallDownload}
+                          onClick={() => {
+                            if (canInstallDownload) {
+                              triggerInstallDownloads();
+                            }
+                          }}
+                        >
+                          Install
+                        </button>
+                        {!agentRunning ? (
+                          runEnabled ? (
+                            <a href="devbloom-agent://start" style={actionButtonStyle}>
+                              Run
                             </a>
                           ) : (
-                            <button type="button" style={actionButtonStyle} onClick={triggerInstallDownloads}>
-                              Install
+                            <button
+                              type="button"
+                              disabled
+                              style={{
+                                ...actionButtonStyle,
+                                opacity: 0.45,
+                                cursor: "not-allowed",
+                              }}
+                              title="Install Local Agent to %LOCALAPPDATA%\\DevBloom\\LocalAgent first"
+                            >
+                              Run
                             </button>
                           )
-                        ) : null}
-                        {isInstalledOnDisk && !agentRunning ? (
-                          <a href="devbloom-agent://start" style={actionButtonStyle}>
-                            Run
-                          </a>
                         ) : null}
                         {agentRunning ? (
                           <a href="devbloom-agent-stop://" style={actionButtonStyle}>
@@ -612,17 +666,15 @@ export default function AdminInstallationPage() {
                           </a>
                         ) : null}
                       </div>
-                      {showInstallButton ? (
-                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)", lineHeight: 1.45 }}>
-                          {installViaProtocol
-                            ? "Install downloads the latest release and updates AppData (uses zip in Downloads if you saved it there)."
-                            : "Install saves latest.zip and DevBloom-LocalAgent-Install.bat to Downloads. Run the .bat file, then click Run here."}
-                        </p>
-                      ) : (
-                        <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
-                          Installed at %LOCALAPPDATA%\DevBloom\LocalAgent. Use Run to start and Stop when done.
-                        </p>
-                      )}
+                      <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)", lineHeight: 1.45 }}>
+                        {canInstallDownload
+                          ? "Install saves latest.zip and DevBloom-LocalAgent-Install.bat to Downloads. Run the .bat file, then click Run here."
+                          : "Install download URL is not configured on this build."}
+                        {isInstalledOnDisk
+                          ? " Installed at %LOCALAPPDATA%\\DevBloom\\LocalAgent."
+                          : " Run is enabled after the installer finishes."}
+                        {updateAvailable ? " An update is available — use Install to download the latest release." : ""}
+                      </p>
                     </>
                   )}
                 </section>

@@ -57,6 +57,15 @@ function bridgeSupabaseBrowserEnv() {
 
 bridgeSupabaseBrowserEnv();
 
+/** Local dev: Installation → Install / Latest version need this (production sets it at build). */
+if (
+  process.env.NODE_ENV !== "production" &&
+  !(process.env.NEXT_PUBLIC_LOCAL_AGENT_DOWNLOAD_URL || "").trim()
+) {
+  process.env.NEXT_PUBLIC_LOCAL_AGENT_DOWNLOAD_URL =
+    "https://dev.funbloomstudio.com/downloads/local-agent/latest.zip";
+}
+
 const supabasePublicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabasePublicAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
