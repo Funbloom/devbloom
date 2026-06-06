@@ -6,7 +6,8 @@
     "dev": "next dev --webpack -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@supabase/ssr": "latest",
@@ -20,6 +21,7 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "vitest": "^4.1.8"
   }
 }

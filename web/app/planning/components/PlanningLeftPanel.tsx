@@ -7,9 +7,11 @@ type Props = {
   startDate: string;
   saving: boolean;
   importDisabled?: boolean;
+  analyseDisabled?: boolean;
   deleteAllDisabled?: boolean;
   onStartDateChange: (value: string) => void;
   onImportFileSelected: (file: File) => void;
+  onAnalyseClick: () => void;
   onDeleteAllClick: () => void;
 };
 
@@ -17,9 +19,11 @@ export function PlanningLeftPanel({
   startDate,
   saving,
   importDisabled,
+  analyseDisabled,
   deleteAllDisabled,
   onStartDateChange,
   onImportFileSelected,
+  onAnalyseClick,
   onDeleteAllClick,
 }: Props): ReactElement {
   return (
@@ -50,6 +54,14 @@ export function PlanningLeftPanel({
           disabled={saving || importDisabled}
           onFileSelected={onImportFileSelected}
         />
+        <button
+          type="button"
+          className="imagegen-button-secondary"
+          disabled={saving || analyseDisabled}
+          onClick={onAnalyseClick}
+        >
+          Analyse
+        </button>
         <button
           type="button"
           className="imagegen-delete-button"

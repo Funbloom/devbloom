@@ -29,6 +29,33 @@ export function normalizeOwners(raw: string | null | undefined): string {
   return splitOwners(raw).join(", ");
 }
 
+export function joinOwnersOrdered(
+  owners: string[],
+  employees: { name: string; order_index: number }[],
+): string {
+  const orderMap = new Map<string, number>();
+  for (const employee of employees) {
+    orderMap.set(employee.name.toLowerCase(), employee.order_index);
+  }
+  const sorted = [...owners].sort((left, right) => {
+    const leftOrder = orderMap.get(left.toLowerCase()) ?? 9999;
+    const rightOrder = orderMap.get(right.toLowerCase()) ?? 9999;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    return left.localeCompare(right);
+  });
+  return sorted.join(", ");
+}
+
+export function resolveOwnersToEmployees(
+  raw: string | null | undefined,
+  employees: { name: string }[],
+): string[] {
+  const byLower = new Map(employees.map((employee) => [employee.name.toLowerCase(), employee.name]));
+  return splitOwners(raw).map((part) => byLower.get(part.toLowerCase()) ?? part);
+}
+
 export function splitObjectiveDeliverable(title: string): ObjectiveDeliverableParts {
   const cleaned = title.trim();
   const separator = cleaned.indexOf(": ");

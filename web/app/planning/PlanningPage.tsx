@@ -8,6 +8,7 @@ import { DeliverablesPanel } from "./components/DeliverablesPanel";
 import { MilestoneEditModal } from "./components/MilestoneEditModal";
 import { PlanningDeleteAllConfirmDialog } from "./components/PlanningDeleteAllConfirmDialog";
 import { PlanningImportConflictDialog } from "./components/PlanningImportConflictDialog";
+import { PlanningAnalysisModal } from "./components/PlanningAnalysisModal";
 import { PlanningImportPreviewModal } from "./components/PlanningImportPreviewModal";
 import { PlanningLeftPanel } from "./components/PlanningLeftPanel";
 import { PlanningPanelTabs, type PlanningPanelTab } from "./components/PlanningPanelTabs";
@@ -41,10 +42,15 @@ import {
 import type {
   MilestoneStatus,
   PlanningDeliverable,
+  PlanningEmployee,
   PlanningGraph,
   PlanningMilestone,
   VacationGrid,
 } from "./types";
+import {
+  buildAnalyzedRiskUpdates,
+  type PlanningAnalysisResult,
+} from "./planningAnalysis";
 import {
   clampMonthZoom,
   orderedMonthKeysBetweenIso,
@@ -57,7 +63,7 @@ import {
   VACATION_MONTH_ZOOM_STORAGE_KEY,
 } from "./monthZoomStorage";
 import { buildDayColumns } from "./vacationGrid";
-import { fetchVacationGrid, updateVacationCells } from "./vacationClient";
+import { fetchPlanningEmployees, fetchVacationGrid, updateVacationCells } from "./vacationClient";
 import {
   aggregateSelectionState,
   cellKey,
@@ -109,6 +115,8 @@ export function PlanningPage(): ReactElement {
   const [importParsing, setImportParsing] = useState(false);
   const [deleteAllConfirmOpen, setDeleteAllConfirmOpen] = useState(false);
   const [deleteAllError, setDeleteAllError] = useState<string | null>(null);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [employees, setEmployees] = useState<PlanningEmployee[]>([]);
 
   const planningMaxExpandedMonths = useMemo(
     () => planningRangeMonthKeys(startDate, PLANNING_WEEKS_MAX).length,
@@ -174,6 +182,15 @@ export function PlanningPage(): ReactElement {
     }
   }, []);
 
+  const loadEmployees = useCallback(async () => {
+    try {
+      const data = await fetchPlanningEmployees();
+      setEmployees(data);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Failed to load employees.");
+    }
+  }, []);
+
   useEffect(() => {
     const sync = () => {
       if (typeof window === "undefined") {
@@ -196,8 +213,9 @@ export function PlanningPage(): ReactElement {
   useEffect(() => {
     if (panelTab === "planning") {
       void loadGraph(projectKey);
+      void loadEmployees();
     }
-  }, [projectKey, loadGraph, panelTab]);
+  }, [projectKey, loadGraph, loadEmployees, panelTab]);
 
   useEffect(() => {
     if (panelTab === "vacations") {
@@ -438,6 +456,39 @@ export function PlanningPage(): ReactElement {
     }));
   }, []);
 
+  const handleApplyAnalyzedRisks = useCallback(
+    async (analysisResult: PlanningAnalysisResult) => {
+      const updates = buildAnalyzedRiskUpdates(analysisResult);
+      const milestoneUpdates = updates.milestones.filter((row) => row.risk !== row.previousRisk);
+      const deliverableUpdates = updates.deliverables.filter((row) => row.risk !== row.previousRisk);
+      if (milestoneUpdates.length === 0 && deliverableUpdates.length === 0) {
+        return;
+      }
+      setSaving(true);
+      setStatus(null);
+      try {
+        const results = await Promise.all([
+          ...milestoneUpdates.map((row) => updateMilestone(row.id, { risk: row.risk })),
+          ...deliverableUpdates.map((row) => updateDeliverable(row.id, { risk: row.risk })),
+        ]);
+        for (const updated of results) {
+          if ("milestone_id" in updated) {
+            mergeDeliverable(updated);
+          } else {
+            mergeMilestone(updated);
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to update risks.";
+        setStatus(message);
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [mergeDeliverable, mergeMilestone],
+  );
+
   const leftPanel = (
     <PlanningPanelTabs activeTab={panelTab} onTabChange={setPanelTab}>
       {panelTab === "planning" ? (
@@ -445,9 +496,11 @@ export function PlanningPage(): ReactElement {
           startDate={startDate}
           saving={saving || importParsing}
           importDisabled={!projectKey}
+          analyseDisabled={!projectKey || !hasPlanningData}
           deleteAllDisabled={!projectKey || !hasPlanningData}
           onStartDateChange={(value) => void handleStartDateChange(value)}
           onImportFileSelected={(file) => void handleImportFileSelected(file)}
+          onAnalyseClick={() => setAnalysisOpen(true)}
           onDeleteAllClick={() => {
             setDeleteAllError(null);
             setDeleteAllConfirmOpen(true);
@@ -524,6 +577,7 @@ export function PlanningPage(): ReactElement {
                   <DeliverablesPanel
                     milestone={selectedMilestone}
                     deliverables={graph.deliverables}
+                    employees={employees}
                     planStartDate={startDate}
                     startWeek={
                       selectedMilestone
@@ -587,6 +641,21 @@ export function PlanningPage(): ReactElement {
 
   return (
     <>
+      {analysisOpen ? (
+        <PlanningAnalysisModal
+          graph={graph}
+          planStart={startDate}
+          activeProjectName={activeProjectName || projectKey}
+          saving={saving}
+          onClose={() => setAnalysisOpen(false)}
+          onSelectMilestone={(milestoneId) => {
+            setSelectedMilestoneId(milestoneId);
+            setAnalysisOpen(false);
+          }}
+          onApplyAnalyzedRisks={handleApplyAnalyzedRisks}
+        />
+      ) : null}
+
       {importPreview ? (
         <PlanningImportPreviewModal
           data={importPreview.data}

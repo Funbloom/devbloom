@@ -6,12 +6,13 @@ import {
   formatPlanningDateDots,
   formatPlanningDateLong,
   joinObjectiveDeliverable,
-  normalizeOwners,
+  joinOwnersOrdered,
+  resolveOwnersToEmployees,
   riskPillStyle,
   splitObjectiveDeliverable,
-  splitOwners,
   statusPillStyle,
 } from "../milestoneDetail";
+import { OwnerEmployeePicker, OwnerEmployeePills } from "./OwnerEmployeePicker";
 import {
   durationWeeksFromDeliveryDate,
   milestoneDeliveryDateIso,
@@ -20,6 +21,7 @@ import type {
   MilestoneRisk,
   MilestoneStatus,
   PlanningDeliverable,
+  PlanningEmployee,
   PlanningMilestone,
 } from "../types";
 import { RISK_LABELS, STATUS_LABELS } from "./planningColors";
@@ -27,6 +29,7 @@ import { RISK_LABELS, STATUS_LABELS } from "./planningColors";
 type Props = {
   milestone: PlanningMilestone | null;
   deliverables: PlanningDeliverable[];
+  employees: PlanningEmployee[];
   planStartDate: string;
   startWeek: number;
   disabled?: boolean;
@@ -121,16 +124,6 @@ const pillBase: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const ownerPill: CSSProperties = {
-  ...pillBase,
-  background: "#334155",
-  color: "#e2e8f0",
-  border: "1px solid #475569",
-  maxWidth: 140,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-};
-
 const STATUS_OPTIONS: MilestoneStatus[] = ["todo", "in_progress", "ready", "completed"];
 const RISK_OPTIONS: MilestoneRisk[] = ["on_track", "caution", "risk"];
 
@@ -138,24 +131,10 @@ function Pill({ label, style }: { label: string; style: CSSProperties }): ReactE
   return <span style={{ ...pillBase, ...style }}>{label}</span>;
 }
 
-function OwnerPills({ owners }: { owners: string[] }): ReactElement {
-  if (owners.length === 0) {
-    return <>—</>;
-  }
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-      {owners.map((name, index) => (
-        <span key={`${name}-${index}`} style={ownerPill} title={name}>
-          {name}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 export function DeliverablesPanel({
   milestone,
   deliverables,
+  employees,
   planStartDate,
   startWeek,
   disabled,
@@ -335,7 +314,10 @@ export function DeliverablesPanel({
                         <Pill label={RISK_LABELS[rowRisk]} style={riskPillStyle(rowRisk)} />
                       </td>
                       <td style={tdStyle}>
-                        <OwnerPills owners={splitOwners(row.owner)} />
+                        <OwnerEmployeePills
+                          owners={resolveOwnersToEmployees(row.owner, employees)}
+                          employees={employees}
+                        />
                       </td>
                       <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
                         {formatPlanningDateLong(row.due_date)}
@@ -592,6 +574,7 @@ export function DeliverablesPanel({
                 <DeliverableRowEditor
                   key={row.id}
                   row={row}
+                  employees={employees}
                   disabled={disabled || busy}
                   onSave={(patch) => void handleRowFieldSave(row, patch)}
                   onDelete={() => handleDeleteRow(row.id)}
@@ -607,6 +590,7 @@ export function DeliverablesPanel({
 
 type RowEditorProps = {
   row: PlanningDeliverable;
+  employees: PlanningEmployee[];
   disabled: boolean;
   onSave: (
     patch: Partial<{
@@ -622,6 +606,7 @@ type RowEditorProps = {
 
 function DeliverableRowEditor({
   row,
+  employees,
   disabled,
   onSave,
   onDelete,
@@ -631,7 +616,9 @@ function DeliverableRowEditor({
   const [deliverable, setDeliverable] = useState(parts.deliverable);
   const [status, setStatus] = useState<MilestoneStatus>(row.status);
   const [risk, setRisk] = useState<MilestoneRisk>(row.risk ?? "on_track");
-  const [owner, setOwner] = useState(row.owner ?? "");
+  const [owner, setOwner] = useState(
+    joinOwnersOrdered(resolveOwnersToEmployees(row.owner, employees), employees),
+  );
   const [dueDate, setDueDate] = useState(row.due_date ?? "");
 
   useEffect(() => {
@@ -640,9 +627,9 @@ function DeliverableRowEditor({
     setDeliverable(nextParts.deliverable);
     setStatus(row.status);
     setRisk(row.risk ?? "on_track");
-    setOwner(row.owner ?? "");
+    setOwner(joinOwnersOrdered(resolveOwnersToEmployees(row.owner, employees), employees));
     setDueDate(row.due_date ?? "");
-  }, [row]);
+  }, [row, employees]);
 
   const saveTitle = () => {
     const nextTitle = joinObjectiveDeliverable(objective, deliverable);
@@ -714,21 +701,18 @@ function DeliverableRowEditor({
           ))}
         </select>
       </td>
-      <td style={tdEditStyle}>
-        <input
-          type="text"
+      <td style={{ ...tdEditStyle, minWidth: 180 }}>
+        <OwnerEmployeePicker
+          employees={employees}
           value={owner}
           disabled={disabled}
-          style={inputStyle}
-          placeholder="Owner, Owner"
-          onChange={(e) => setOwner(e.target.value)}
-          onBlur={() => {
-            const normalized = normalizeOwners(owner);
-            setOwner(normalized);
-            if (normalized === normalizeOwners(row.owner ?? "")) {
+          onChange={(nextOwner) => {
+            setOwner(nextOwner);
+            const current = joinOwnersOrdered(resolveOwnersToEmployees(row.owner, employees), employees);
+            if (nextOwner === current) {
               return;
             }
-            onSave({ owner: normalized });
+            onSave({ owner: nextOwner });
           }}
         />
       </td>
