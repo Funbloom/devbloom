@@ -1,17 +1,64 @@
 export type MonthZoom = {
+  zoomPercent: number;
   expandedMonthCount: number;
   zoomedCellPx: number;
 };
 
-export const DEFAULT_MONTH_ZOOM: MonthZoom = {
-  expandedMonthCount: 2,
-  zoomedCellPx: 28,
-};
+export const ZOOM_PERCENT_MIN = 0;
+export const ZOOM_PERCENT_MAX = 100;
+export const DEFAULT_ZOOM_PERCENT = 50;
 
 export const MONTH_ZOOM_MONTH_MIN = 1;
-export const MONTH_ZOOM_CELL_PX_MIN = 16;
-export const MONTH_ZOOM_CELL_PX_MAX = 40;
 export const MONTH_ZOOM_COMPACT_CELL_PX = 14;
+export const MONTH_ZOOM_CELL_PX_AT_ZERO = 14;
+export const MONTH_ZOOM_CELL_PX_AT_MID = 40;
+export const MONTH_ZOOM_CELL_PX_AT_MAX = 64;
+
+/** @deprecated Use MONTH_ZOOM_CELL_PX_AT_ZERO / AT_MID / AT_MAX */
+export const MONTH_ZOOM_CELL_PX_MIN = MONTH_ZOOM_CELL_PX_AT_ZERO;
+/** @deprecated Use MONTH_ZOOM_CELL_PX_AT_MAX */
+export const MONTH_ZOOM_CELL_PX_MAX = MONTH_ZOOM_CELL_PX_AT_MAX;
+
+export function monthZoomFromPercent(
+  percent: number,
+  maxExpandedMonths: number,
+): MonthZoom {
+  const max = Math.max(MONTH_ZOOM_MONTH_MIN, maxExpandedMonths);
+  const clampedPercent = Math.max(
+    ZOOM_PERCENT_MIN,
+    Math.min(ZOOM_PERCENT_MAX, Math.round(percent)),
+  );
+  const progress = clampedPercent / 100;
+
+  const expandedMonthCount =
+    clampedPercent === 0
+      ? max
+      : Math.max(MONTH_ZOOM_MONTH_MIN, Math.round(max - progress * (max - 1)));
+
+  let zoomedCellPx: number;
+  if (progress <= 0.5) {
+    zoomedCellPx = Math.round(
+      MONTH_ZOOM_CELL_PX_AT_ZERO +
+        (progress / 0.5) * (MONTH_ZOOM_CELL_PX_AT_MID - MONTH_ZOOM_CELL_PX_AT_ZERO),
+    );
+  } else {
+    zoomedCellPx = Math.round(
+      MONTH_ZOOM_CELL_PX_AT_MID +
+        ((progress - 0.5) / 0.5) * (MONTH_ZOOM_CELL_PX_AT_MAX - MONTH_ZOOM_CELL_PX_AT_MID),
+    );
+  }
+
+  return {
+    zoomPercent: clampedPercent,
+    expandedMonthCount,
+    zoomedCellPx,
+  };
+}
+
+export const DEFAULT_MONTH_ZOOM: MonthZoom = monthZoomFromPercent(
+  DEFAULT_ZOOM_PERCENT,
+  MONTH_ZOOM_MONTH_MIN,
+);
 
 export function monthKeyFromDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -71,17 +118,10 @@ export function buildExpandedMonthKeys(
 }
 
 export function clampMonthZoom(zoom: MonthZoom, maxExpandedMonths: number): MonthZoom {
-  const max = Math.max(MONTH_ZOOM_MONTH_MIN, maxExpandedMonths);
-  return {
-    expandedMonthCount: Math.max(
-      MONTH_ZOOM_MONTH_MIN,
-      Math.min(max, Math.round(zoom.expandedMonthCount)),
-    ),
-    zoomedCellPx: Math.max(
-      MONTH_ZOOM_CELL_PX_MIN,
-      Math.min(MONTH_ZOOM_CELL_PX_MAX, Math.round(zoom.zoomedCellPx)),
-    ),
-  };
+  const percent = Number.isFinite(zoom.zoomPercent)
+    ? zoom.zoomPercent
+    : DEFAULT_ZOOM_PERCENT;
+  return monthZoomFromPercent(percent, maxExpandedMonths);
 }
 
 export function cellWidthPx(monthKey: string, zoom: MonthZoom, expandedKeys: Set<string>): number {

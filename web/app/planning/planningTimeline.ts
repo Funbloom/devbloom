@@ -143,3 +143,35 @@ export function defaultStartDateIso(): string {
 export function planStartOrDefault(plan: ProjectPlan | null): string {
   return plan?.start_date?.trim() || defaultStartDateIso();
 }
+
+export function addDaysToIso(iso: string, days: number): string {
+  const base = parsePlanStart(iso);
+  const shifted = addDays(base, days);
+  const y = shifted.getFullYear();
+  const m = String(shifted.getMonth() + 1).padStart(2, "0");
+  const day = String(shifted.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export function milestoneDeliveryDateIso(
+  planStart: string,
+  startWeek: number,
+  durationWeeks: number,
+): string {
+  const milestoneStartOffsetDays = startWeek * 7;
+  const deliveryOffsetDays = milestoneStartOffsetDays + Math.max(1, durationWeeks) * 7;
+  return addDaysToIso(planStart, deliveryOffsetDays);
+}
+
+export function durationWeeksFromDeliveryDate(
+  planStart: string,
+  startWeek: number,
+  deliveryIso: string,
+): number {
+  const planStartDate = parsePlanStart(planStart);
+  const deliveryDate = parsePlanStart(deliveryIso);
+  const milestoneStart = addDays(planStartDate, startWeek * 7);
+  const diffMs = deliveryDate.getTime() - milestoneStart.getTime();
+  const days = Math.max(0, Math.round(diffMs / (24 * 60 * 60 * 1000)));
+  return Math.max(1, Math.ceil(days / 7));
+}

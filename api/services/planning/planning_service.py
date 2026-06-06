@@ -41,6 +41,11 @@ def _validate_deliverable_status(value: str) -> str:
     return _validate_milestone_status(value)
 
 
+def _normalize_owners(value: str) -> str:
+    parts = [part.strip() for part in (value or "").split(",") if part.strip()]
+    return ", ".join(parts)
+
+
 def compute_milestone_start_weeks(milestones: List[Dict[str, Any]]) -> Dict[str, int]:
     """Sequential start week offset per milestone id (sorted by order_index)."""
     ordered = sorted(milestones, key=lambda m: int(m.get("order_index") or 0))
@@ -119,7 +124,7 @@ def get_plan_by_project_key(project_key: str) -> Dict[str, Any]:
         ms_result = (
             supabase.table("planning_milestones")
             .select(
-                "id,project_plan_id,name,duration_weeks,status,risk,order_index,created_at,updated_at"
+                "id,project_plan_id,name,duration_weeks,status,risk,goals,order_index,created_at,updated_at"
             )
             .eq("project_plan_id", plan_id)
             .order("order_index", desc=False)
@@ -133,7 +138,7 @@ def get_plan_by_project_key(project_key: str) -> Dict[str, Any]:
         if milestone_ids:
             del_result = (
                 supabase.table("planning_deliverables")
-                .select("id,milestone_id,title,status,order_index,created_at,updated_at")
+                .select("id,milestone_id,title,status,risk,owner,due_date,order_index,created_at,updated_at")
                 .in_("milestone_id", milestone_ids)
                 .order("order_index", desc=False)
                 .execute()
@@ -250,6 +255,7 @@ def create_milestone(
     duration_weeks: int = 1,
     status: str = "todo",
     risk: str = "on_track",
+    goals: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     key = (project_key or "").strip()
     cleaned_name = (name or "").strip()
@@ -274,6 +280,7 @@ def create_milestone(
             "duration_weeks": duration_weeks,
             "status": status_val,
             "risk": risk_val,
+            "goals": goals or [],
             "order_index": order_index,
             "created_at": now,
             "updated_at": now,
@@ -292,6 +299,7 @@ def update_milestone(
     duration_weeks: Optional[int] = None,
     status: Optional[str] = None,
     risk: Optional[str] = None,
+    goals: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {}
     if name is not None:
@@ -307,6 +315,8 @@ def update_milestone(
         payload["status"] = _validate_milestone_status(status)
     if risk is not None:
         payload["risk"] = _validate_milestone_risk(risk)
+    if goals is not None:
+        payload["goals"] = goals
     if not payload:
         raise HTTPException(status_code=400, detail="No fields to update.")
 
@@ -327,6 +337,38 @@ def update_milestone(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to update milestone: {exc}") from exc
+
+
+def delete_all_milestones_for_project(project_key: str) -> None:
+    key = (project_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="project_key is required.")
+    supabase = get_supabase_client()
+    plan = _get_plan_row(supabase, key)
+    if not plan:
+        return
+    supabase.table("planning_milestones").delete().eq("project_plan_id", plan["id"]).execute()
+
+
+def clear_project_planning(project_key: str) -> Dict[str, Any]:
+    key = (project_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="project_key is required.")
+    supabase = get_supabase_client()
+    plan = _get_plan_row(supabase, key)
+    if not plan:
+        return {"ok": True, "deleted_milestones": 0}
+    plan_id = str(plan["id"])
+    milestone_rows = (
+        supabase.table("planning_milestones")
+        .select("id")
+        .eq("project_plan_id", plan_id)
+        .execute()
+    )
+    milestone_count = len(milestone_rows.data or [])
+    supabase.table("planning_milestones").delete().eq("project_plan_id", plan_id).execute()
+    supabase.table("project_plans").delete().eq("id", plan_id).execute()
+    return {"ok": True, "deleted_milestones": milestone_count}
 
 
 def delete_milestone(milestone_id: str) -> Dict[str, Any]:
@@ -404,21 +446,34 @@ def create_deliverable(
     milestone_id: str,
     title: str,
     status: str = "todo",
+    owner: str = "",
+    due_date: Optional[str] = None,
+    risk: str = "on_track",
 ) -> Dict[str, Any]:
     cleaned = (title or "").strip()
     if not cleaned:
         raise HTTPException(status_code=400, detail="title is required.")
     status_val = _validate_deliverable_status(status)
+    risk_val = _validate_milestone_risk(risk)
 
     try:
         supabase = get_supabase_client()
         _get_milestone(supabase, milestone_id)
         order_index = _next_order_index(supabase, "planning_deliverables", "milestone_id", milestone_id)
         now = _now_iso()
+        parsed_due: Optional[str] = None
+        if due_date:
+            try:
+                parsed_due = date.fromisoformat(due_date.strip()).isoformat()
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="due_date must be YYYY-MM-DD.") from exc
         payload = {
             "milestone_id": milestone_id,
             "title": cleaned,
             "status": status_val,
+            "risk": risk_val,
+            "owner": _normalize_owners(owner or ""),
+            "due_date": parsed_due,
             "order_index": order_index,
             "created_at": now,
             "updated_at": now,
@@ -435,6 +490,9 @@ def update_deliverable(
     deliverable_id: str,
     title: Optional[str] = None,
     status: Optional[str] = None,
+    owner: Optional[str] = None,
+    due_date: Optional[str] = None,
+    risk: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {}
     if title is not None:
@@ -444,6 +502,18 @@ def update_deliverable(
         payload["title"] = cleaned
     if status is not None:
         payload["status"] = _validate_deliverable_status(status)
+    if owner is not None:
+        payload["owner"] = _normalize_owners(owner)
+    if risk is not None:
+        payload["risk"] = _validate_milestone_risk(risk)
+    if due_date is not None:
+        if due_date == "":
+            payload["due_date"] = None
+        else:
+            try:
+                payload["due_date"] = date.fromisoformat(due_date.strip()).isoformat()
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="due_date must be YYYY-MM-DD.") from exc
     if not payload:
         raise HTTPException(status_code=400, detail="No fields to update.")
     payload["updated_at"] = _now_iso()
@@ -463,6 +533,53 @@ def update_deliverable(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to update deliverable: {exc}") from exc
+
+
+def apply_planning_import(project_key: str, mode: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    key = (project_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="project_key is required.")
+    if mode not in {"append", "replace"}:
+        raise HTTPException(status_code=400, detail="mode must be append or replace.")
+
+    milestones = data.get("milestones") or []
+    if not milestones:
+        raise HTTPException(status_code=400, detail="No milestones to import.")
+
+    if mode == "replace":
+        delete_all_milestones_for_project(key)
+
+    project_start = (data.get("project_start_date") or "").strip()
+    if project_start:
+        upsert_plan_start_date(key, project_start)
+
+    for milestone in milestones:
+        created = create_milestone(
+            key,
+            milestone.get("name") or "",
+            duration_weeks=int(milestone.get("duration_weeks") or 1),
+            status=milestone.get("status") or "todo",
+            risk=milestone.get("risk") or "on_track",
+            goals=milestone.get("goals") or [],
+        )
+        milestone_id = str(created.get("id") or "")
+        for deliverable in milestone.get("deliverables") or []:
+            create_deliverable(
+                milestone_id,
+                deliverable.get("title") or "",
+                status=deliverable.get("status") or "todo",
+                owner=deliverable.get("owner") or "",
+                due_date=deliverable.get("due_date"),
+                risk=deliverable.get("risk") or "on_track",
+            )
+        for event in milestone.get("events") or []:
+            create_event(
+                milestone_id,
+                event.get("name") or "",
+                weeks_after_milestone_start=int(event.get("week_offset") or 0),
+            )
+
+    return get_plan_by_project_key(key)
 
 
 def delete_deliverable(deliverable_id: str) -> Dict[str, Any]:

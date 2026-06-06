@@ -24,6 +24,17 @@ export async function fetchPlanningGraph(projectKey: string): Promise<PlanningGr
   return parseJson<PlanningGraph>(response, "Load planning");
 }
 
+export async function clearProjectPlanning(projectKey: string): Promise<void> {
+  const response = await fetchApi(
+    `/planning/plan?project_key=${encodeURIComponent(projectKey)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Clear planning failed (${response.status})`);
+  }
+}
+
 export async function upsertPlanStartDate(
   projectKey: string,
   startDate: string,
@@ -64,6 +75,7 @@ export async function updateMilestone(
     duration_weeks: number;
     status: MilestoneStatus;
     risk: MilestoneRisk;
+    goals: string[];
   }>,
 ): Promise<PlanningMilestone> {
   const response = await fetchApi(`/planning/milestones/${encodeURIComponent(milestoneId)}`, {
@@ -88,18 +100,34 @@ export async function createDeliverable(
   milestoneId: string,
   title: string,
   status: MilestoneStatus,
+  owner: string = "",
+  dueDate: string | null = null,
+  risk: MilestoneRisk = "on_track",
 ): Promise<PlanningDeliverable> {
   const response = await fetchApi("/planning/deliverables", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ milestone_id: milestoneId, title, status }),
+    body: JSON.stringify({
+      milestone_id: milestoneId,
+      title,
+      status,
+      owner,
+      due_date: dueDate,
+      risk,
+    }),
   });
   return parseJson<PlanningDeliverable>(response, "Create deliverable");
 }
 
 export async function updateDeliverable(
   deliverableId: string,
-  patch: Partial<{ title: string; status: MilestoneStatus }>,
+  patch: Partial<{
+    title: string;
+    status: MilestoneStatus;
+    risk: MilestoneRisk;
+    owner: string;
+    due_date: string | null;
+  }>,
 ): Promise<PlanningDeliverable> {
   const response = await fetchApi(
     `/planning/deliverables/${encodeURIComponent(deliverableId)}`,

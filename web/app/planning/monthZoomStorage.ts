@@ -1,9 +1,10 @@
 import {
   clampMonthZoom,
   DEFAULT_MONTH_ZOOM,
-  MONTH_ZOOM_CELL_PX_MAX,
-  MONTH_ZOOM_CELL_PX_MIN,
-  MONTH_ZOOM_MONTH_MIN,
+  DEFAULT_ZOOM_PERCENT,
+  monthZoomFromPercent,
+  ZOOM_PERCENT_MAX,
+  ZOOM_PERCENT_MIN,
   type MonthZoom,
 } from "./monthZoom";
 
@@ -13,18 +14,11 @@ export const VACATION_MONTH_ZOOM_STORAGE_KEY = "devbloom_vacation_month_zoom";
 function parseStoredMonthZoom(raw: string): MonthZoom | null {
   try {
     const parsed = JSON.parse(raw) as Partial<MonthZoom>;
-    const expandedMonthCount = Number(parsed.expandedMonthCount);
-    const zoomedCellPx = Number(parsed.zoomedCellPx);
-    if (!Number.isFinite(expandedMonthCount) || !Number.isFinite(zoomedCellPx)) {
-      return null;
+    const zoomPercent = Number(parsed.zoomPercent);
+    if (Number.isFinite(zoomPercent)) {
+      return monthZoomFromPercent(zoomPercent, 1);
     }
-    return {
-      expandedMonthCount: Math.max(MONTH_ZOOM_MONTH_MIN, Math.round(expandedMonthCount)),
-      zoomedCellPx: Math.max(
-        MONTH_ZOOM_CELL_PX_MIN,
-        Math.min(MONTH_ZOOM_CELL_PX_MAX, Math.round(zoomedCellPx)),
-      ),
-    };
+    return monthZoomFromPercent(DEFAULT_ZOOM_PERCENT, 1);
   } catch {
     return null;
   }
@@ -36,11 +30,17 @@ export function loadMonthZoom(storageKey: string, maxExpandedMonths?: number): M
   }
   const raw = window.localStorage.getItem(storageKey);
   if (!raw) {
-    return DEFAULT_MONTH_ZOOM;
+    return monthZoomFromPercent(
+      DEFAULT_ZOOM_PERCENT,
+      maxExpandedMonths ?? 1,
+    );
   }
   const parsed = parseStoredMonthZoom(raw);
   if (!parsed) {
-    return DEFAULT_MONTH_ZOOM;
+    return monthZoomFromPercent(
+      DEFAULT_ZOOM_PERCENT,
+      maxExpandedMonths ?? 1,
+    );
   }
   if (maxExpandedMonths !== undefined) {
     return clampMonthZoom(parsed, maxExpandedMonths);
@@ -52,5 +52,9 @@ export function saveMonthZoom(storageKey: string, zoom: MonthZoom): void {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(storageKey, JSON.stringify(zoom));
+  const percent = Math.max(
+    ZOOM_PERCENT_MIN,
+    Math.min(ZOOM_PERCENT_MAX, Math.round(zoom.zoomPercent)),
+  );
+  window.localStorage.setItem(storageKey, JSON.stringify({ zoomPercent: percent }));
 }

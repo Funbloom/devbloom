@@ -17,6 +17,7 @@ export type PlanningMilestone = {
   duration_weeks: number;
   status: MilestoneStatus;
   risk: MilestoneRisk;
+  goals: string[];
   order_index: number;
   created_at: string;
   updated_at: string;
@@ -27,6 +28,9 @@ export type PlanningDeliverable = {
   milestone_id: string;
   title: string;
   status: DeliverableStatus;
+  risk: MilestoneRisk;
+  owner: string;
+  due_date: string | null;
   order_index: number;
   created_at: string;
   updated_at: string;

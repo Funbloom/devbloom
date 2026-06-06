@@ -3,15 +3,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { StudioTwoColumnShell } from "../components/studio/StudioTwoColumnShell";
-import { STORAGE_KEY_ACTIVE_PROJECT } from "../lib/activeProject";
+import { STORAGE_KEY_ACTIVE_PROJECT, STORAGE_KEY_ACTIVE_PROJECT_NAME } from "../lib/activeProject";
 import { DeliverablesPanel } from "./components/DeliverablesPanel";
 import { MilestoneEditModal } from "./components/MilestoneEditModal";
+import { PlanningDeleteAllConfirmDialog } from "./components/PlanningDeleteAllConfirmDialog";
+import { PlanningImportConflictDialog } from "./components/PlanningImportConflictDialog";
+import { PlanningImportPreviewModal } from "./components/PlanningImportPreviewModal";
 import { PlanningLeftPanel } from "./components/PlanningLeftPanel";
 import { PlanningPanelTabs, type PlanningPanelTab } from "./components/PlanningPanelTabs";
+import { MonthZoomWidget } from "./components/MonthZoomWidget";
 import { PlanningTimeline } from "./components/PlanningTimeline";
 import { VacationsGrid } from "./components/VacationsGrid";
 import { VacationsLeftPanel } from "./components/VacationsLeftPanel";
+import { applyPlanningImport, parsePlanningImport } from "./planningImportClient";
+import type { ImportApplyMode, ImportedPlanningData } from "./planningImportTypes";
 import {
+  clearProjectPlanning,
   createDeliverable,
   createEvent,
   createMilestone,
@@ -25,12 +32,19 @@ import {
   upsertPlanStartDate,
 } from "./planningClient";
 import {
+  computeMilestoneStartWeeks,
   defaultStartDateIso,
   PLANNING_WEEKS_MAX,
   planningRangeMonthKeys,
   planStartOrDefault,
 } from "./planningTimeline";
-import type { MilestoneStatus, PlanningGraph, PlanningMilestone, VacationGrid } from "./types";
+import type {
+  MilestoneStatus,
+  PlanningDeliverable,
+  PlanningGraph,
+  PlanningMilestone,
+  VacationGrid,
+} from "./types";
 import {
   clampMonthZoom,
   orderedMonthKeysBetweenIso,
@@ -68,6 +82,7 @@ const emptyVacationGrid = (): VacationGrid => ({
 export function PlanningPage(): ReactElement {
   const [panelTab, setPanelTab] = useState<PlanningPanelTab>("planning");
   const [projectKey, setProjectKey] = useState("");
+  const [activeProjectName, setActiveProjectName] = useState("");
   const [graph, setGraph] = useState<PlanningGraph>(emptyGraph);
   const [vacationGrid, setVacationGrid] = useState<VacationGrid>(emptyVacationGrid);
   const [startDate, setStartDate] = useState(defaultStartDateIso());
@@ -85,6 +100,15 @@ export function PlanningPage(): ReactElement {
   const [vacationMonthZoom, setVacationMonthZoom] = useState<MonthZoom>(() =>
     loadMonthZoom(VACATION_MONTH_ZOOM_STORAGE_KEY),
   );
+  const [importPreview, setImportPreview] = useState<{
+    data: ImportedPlanningData;
+    warnings: string[];
+  } | null>(null);
+  const [importConflictOpen, setImportConflictOpen] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importParsing, setImportParsing] = useState(false);
+  const [deleteAllConfirmOpen, setDeleteAllConfirmOpen] = useState(false);
+  const [deleteAllError, setDeleteAllError] = useState<string | null>(null);
 
   const planningMaxExpandedMonths = useMemo(
     () => planningRangeMonthKeys(startDate, PLANNING_WEEKS_MAX).length,
@@ -152,11 +176,13 @@ export function PlanningPage(): ReactElement {
 
   useEffect(() => {
     const sync = () => {
-      const key =
-        typeof window !== "undefined"
-          ? window.localStorage.getItem(STORAGE_KEY_ACTIVE_PROJECT)?.trim() ?? ""
-          : "";
+      if (typeof window === "undefined") {
+        return;
+      }
+      const key = window.localStorage.getItem(STORAGE_KEY_ACTIVE_PROJECT)?.trim() ?? "";
+      const name = window.localStorage.getItem(STORAGE_KEY_ACTIVE_PROJECT_NAME)?.trim() ?? "";
       setProjectKey(key);
+      setActiveProjectName(name);
     };
     sync();
     window.addEventListener("activeProjectChanged", sync);
@@ -182,6 +208,86 @@ export function PlanningPage(): ReactElement {
   const refresh = async () => {
     if (projectKey) {
       await loadGraph(projectKey);
+    }
+  };
+
+  const closeImportFlow = () => {
+    setImportPreview(null);
+    setImportConflictOpen(false);
+    setImportError(null);
+  };
+
+  const handleImportFileSelected = async (file: File) => {
+    if (!projectKey) {
+      setStatus("Select a project before importing a plan.");
+      return;
+    }
+    setImportParsing(true);
+    setImportError(null);
+    setStatus(null);
+    try {
+      const result = await parsePlanningImport(file);
+      setImportPreview({ data: result.data, warnings: result.warnings });
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Failed to parse import file.");
+    } finally {
+      setImportParsing(false);
+    }
+  };
+
+  const runImportApply = async (mode: ImportApplyMode) => {
+    if (!projectKey || !importPreview) {
+      return;
+    }
+    setSaving(true);
+    setImportError(null);
+    setStatus(null);
+    try {
+      await applyPlanningImport(projectKey, mode, importPreview.data);
+      closeImportFlow();
+      await refresh();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Failed to apply import.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleImportConfirm = () => {
+    if (!importPreview) {
+      return;
+    }
+    if (graph.milestones.length > 0) {
+      setImportConflictOpen(true);
+      return;
+    }
+    void runImportApply("append");
+  };
+
+  const handleImportConflictChoice = (mode: ImportApplyMode) => {
+    setImportConflictOpen(false);
+    void runImportApply(mode);
+  };
+
+  const hasPlanningData = graph.milestones.length > 0 || graph.plan !== null;
+
+  const handleDeleteAllConfirm = async () => {
+    if (!projectKey) {
+      return;
+    }
+    setSaving(true);
+    setDeleteAllError(null);
+    setStatus(null);
+    try {
+      await clearProjectPlanning(projectKey);
+      setDeleteAllConfirmOpen(false);
+      setSelectedMilestoneId(null);
+      setEditMilestone(null);
+      await refresh();
+    } catch (err) {
+      setDeleteAllError(err instanceof Error ? err.message : "Failed to delete planning data.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -286,24 +392,71 @@ export function PlanningPage(): ReactElement {
   const selectedMilestone =
     graph.milestones.find((m) => m.id === selectedMilestoneId) ?? null;
 
+  const showMilestoneDetail = selectedMilestone !== null;
+
+  const milestoneStartWeeks = useMemo(
+    () => computeMilestoneStartWeeks(graph.milestones),
+    [graph.milestones],
+  );
+
+  const mergeMilestone = useCallback((updated: PlanningMilestone) => {
+    setGraph((prev) => ({
+      ...prev,
+      milestones: prev.milestones.map((milestone) =>
+        milestone.id === updated.id
+          ? { ...milestone, ...updated, goals: updated.goals ?? [] }
+          : milestone,
+      ),
+    }));
+  }, []);
+
+  const mergeDeliverable = useCallback((updated: PlanningDeliverable) => {
+    setGraph((prev) => ({
+      ...prev,
+      deliverables: prev.deliverables.map((deliverable) =>
+        deliverable.id === updated.id
+          ? { ...deliverable, ...updated, risk: updated.risk ?? "on_track" }
+          : deliverable,
+      ),
+    }));
+  }, []);
+
+  const appendDeliverable = useCallback((created: PlanningDeliverable) => {
+    setGraph((prev) => ({
+      ...prev,
+      deliverables: [
+        ...prev.deliverables,
+        { ...created, risk: created.risk ?? "on_track" },
+      ],
+    }));
+  }, []);
+
+  const removeDeliverableFromGraph = useCallback((deliverableId: string) => {
+    setGraph((prev) => ({
+      ...prev,
+      deliverables: prev.deliverables.filter((deliverable) => deliverable.id !== deliverableId),
+    }));
+  }, []);
+
   const leftPanel = (
     <PlanningPanelTabs activeTab={panelTab} onTabChange={setPanelTab}>
       {panelTab === "planning" ? (
         <PlanningLeftPanel
           startDate={startDate}
-          saving={saving}
-          monthZoom={planningMonthZoom}
-          maxExpandedMonths={planningMaxExpandedMonths}
-          onMonthZoomChange={setPlanningMonthZoom}
+          saving={saving || importParsing}
+          importDisabled={!projectKey}
+          deleteAllDisabled={!projectKey || !hasPlanningData}
           onStartDateChange={(value) => void handleStartDateChange(value)}
+          onImportFileSelected={(file) => void handleImportFileSelected(file)}
+          onDeleteAllClick={() => {
+            setDeleteAllError(null);
+            setDeleteAllConfirmOpen(true);
+          }}
         />
       ) : (
         <VacationsLeftPanel
           selectionState={selectionState}
           saving={saving}
-          monthZoom={vacationMonthZoom}
-          maxExpandedMonths={vacationMaxExpandedMonths}
-          onMonthZoomChange={setVacationMonthZoom}
           onRequestVacation={() => void applyVacationAction("vacation")}
           onSetAway={() => void applyVacationAction("away_working")}
           onCancelVacation={() => void applyVacationAction(null)}
@@ -315,9 +468,32 @@ export function PlanningPage(): ReactElement {
 
   const rightPanel =
     panelTab === "planning" ? (
-      <div className="imagegen-panel" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div
+        className="imagegen-panel"
+        style={{
+          flex: showMilestoneDetail ? "0 0 auto" : 1,
+          minHeight: showMilestoneDetail ? "auto" : 0,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         <h2 className="imagegen-panel-title">Timeline</h2>
-        <div className="imagegen-panel-body" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        {projectKey && !loading ? (
+          <MonthZoomWidget
+            monthZoom={planningMonthZoom}
+            maxExpandedMonths={planningMaxExpandedMonths}
+            onMonthZoomChange={setPlanningMonthZoom}
+          />
+        ) : null}
+        <div
+          className="imagegen-panel-body"
+          style={{
+            flex: showMilestoneDetail ? "0 0 auto" : 1,
+            minHeight: showMilestoneDetail ? "auto" : 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           {!projectKey ? (
             <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>
               Select a project in the header to open its planning timeline.
@@ -340,11 +516,33 @@ export function PlanningPage(): ReactElement {
                     selectedMilestoneId={selectedMilestoneId}
                     saving={saving}
                     monthZoom={planningMonthZoom}
+                    compact={showMilestoneDetail}
                     onSelectMilestone={setSelectedMilestoneId}
                     onEditMilestone={setEditMilestone}
                     onAddMilestone={() => void handleAddMilestone()}
                   />
-                  <DeliverablesPanel milestone={selectedMilestone} deliverables={graph.deliverables} />
+                  <DeliverablesPanel
+                    milestone={selectedMilestone}
+                    deliverables={graph.deliverables}
+                    planStartDate={startDate}
+                    startWeek={
+                      selectedMilestone
+                        ? milestoneStartWeeks.get(selectedMilestone.id) ?? 0
+                        : 0
+                    }
+                    disabled={saving || importParsing}
+                    onMilestoneUpdated={mergeMilestone}
+                    onDeliverableUpdated={mergeDeliverable}
+                    onDeliverableCreated={appendDeliverable}
+                    onDeliverableDeleted={removeDeliverableFromGraph}
+                    onSaveMilestone={updateMilestone}
+                    onSaveDeliverable={updateDeliverable}
+                    onCreateDeliverable={(milestoneId) =>
+                      createDeliverable(milestoneId, "New item", "todo", "", null, "on_track")
+                    }
+                    onDeleteDeliverable={deleteDeliverable}
+                    onError={(message) => setStatus(message)}
+                  />
                 </>
               )}
             </>
@@ -354,6 +552,13 @@ export function PlanningPage(): ReactElement {
     ) : (
       <div className="imagegen-panel" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <h2 className="imagegen-panel-title">Vacation calendar</h2>
+        {!vacationLoading ? (
+          <MonthZoomWidget
+            monthZoom={vacationMonthZoom}
+            maxExpandedMonths={vacationMaxExpandedMonths}
+            onMonthZoomChange={setVacationMonthZoom}
+          />
+        ) : null}
         <div className="imagegen-panel-body" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           {status ? (
             <p role="status" style={{ margin: "0 0 8px", color: "#fca5a5", fontSize: 13 }}>
@@ -382,6 +587,43 @@ export function PlanningPage(): ReactElement {
 
   return (
     <>
+      {importPreview ? (
+        <PlanningImportPreviewModal
+          data={importPreview.data}
+          warnings={importPreview.warnings}
+          activeProjectName={activeProjectName || projectKey}
+          saving={saving}
+          error={importError}
+          onClose={closeImportFlow}
+          onConfirm={handleImportConfirm}
+        />
+      ) : null}
+
+      {deleteAllConfirmOpen ? (
+        <PlanningDeleteAllConfirmDialog
+          projectName={activeProjectName || projectKey}
+          milestoneCount={graph.milestones.length}
+          saving={saving}
+          error={deleteAllError}
+          onConfirm={() => void handleDeleteAllConfirm()}
+          onCancel={() => {
+            if (!saving) {
+              setDeleteAllConfirmOpen(false);
+              setDeleteAllError(null);
+            }
+          }}
+        />
+      ) : null}
+
+      {importConflictOpen ? (
+        <PlanningImportConflictDialog
+          existingMilestoneCount={graph.milestones.length}
+          saving={saving}
+          onChoose={handleImportConflictChoice}
+          onCancel={() => setImportConflictOpen(false)}
+        />
+      ) : null}
+
       {editMilestone ? (
         <MilestoneEditModal
           milestone={editMilestone}
@@ -484,7 +726,9 @@ export function PlanningPage(): ReactElement {
       <StudioTwoColumnShell
         left={leftPanel}
         right={rightPanel}
-        rightStyle={{ minHeight: "min(75vh, 920px)" }}
+        rightStyle={{
+          minHeight: showMilestoneDetail ? "auto" : "min(75vh, 920px)",
+        }}
       />
     </>
   );

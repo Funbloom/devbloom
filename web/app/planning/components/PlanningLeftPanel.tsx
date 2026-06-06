@@ -1,25 +1,26 @@
 "use client";
 
 import type { ReactElement } from "react";
-import type { MonthZoom } from "../monthZoom";
-import { MonthZoomWidget } from "./MonthZoomWidget";
+import { PlanningImportButton } from "./PlanningImportButton";
 
 type Props = {
   startDate: string;
   saving: boolean;
-  monthZoom: MonthZoom;
-  maxExpandedMonths: number;
-  onMonthZoomChange: (zoom: MonthZoom) => void;
+  importDisabled?: boolean;
+  deleteAllDisabled?: boolean;
   onStartDateChange: (value: string) => void;
+  onImportFileSelected: (file: File) => void;
+  onDeleteAllClick: () => void;
 };
 
 export function PlanningLeftPanel({
   startDate,
   saving,
-  monthZoom,
-  maxExpandedMonths,
-  onMonthZoomChange,
+  importDisabled,
+  deleteAllDisabled,
   onStartDateChange,
+  onImportFileSelected,
+  onDeleteAllClick,
 }: Props): ReactElement {
   return (
     <div className="imagegen-panel">
@@ -45,12 +46,18 @@ export function PlanningLeftPanel({
             }}
           />
         </label>
-        <MonthZoomWidget
-          monthZoom={monthZoom}
-          maxExpandedMonths={maxExpandedMonths}
-          cellWidthLabel="Week column width"
-          onMonthZoomChange={onMonthZoomChange}
+        <PlanningImportButton
+          disabled={saving || importDisabled}
+          onFileSelected={onImportFileSelected}
         />
+        <button
+          type="button"
+          className="imagegen-delete-button"
+          disabled={saving || deleteAllDisabled}
+          onClick={onDeleteAllClick}
+        >
+          Delete all
+        </button>
         <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
           <div>Status bar colors: blue todo, yellow in progress, green ready, dark green completed.</div>
           <div style={{ marginTop: 6 }}>Risk column: green on track, amber caution, red risk.</div>

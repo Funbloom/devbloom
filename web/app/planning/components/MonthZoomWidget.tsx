@@ -2,86 +2,72 @@
 
 import type { ReactElement } from "react";
 import {
-  MONTH_ZOOM_CELL_PX_MAX,
-  MONTH_ZOOM_CELL_PX_MIN,
-  MONTH_ZOOM_MONTH_MIN,
+  monthZoomFromPercent,
+  ZOOM_PERCENT_MAX,
+  ZOOM_PERCENT_MIN,
   type MonthZoom,
 } from "../monthZoom";
 
 type Props = {
   monthZoom: MonthZoom;
   maxExpandedMonths: number;
-  cellWidthLabel: string;
   onMonthZoomChange: (zoom: MonthZoom) => void;
 };
 
+const SLIDER_WIDTH_PX = 120;
+
 const sliderStyle = {
-  width: "100%",
+  width: SLIDER_WIDTH_PX,
   accentColor: "#3b82f6",
 } as const;
 
 export function MonthZoomWidget({
   monthZoom,
   maxExpandedMonths,
-  cellWidthLabel,
   onMonthZoomChange,
 }: Props): ReactElement {
-  const max = Math.max(MONTH_ZOOM_MONTH_MIN, maxExpandedMonths);
-  const expandedCount = Math.min(monthZoom.expandedMonthCount, max);
-  const allExpanded = expandedCount >= max;
+  const zoomPercent = Math.max(
+    ZOOM_PERCENT_MIN,
+    Math.min(ZOOM_PERCENT_MAX, Math.round(monthZoom.zoomPercent)),
+  );
 
   return (
     <div
       style={{
-        display: "grid",
+        display: "flex",
+        alignItems: "center",
         gap: 10,
-        padding: 10,
-        borderRadius: 8,
-        border: "1px solid #334155",
-        background: "#0b1220",
+        padding: "8px 16px",
+        borderBottom: "1px solid #222836",
       }}
     >
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>Month zoom</div>
-      <label style={{ display: "grid", gap: 6, fontSize: 12, color: "#94a3b8" }}>
-        <span>
-          {allExpanded
-            ? `All months expanded (${max})`
-            : `Expanded months (${expandedCount}) — from current month`}
-        </span>
-        <input
-          type="range"
-          min={MONTH_ZOOM_MONTH_MIN}
-          max={max}
-          step={1}
-          value={expandedCount}
-          style={sliderStyle}
-          onChange={(e) => {
-            onMonthZoomChange({
-              ...monthZoom,
-              expandedMonthCount: Number(e.target.value),
-            });
-          }}
-        />
-      </label>
-      <label style={{ display: "grid", gap: 6, fontSize: 12, color: "#94a3b8" }}>
-        <span>
-          {cellWidthLabel} ({monthZoom.zoomedCellPx}px)
-        </span>
-        <input
-          type="range"
-          min={MONTH_ZOOM_CELL_PX_MIN}
-          max={MONTH_ZOOM_CELL_PX_MAX}
-          step={2}
-          value={monthZoom.zoomedCellPx}
-          style={sliderStyle}
-          onChange={(e) => {
-            onMonthZoomChange({
-              ...monthZoom,
-              zoomedCellPx: Number(e.target.value),
-            });
-          }}
-        />
-      </label>
+      <span style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", whiteSpace: "nowrap" }}>
+        Zoom
+      </span>
+      <input
+        type="range"
+        min={ZOOM_PERCENT_MIN}
+        max={ZOOM_PERCENT_MAX}
+        step={1}
+        value={zoomPercent}
+        style={sliderStyle}
+        aria-label="Timeline zoom"
+        onChange={(e) => {
+          onMonthZoomChange(
+            monthZoomFromPercent(Number(e.target.value), maxExpandedMonths),
+          );
+        }}
+      />
+      <span
+        style={{
+          fontSize: 12,
+          color: "#94a3b8",
+          whiteSpace: "nowrap",
+          minWidth: 72,
+        }}
+      >
+        {zoomPercent}%
+      </span>
     </div>
   );
 }

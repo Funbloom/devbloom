@@ -33,6 +33,7 @@ type Props = {
   onEditMilestone: (milestone: PlanningMilestone) => void;
   onAddMilestone: () => void;
   monthZoom: MonthZoom;
+  compact?: boolean;
 };
 
 function monthSpans(
@@ -60,6 +61,7 @@ export function PlanningTimeline({
   onEditMilestone,
   onAddMilestone,
   monthZoom,
+  compact = false,
 }: Props): ReactElement {
   const columns = useMemo(
     () => buildWeekColumns(startDate, PLANNING_WEEKS_MAX, monthZoom),
@@ -75,8 +77,24 @@ export function PlanningTimeline({
   const cellBorder = "1px solid #2a2f3a";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
-      <div style={{ overflowX: "auto", overflowY: "auto", flex: 1, border: cellBorder, borderRadius: 10 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        flex: compact ? "0 0 auto" : 1,
+      }}
+    >
+      <div
+        style={{
+          overflowX: "auto",
+          overflowY: "auto",
+          flex: compact ? "0 0 auto" : 1,
+          maxHeight: compact ? 300 : undefined,
+          border: cellBorder,
+          borderRadius: 10,
+        }}
+      >
         <div style={{ minWidth: STICKY_LEFT_W + timelineWidth, position: "relative" }}>
           {currentWeek !== null && currentWeek >= 0 && currentWeek < PLANNING_WEEKS_MAX && (
             <div

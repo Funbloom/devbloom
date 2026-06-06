@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from core.auth import get_current_user, require_admin
@@ -12,7 +12,10 @@ from services.planning.employee_service import (
     list_employees,
     update_employee,
 )
+from services.planning.planning_import_pkg.planning_import_service import apply_import, parse_import_file
+from services.planning.planning_import_pkg.planning_import_types import ImportedPlanningData
 from services.planning.planning_service import (
+    clear_project_planning,
     create_deliverable,
     create_event,
     create_milestone,
@@ -42,6 +45,7 @@ class MilestoneCreateBody(BaseModel):
     duration_weeks: int = Field(default=1, ge=1)
     status: str = "todo"
     risk: str = "on_track"
+    goals: List[str] = Field(default_factory=list)
 
 
 class MilestoneUpdateBody(BaseModel):
@@ -49,6 +53,7 @@ class MilestoneUpdateBody(BaseModel):
     duration_weeks: Optional[int] = Field(default=None, ge=1)
     status: Optional[str] = None
     risk: Optional[str] = None
+    goals: Optional[List[str]] = None
 
 
 class MilestoneReorderBody(BaseModel):
@@ -60,11 +65,23 @@ class DeliverableCreateBody(BaseModel):
     milestone_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     status: str = "todo"
+    risk: str = "on_track"
+    owner: str = ""
+    due_date: Optional[str] = None
 
 
 class DeliverableUpdateBody(BaseModel):
     title: Optional[str] = None
     status: Optional[str] = None
+    risk: Optional[str] = None
+    owner: Optional[str] = None
+    due_date: Optional[str] = None
+
+
+class ImportApplyBody(BaseModel):
+    project_key: str = Field(min_length=1)
+    mode: str = Field(pattern="^(append|replace)$")
+    data: ImportedPlanningData
 
 
 class EventCreateBody(BaseModel):
@@ -106,6 +123,11 @@ def put_plan(body: PlanUpsertBody) -> dict:
     return upsert_plan_start_date(body.project_key, body.start_date)
 
 
+@planning_router.delete("/plan")
+def delete_plan(project_key: str = Query(..., min_length=1)) -> dict:
+    return clear_project_planning(project_key)
+
+
 @planning_router.post("/milestones")
 def post_milestone(body: MilestoneCreateBody) -> dict:
     return create_milestone(
@@ -114,6 +136,7 @@ def post_milestone(body: MilestoneCreateBody) -> dict:
         duration_weeks=body.duration_weeks,
         status=body.status,
         risk=body.risk,
+        goals=body.goals,
     )
 
 
@@ -125,6 +148,7 @@ def patch_milestone(milestone_id: str, body: MilestoneUpdateBody) -> dict:
         duration_weeks=body.duration_weeks,
         status=body.status,
         risk=body.risk,
+        goals=body.goals,
     )
 
 
@@ -140,12 +164,26 @@ def post_milestone_reorder(body: MilestoneReorderBody) -> list:
 
 @planning_router.post("/deliverables")
 def post_deliverable(body: DeliverableCreateBody) -> dict:
-    return create_deliverable(body.milestone_id, body.title, status=body.status)
+    return create_deliverable(
+        body.milestone_id,
+        body.title,
+        status=body.status,
+        owner=body.owner,
+        due_date=body.due_date,
+        risk=body.risk,
+    )
 
 
 @planning_router.patch("/deliverables/{deliverable_id}")
 def patch_deliverable(deliverable_id: str, body: DeliverableUpdateBody) -> dict:
-    return update_deliverable(deliverable_id, title=body.title, status=body.status)
+    return update_deliverable(
+        deliverable_id,
+        title=body.title,
+        status=body.status,
+        owner=body.owner,
+        due_date=body.due_date,
+        risk=body.risk,
+    )
 
 
 @planning_router.delete("/deliverables/{deliverable_id}")
@@ -224,3 +262,15 @@ def patch_employee(
 @planning_router.delete("/employees/{employee_id}")
 def remove_employee(employee_id: str, _admin: dict = Depends(require_admin)) -> dict:
     return delete_employee(employee_id)
+
+
+@planning_router.post("/import/parse")
+async def post_import_parse(file: UploadFile = File(...)) -> dict:
+    content = await file.read()
+    result = parse_import_file(content, file.filename or "upload.bin")
+    return result.model_dump()
+
+
+@planning_router.post("/import/apply")
+def post_import_apply(body: ImportApplyBody) -> dict:
+    return apply_import(body.project_key, body.mode, body.data)

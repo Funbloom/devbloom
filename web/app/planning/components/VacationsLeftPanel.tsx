@@ -1,17 +1,12 @@
 "use client";
 
 import type { ReactElement } from "react";
-import type { MonthZoom } from "../monthZoom";
 import type { SelectionActionState } from "../vacationSelection";
 import { VACATION_HOLIDAY_CELL_COLOR } from "../vacationGrid";
-import { MonthZoomWidget } from "./MonthZoomWidget";
 
 type Props = {
   selectionState: SelectionActionState;
   saving: boolean;
-  monthZoom: MonthZoom;
-  maxExpandedMonths: number;
-  onMonthZoomChange: (zoom: MonthZoom) => void;
   onRequestVacation: () => void;
   onSetAway: () => void;
   onCancelVacation: () => void;
@@ -21,9 +16,6 @@ type Props = {
 export function VacationsLeftPanel({
   selectionState,
   saving,
-  monthZoom,
-  maxExpandedMonths,
-  onMonthZoomChange,
   onRequestVacation,
   onSetAway,
   onCancelVacation,
@@ -37,12 +29,6 @@ export function VacationsLeftPanel({
           Drag to select days on the grid. Changes are saved immediately and notify the team chat
           when configured.
         </p>
-        <MonthZoomWidget
-          monthZoom={monthZoom}
-          maxExpandedMonths={maxExpandedMonths}
-          cellWidthLabel="Day cell width"
-          onMonthZoomChange={onMonthZoomChange}
-        />
         <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)", display: "grid", gap: 4 }}>
           <div>
             <span
