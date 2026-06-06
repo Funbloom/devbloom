@@ -58,9 +58,13 @@ const TOOLS_CATEGORIES: ToolsCategory[] = [
   },
   {
     category: "Story",
+    links: [{ path: "/storyboard", label: "Storyboard", icon: "storyboard" }],
+  },
+  {
+    category: "Management",
     links: [
-      { path: "/storyboard", label: "Storyboard", icon: "storyboard" },
       { path: "/planning", label: "Planning", icon: "planning" },
+      { path: "/vacations", label: "Vacations", icon: "vacations" },
     ],
   },
 ];
@@ -80,6 +84,7 @@ function getCurrentPageLabel(pathname: string): string {
   if (pathname.startsWith("/settings/usage")) return "Usage";
   if (pathname.startsWith("/storyboard")) return "Storyboard";
   if (pathname.startsWith("/planning")) return "Planning";
+  if (pathname.startsWith("/vacations")) return "Vacations";
   if (pathname.startsWith("/imageGen")) return "Image Gen";
   if (pathname.startsWith("/audio")) return "Voice Gen";
   if (pathname.startsWith("/audiobank")) return "Audiobank";

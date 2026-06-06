@@ -8,14 +8,13 @@ import type {
   MilestoneRisk,
   MilestoneStatus,
   PlanningDeliverable,
-  PlanningEmployee,
   PlanningGraph,
   PlanningMilestone,
-  VacationEntry,
 } from "./types";
+import type { VacationEmployee, VacationEntry } from "../vacations/types";
 
 export type PlanningAnalysisVacationContext = {
-  employees: PlanningEmployee[];
+  employees: VacationEmployee[];
   entries: VacationEntry[];
   holidays: string[];
 };
@@ -178,7 +177,7 @@ type UnavailableDays = {
 };
 
 export function countEmployeeUnavailableDays(
-  employee: PlanningEmployee,
+  employee: VacationEmployee,
   fromDate: Date,
   toDate: Date,
   entries: VacationEntry[],
@@ -221,8 +220,8 @@ export function countEmployeeUnavailableDays(
 
 function findEmployeeByName(
   ownerName: string,
-  employees: PlanningEmployee[],
-): PlanningEmployee | null {
+  employees: VacationEmployee[],
+): VacationEmployee | null {
   const normalized = ownerName.trim().toLowerCase();
   if (!normalized) {
     return null;
@@ -411,12 +410,15 @@ function analyzeMilestone(
   const dueSoonCount = milestoneDeliverables.filter((row) => row.issues.includes("due_soon")).length;
   const missingDueCount = milestoneDeliverables.filter((row) => row.issues.includes("missing_due_date")).length;
   const openDeliverableCount = totalDeliverables - doneCount;
+  const allDeliverablesDone = totalDeliverables > 0 && doneCount === totalDeliverables;
 
   let scheduleSeverity: AnalysisSeverity = "on_track";
   let scheduleDetail = "On schedule";
   const todayDate = todayMidnight(today);
   const deliveryDate = parseIsoDate(deliveryDateIso);
-  if (milestone.status !== "completed" && todayDate > deliveryDate) {
+  if (allDeliverablesDone) {
+    scheduleDetail = "All deliverables complete";
+  } else if (milestone.status !== "completed" && todayDate > deliveryDate) {
     scheduleSeverity = "risk";
     const daysLate = daysBetween(deliveryDate, todayDate);
     scheduleDetail = `Delivery date passed ${daysLate} days ago`;
@@ -427,7 +429,10 @@ function analyzeMilestone(
   let paceSeverity: AnalysisSeverity = "on_track";
   let paceDetail = "Pace matches plan";
 
-  if (currentWeek !== null) {
+  if (allDeliverablesDone) {
+    elapsedPct = 1;
+    paceDetail = "All deliverables complete";
+  } else if (currentWeek !== null) {
     const endWeek = startWeek + Math.max(1, milestone.duration_weeks);
     if (currentWeek >= startWeek && currentWeek < endWeek && milestone.status !== "completed") {
       elapsedPct = Math.min(1, (currentWeek - startWeek) / Math.max(1, milestone.duration_weeks));

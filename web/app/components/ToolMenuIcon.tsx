@@ -10,6 +10,7 @@ export type ToolIconId =
   | "meshGen"
   | "storyboard"
   | "planning"
+  | "vacations"
   | "admin"
   | "installation"
   | "usage"
@@ -77,6 +78,13 @@ const ICONS: Record<ToolIconId, ReactNode> = {
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M7 8h10M7 12h7M7 16h4" />
       <path d="M3 9h18" />
+    </>
+  ),
+  vacations: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 2v4M17 2v4M3 9h18" />
+      <path d="M8 14h2M14 14h2" />
     </>
   ),
   admin: (

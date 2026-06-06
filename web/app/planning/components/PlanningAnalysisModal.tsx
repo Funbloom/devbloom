@@ -16,8 +16,9 @@ import {
   type PlanningAnalysisResult,
 } from "../planningAnalysis";
 import { PlanningAnalysisCharts } from "./PlanningAnalysisCharts";
-import { fetchVacationGrid } from "../vacationClient";
-import type { PlanningGraph, VacationGrid } from "../types";
+import { fetchVacationGrid } from "../../vacations/vacationClient";
+import type { PlanningGraph } from "../types";
+import type { VacationGrid } from "../../vacations/types";
 
 type Props = {
   graph: PlanningGraph;

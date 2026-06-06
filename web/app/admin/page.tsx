@@ -8,12 +8,12 @@ import { projectKeyFromDisplayName } from "../lib/projectKey";
 import { localAgent, getLocalProjectPath, setLocalProjectPath, isLocalAgentContext } from "../lib/localAgentClient";
 import { useAuth } from "../contexts/AuthContext";
 import {
-  createPlanningEmployee,
-  deletePlanningEmployee,
-  fetchPlanningEmployees,
-  updatePlanningEmployee,
-} from "../planning/vacationClient";
-import type { PlanningEmployee } from "../planning/types";
+  createVacationEmployee,
+  deleteVacationEmployee,
+  fetchVacationEmployees,
+  updateVacationEmployee,
+} from "../vacations/vacationClient";
+import type { VacationEmployee } from "../vacations/types";
 
 type SourceItem = {
   id: string;
@@ -129,7 +129,7 @@ export default function AdminPage() {
   }[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
-  const [employees, setEmployees] = useState<PlanningEmployee[]>([]);
+  const [employees, setEmployees] = useState<VacationEmployee[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [employeesError, setEmployeesError] = useState<string | null>(null);
   const [employeesStatus, setEmployeesStatus] = useState<string | null>(null);
@@ -192,7 +192,7 @@ export default function AdminPage() {
     setEmployeesLoading(true);
     setEmployeesError(null);
     try {
-      const data = await fetchPlanningEmployees();
+      const data = await fetchVacationEmployees();
       setEmployees(data);
     } catch (err) {
       setEmployeesError(err instanceof Error ? err.message : "Failed to load employees.");
@@ -1420,7 +1420,7 @@ export default function AdminPage() {
                 void (async () => {
                   setEmployeesStatus(null);
                   try {
-                    await createPlanningEmployee(
+                    await createVacationEmployee(
                       newEmployeeName.trim(),
                       newEmployeeTitle.trim(),
                       newEmployeeStartDate,
@@ -1485,7 +1485,7 @@ export default function AdminPage() {
                                   void (async () => {
                                     setEmployeesStatus(null);
                                     try {
-                                      await updatePlanningEmployee(employee.id, {
+                                      await updateVacationEmployee(employee.id, {
                                         name: editEmployeeName.trim(),
                                         title: editEmployeeTitle.trim(),
                                         start_date: editEmployeeStartDate,
@@ -1542,7 +1542,7 @@ export default function AdminPage() {
                                   void (async () => {
                                     setEmployeesStatus(null);
                                     try {
-                                      await deletePlanningEmployee(employee.id);
+                                      await deleteVacationEmployee(employee.id);
                                       setEmployeesStatus("Employee removed.");
                                       await loadEmployees();
                                     } catch (err) {

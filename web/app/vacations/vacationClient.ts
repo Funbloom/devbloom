@@ -1,5 +1,5 @@
 import { fetchApi } from "../lib/api";
-import type { PlanningEmployee, VacationCellStatus, VacationGrid } from "./types";
+import type { VacationCellStatus, VacationEmployee, VacationGrid } from "./types";
 
 async function parseJson<T>(response: Response, label: string): Promise<T> {
   if (!response.ok) {
@@ -21,7 +21,7 @@ export async function fetchVacationGrid(
     params.set("to", toIso);
   }
   const query = params.toString();
-  const response = await fetchApi(`/planning/vacations${query ? `?${query}` : ""}`);
+  const response = await fetchApi(`/vacations${query ? `?${query}` : ""}`);
   return parseJson<VacationGrid>(response, "Load vacations");
 }
 
@@ -30,7 +30,7 @@ export async function updateVacationCells(
   dates: string[],
   status: VacationCellStatus,
 ): Promise<void> {
-  const response = await fetchApi("/planning/vacations/cells", {
+  const response = await fetchApi("/vacations/cells", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ employee_id: employeeId, dates, status }),
@@ -38,38 +38,38 @@ export async function updateVacationCells(
   await parseJson(response, "Update vacation cells");
 }
 
-export async function fetchPlanningEmployees(): Promise<PlanningEmployee[]> {
-  const response = await fetchApi("/planning/employees");
-  return parseJson<PlanningEmployee[]>(response, "Load employees");
+export async function fetchVacationEmployees(): Promise<VacationEmployee[]> {
+  const response = await fetchApi("/vacations/employees");
+  return parseJson<VacationEmployee[]>(response, "Load employees");
 }
 
-export async function createPlanningEmployee(
+export async function createVacationEmployee(
   name: string,
   title: string,
   startDate: string,
-): Promise<PlanningEmployee> {
-  const response = await fetchApi("/planning/employees", {
+): Promise<VacationEmployee> {
+  const response = await fetchApi("/vacations/employees", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, title, start_date: startDate }),
   });
-  return parseJson<PlanningEmployee>(response, "Create employee");
+  return parseJson<VacationEmployee>(response, "Create employee");
 }
 
-export async function updatePlanningEmployee(
+export async function updateVacationEmployee(
   id: string,
   patch: { name?: string; title?: string; start_date?: string },
-): Promise<PlanningEmployee> {
-  const response = await fetchApi(`/planning/employees/${encodeURIComponent(id)}`, {
+): Promise<VacationEmployee> {
+  const response = await fetchApi(`/vacations/employees/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  return parseJson<PlanningEmployee>(response, "Update employee");
+  return parseJson<VacationEmployee>(response, "Update employee");
 }
 
-export async function deletePlanningEmployee(id: string): Promise<void> {
-  const response = await fetchApi(`/planning/employees/${encodeURIComponent(id)}`, {
+export async function deleteVacationEmployee(id: string): Promise<void> {
+  const response = await fetchApi(`/vacations/employees/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
   await parseJson(response, "Delete employee");

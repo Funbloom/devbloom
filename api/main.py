@@ -38,6 +38,7 @@ from routers.user_profile_routes import user_profile_router
 from routers.inworld_routes import inworld_router
 from routers.audiobank_routes import audiobank_router
 from routers.planning_routes import planning_router
+from routers.vacation_routes import vacation_router
 from games.pocket_voyager.routers.narrative_routes import narrative_router
 
 logger = logging.getLogger(__name__)
@@ -103,3 +104,4 @@ app.include_router(inworld_router)
 app.include_router(audiobank_router, dependencies=[Depends(get_current_user)])
 app.include_router(narrative_router, dependencies=[Depends(get_current_user)])
 app.include_router(planning_router, dependencies=[Depends(get_current_user)])
+app.include_router(vacation_router, dependencies=[Depends(get_current_user)])

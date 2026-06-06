@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { StudioTwoColumnShell } from "../components/studio/StudioTwoColumnShell";
 import { STORAGE_KEY_ACTIVE_PROJECT, STORAGE_KEY_ACTIVE_PROJECT_NAME } from "../lib/activeProject";
+import { fetchVacationEmployees } from "../vacations/vacationClient";
 import { DeliverablesPanel } from "./components/DeliverablesPanel";
 import { MilestoneEditModal } from "./components/MilestoneEditModal";
 import { PlanningDeleteAllConfirmDialog } from "./components/PlanningDeleteAllConfirmDialog";
@@ -11,11 +12,8 @@ import { PlanningImportConflictDialog } from "./components/PlanningImportConflic
 import { PlanningAnalysisModal } from "./components/PlanningAnalysisModal";
 import { PlanningImportPreviewModal } from "./components/PlanningImportPreviewModal";
 import { PlanningLeftPanel } from "./components/PlanningLeftPanel";
-import { PlanningPanelTabs, type PlanningPanelTab } from "./components/PlanningPanelTabs";
 import { MonthZoomWidget } from "./components/MonthZoomWidget";
 import { PlanningTimeline } from "./components/PlanningTimeline";
-import { VacationsGrid } from "./components/VacationsGrid";
-import { VacationsLeftPanel } from "./components/VacationsLeftPanel";
 import { applyPlanningImport, parsePlanningImport } from "./planningImportClient";
 import type { ImportApplyMode, ImportedPlanningData } from "./planningImportTypes";
 import {
@@ -45,31 +43,17 @@ import type {
   PlanningEmployee,
   PlanningGraph,
   PlanningMilestone,
-  VacationGrid,
 } from "./types";
 import {
   buildAnalyzedRiskUpdates,
   type PlanningAnalysisResult,
 } from "./planningAnalysis";
-import {
-  clampMonthZoom,
-  orderedMonthKeysBetweenIso,
-  type MonthZoom,
-} from "./monthZoom";
+import { clampMonthZoom, type MonthZoom } from "./monthZoom";
 import {
   loadMonthZoom,
   PLANNING_MONTH_ZOOM_STORAGE_KEY,
   saveMonthZoom,
-  VACATION_MONTH_ZOOM_STORAGE_KEY,
 } from "./monthZoomStorage";
-import { buildDayColumns } from "./vacationGrid";
-import { fetchPlanningEmployees, fetchVacationGrid, updateVacationCells } from "./vacationClient";
-import {
-  aggregateSelectionState,
-  cellKey,
-  parseCellKey,
-  type VacationCellKey,
-} from "./vacationSelection";
 
 const emptyGraph = (): PlanningGraph => ({
   plan: null,
@@ -78,33 +62,18 @@ const emptyGraph = (): PlanningGraph => ({
   events: [],
 });
 
-const emptyVacationGrid = (): VacationGrid => ({
-  employees: [],
-  entries: [],
-  holidays: [],
-  range: { from: "", to: "" },
-});
-
 export function PlanningPage(): ReactElement {
-  const [panelTab, setPanelTab] = useState<PlanningPanelTab>("planning");
   const [projectKey, setProjectKey] = useState("");
   const [activeProjectName, setActiveProjectName] = useState("");
   const [graph, setGraph] = useState<PlanningGraph>(emptyGraph);
-  const [vacationGrid, setVacationGrid] = useState<VacationGrid>(emptyVacationGrid);
   const [startDate, setStartDate] = useState(defaultStartDateIso());
   const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
   const [editMilestone, setEditMilestone] = useState<PlanningMilestone | null>(null);
   const [loading, setLoading] = useState(false);
-  const [vacationLoading, setVacationLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  const [dragAnchor, setDragAnchor] = useState<VacationCellKey | null>(null);
   const [planningMonthZoom, setPlanningMonthZoom] = useState<MonthZoom>(() =>
     loadMonthZoom(PLANNING_MONTH_ZOOM_STORAGE_KEY),
-  );
-  const [vacationMonthZoom, setVacationMonthZoom] = useState<MonthZoom>(() =>
-    loadMonthZoom(VACATION_MONTH_ZOOM_STORAGE_KEY),
   );
   const [importPreview, setImportPreview] = useState<{
     data: ImportedPlanningData;
@@ -123,28 +92,13 @@ export function PlanningPage(): ReactElement {
     [startDate],
   );
 
-  const vacationMaxExpandedMonths = useMemo(() => {
-    if (!vacationGrid.range.from || !vacationGrid.range.to) {
-      return 1;
-    }
-    return orderedMonthKeysBetweenIso(vacationGrid.range.from, vacationGrid.range.to).length;
-  }, [vacationGrid.range.from, vacationGrid.range.to]);
-
   useEffect(() => {
     setPlanningMonthZoom((prev) => clampMonthZoom(prev, planningMaxExpandedMonths));
   }, [planningMaxExpandedMonths]);
 
   useEffect(() => {
-    setVacationMonthZoom((prev) => clampMonthZoom(prev, vacationMaxExpandedMonths));
-  }, [vacationMaxExpandedMonths]);
-
-  useEffect(() => {
     saveMonthZoom(PLANNING_MONTH_ZOOM_STORAGE_KEY, planningMonthZoom);
   }, [planningMonthZoom]);
-
-  useEffect(() => {
-    saveMonthZoom(VACATION_MONTH_ZOOM_STORAGE_KEY, vacationMonthZoom);
-  }, [vacationMonthZoom]);
 
   const loadGraph = useCallback(async (key: string) => {
     if (!key) {
@@ -169,22 +123,9 @@ export function PlanningPage(): ReactElement {
     }
   }, []);
 
-  const loadVacations = useCallback(async () => {
-    setVacationLoading(true);
-    setStatus(null);
-    try {
-      const data = await fetchVacationGrid();
-      setVacationGrid(data);
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Failed to load vacation data.");
-    } finally {
-      setVacationLoading(false);
-    }
-  }, []);
-
   const loadEmployees = useCallback(async () => {
     try {
-      const data = await fetchPlanningEmployees();
+      const data = await fetchVacationEmployees();
       setEmployees(data);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Failed to load employees.");
@@ -211,17 +152,9 @@ export function PlanningPage(): ReactElement {
   }, []);
 
   useEffect(() => {
-    if (panelTab === "planning") {
-      void loadGraph(projectKey);
-      void loadEmployees();
-    }
-  }, [projectKey, loadGraph, loadEmployees, panelTab]);
-
-  useEffect(() => {
-    if (panelTab === "vacations") {
-      void loadVacations();
-    }
-  }, [panelTab, loadVacations]);
+    void loadGraph(projectKey);
+    void loadEmployees();
+  }, [projectKey, loadGraph, loadEmployees]);
 
   const refresh = async () => {
     if (projectKey) {
@@ -342,71 +275,6 @@ export function PlanningPage(): ReactElement {
     }
   };
 
-  const entryStatusByKey = useMemo(() => {
-    const map = new Map<string, "vacation" | "away_working">();
-    for (const entry of vacationGrid.entries) {
-      map.set(cellKey(entry.employee_id, entry.day_date), entry.status);
-    }
-    return map;
-  }, [vacationGrid.entries]);
-
-  const holidayDates = useMemo(() => new Set(vacationGrid.holidays), [vacationGrid.holidays]);
-
-  const inactiveKeys = useMemo(() => {
-    const set = new Set<string>();
-    if (!vacationGrid.range.from || !vacationGrid.range.to) {
-      return set;
-    }
-    const dayIsos = buildDayColumns(vacationGrid.range.from, vacationGrid.range.to).map((c) => c.iso);
-    for (const employee of vacationGrid.employees) {
-      for (const iso of dayIsos) {
-        if (iso < employee.start_date) {
-          set.add(cellKey(employee.id, iso));
-        }
-      }
-    }
-    return set;
-  }, [vacationGrid.employees, vacationGrid.range]);
-
-  const selectionState = aggregateSelectionState(
-    selectedKeys,
-    entryStatusByKey,
-    holidayDates,
-    inactiveKeys,
-  );
-
-  const applyVacationAction = async (status: "vacation" | "away_working" | null) => {
-    const byEmployee = new Map<string, string[]>();
-    for (const key of selectedKeys) {
-      const parsed = parseCellKey(key);
-      if (!parsed) {
-        continue;
-      }
-      if (holidayDates.has(parsed.dateIso) || inactiveKeys.has(key)) {
-        continue;
-      }
-      const dates = byEmployee.get(parsed.employeeId) ?? [];
-      dates.push(parsed.dateIso);
-      byEmployee.set(parsed.employeeId, dates);
-    }
-    if (byEmployee.size === 0) {
-      return;
-    }
-    setSaving(true);
-    setStatus(null);
-    try {
-      for (const [employeeId, dates] of byEmployee.entries()) {
-        await updateVacationCells(employeeId, dates, status);
-      }
-      setSelectedKeys(new Set());
-      await loadVacations();
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Failed to update vacation cells.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const selectedMilestone =
     graph.milestones.find((m) => m.id === selectedMilestoneId) ?? null;
 
@@ -490,39 +358,42 @@ export function PlanningPage(): ReactElement {
   );
 
   const leftPanel = (
-    <PlanningPanelTabs activeTab={panelTab} onTabChange={setPanelTab}>
-      {panelTab === "planning" ? (
-        <PlanningLeftPanel
-          startDate={startDate}
-          saving={saving || importParsing}
-          importDisabled={!projectKey}
-          analyseDisabled={!projectKey || !hasPlanningData}
-          deleteAllDisabled={!projectKey || !hasPlanningData}
-          onStartDateChange={(value) => void handleStartDateChange(value)}
-          onImportFileSelected={(file) => void handleImportFileSelected(file)}
-          onAnalyseClick={() => setAnalysisOpen(true)}
-          onDeleteAllClick={() => {
-            setDeleteAllError(null);
-            setDeleteAllConfirmOpen(true);
-          }}
-        />
-      ) : (
-        <VacationsLeftPanel
-          selectionState={selectionState}
-          saving={saving}
-          onRequestVacation={() => void applyVacationAction("vacation")}
-          onSetAway={() => void applyVacationAction("away_working")}
-          onCancelVacation={() => void applyVacationAction(null)}
-          onCancelAway={() => void applyVacationAction(null)}
-        />
-      )}
-    </PlanningPanelTabs>
+    <PlanningLeftPanel
+      startDate={startDate}
+      saving={saving || importParsing}
+      importDisabled={!projectKey}
+      analyseDisabled={!projectKey || !hasPlanningData}
+      deleteAllDisabled={!projectKey || !hasPlanningData}
+      onStartDateChange={(value) => void handleStartDateChange(value)}
+      onImportFileSelected={(file) => void handleImportFileSelected(file)}
+      onAnalyseClick={() => setAnalysisOpen(true)}
+      onDeleteAllClick={() => {
+        setDeleteAllError(null);
+        setDeleteAllConfirmOpen(true);
+      }}
+    />
   );
 
-  const rightPanel =
-    panelTab === "planning" ? (
+  const rightPanel = (
+    <div
+      className="imagegen-panel"
+      style={{
+        flex: showMilestoneDetail ? "0 0 auto" : 1,
+        minHeight: showMilestoneDetail ? "auto" : 0,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <h2 className="imagegen-panel-title">Timeline</h2>
+      {projectKey && !loading ? (
+        <MonthZoomWidget
+          monthZoom={planningMonthZoom}
+          maxExpandedMonths={planningMaxExpandedMonths}
+          onMonthZoomChange={setPlanningMonthZoom}
+        />
+      ) : null}
       <div
-        className="imagegen-panel"
+        className="imagegen-panel-body"
         style={{
           flex: showMilestoneDetail ? "0 0 auto" : 1,
           minHeight: showMilestoneDetail ? "auto" : 0,
@@ -530,114 +401,63 @@ export function PlanningPage(): ReactElement {
           flexDirection: "column",
         }}
       >
-        <h2 className="imagegen-panel-title">Timeline</h2>
-        {projectKey && !loading ? (
-          <MonthZoomWidget
-            monthZoom={planningMonthZoom}
-            maxExpandedMonths={planningMaxExpandedMonths}
-            onMonthZoomChange={setPlanningMonthZoom}
-          />
-        ) : null}
-        <div
-          className="imagegen-panel-body"
-          style={{
-            flex: showMilestoneDetail ? "0 0 auto" : 1,
-            minHeight: showMilestoneDetail ? "auto" : 0,
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          {!projectKey ? (
-            <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>
-              Select a project in the header to open its planning timeline.
-            </p>
-          ) : (
-            <>
-              {status ? (
-                <p role="status" style={{ margin: "0 0 8px", color: "#fca5a5", fontSize: 13 }}>
-                  {status}
-                </p>
-              ) : null}
-              {loading ? (
-                <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>Loading planning data...</p>
-              ) : (
-                <>
-                  <PlanningTimeline
-                    startDate={startDate}
-                    milestones={graph.milestones}
-                    events={graph.events}
-                    selectedMilestoneId={selectedMilestoneId}
-                    saving={saving}
-                    monthZoom={planningMonthZoom}
-                    compact={showMilestoneDetail}
-                    onSelectMilestone={setSelectedMilestoneId}
-                    onEditMilestone={setEditMilestone}
-                    onAddMilestone={() => void handleAddMilestone()}
-                  />
-                  <DeliverablesPanel
-                    milestone={selectedMilestone}
-                    deliverables={graph.deliverables}
-                    employees={employees}
-                    planStartDate={startDate}
-                    startWeek={
-                      selectedMilestone
-                        ? milestoneStartWeeks.get(selectedMilestone.id) ?? 0
-                        : 0
-                    }
-                    disabled={saving || importParsing}
-                    onMilestoneUpdated={mergeMilestone}
-                    onDeliverableUpdated={mergeDeliverable}
-                    onDeliverableCreated={appendDeliverable}
-                    onDeliverableDeleted={removeDeliverableFromGraph}
-                    onSaveMilestone={updateMilestone}
-                    onSaveDeliverable={updateDeliverable}
-                    onCreateDeliverable={(milestoneId) =>
-                      createDeliverable(milestoneId, "New item", "todo", "", null, "on_track")
-                    }
-                    onDeleteDeliverable={deleteDeliverable}
-                    onError={(message) => setStatus(message)}
-                  />
-                </>
-              )}
-            </>
-          )}
-        </div>
+        {!projectKey ? (
+          <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>
+            Select a project in the header to open its planning timeline.
+          </p>
+        ) : (
+          <>
+            {status ? (
+              <p role="status" style={{ margin: "0 0 8px", color: "#fca5a5", fontSize: 13 }}>
+                {status}
+              </p>
+            ) : null}
+            {loading ? (
+              <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>Loading planning data...</p>
+            ) : (
+              <>
+                <PlanningTimeline
+                  startDate={startDate}
+                  milestones={graph.milestones}
+                  events={graph.events}
+                  selectedMilestoneId={selectedMilestoneId}
+                  saving={saving}
+                  monthZoom={planningMonthZoom}
+                  compact={showMilestoneDetail}
+                  onSelectMilestone={setSelectedMilestoneId}
+                  onEditMilestone={setEditMilestone}
+                  onAddMilestone={() => void handleAddMilestone()}
+                />
+                <DeliverablesPanel
+                  milestone={selectedMilestone}
+                  deliverables={graph.deliverables}
+                  employees={employees}
+                  planStartDate={startDate}
+                  startWeek={
+                    selectedMilestone
+                      ? milestoneStartWeeks.get(selectedMilestone.id) ?? 0
+                      : 0
+                  }
+                  disabled={saving || importParsing}
+                  onMilestoneUpdated={mergeMilestone}
+                  onDeliverableUpdated={mergeDeliverable}
+                  onDeliverableCreated={appendDeliverable}
+                  onDeliverableDeleted={removeDeliverableFromGraph}
+                  onSaveMilestone={updateMilestone}
+                  onSaveDeliverable={updateDeliverable}
+                  onCreateDeliverable={(milestoneId) =>
+                    createDeliverable(milestoneId, "New item", "todo", "", null, "on_track")
+                  }
+                  onDeleteDeliverable={deleteDeliverable}
+                  onError={(message) => setStatus(message)}
+                />
+              </>
+            )}
+          </>
+        )}
       </div>
-    ) : (
-      <div className="imagegen-panel" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <h2 className="imagegen-panel-title">Vacation calendar</h2>
-        {!vacationLoading ? (
-          <MonthZoomWidget
-            monthZoom={vacationMonthZoom}
-            maxExpandedMonths={vacationMaxExpandedMonths}
-            onMonthZoomChange={setVacationMonthZoom}
-          />
-        ) : null}
-        <div className="imagegen-panel-body" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          {status ? (
-            <p role="status" style={{ margin: "0 0 8px", color: "#fca5a5", fontSize: 13 }}>
-              {status}
-            </p>
-          ) : null}
-          {vacationLoading ? (
-            <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>Loading vacation data...</p>
-          ) : (
-            <VacationsGrid
-              rangeFrom={vacationGrid.range.from}
-              rangeTo={vacationGrid.range.to}
-              employees={vacationGrid.employees}
-              entries={vacationGrid.entries}
-              holidays={vacationGrid.holidays}
-              selectedKeys={selectedKeys}
-              dragAnchor={dragAnchor}
-              monthZoom={vacationMonthZoom}
-              onSelectKeys={setSelectedKeys}
-              onDragAnchor={setDragAnchor}
-            />
-          )}
-        </div>
-      </div>
-    );
+    </div>
+  );
 
   return (
     <>

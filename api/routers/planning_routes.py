@@ -2,16 +2,9 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, File, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from core.auth import get_current_user, require_admin
-from services.planning.employee_service import (
-    create_employee,
-    delete_employee,
-    list_employees,
-    update_employee,
-)
 from services.planning.planning_import_pkg.planning_import_service import apply_import, parse_import_file
 from services.planning.planning_import_pkg.planning_import_types import ImportedPlanningData
 from services.planning.planning_service import (
@@ -29,8 +22,6 @@ from services.planning.planning_service import (
     update_milestone,
     upsert_plan_start_date,
 )
-from services.planning.vacation_service import get_vacation_grid, update_vacation_cells
-
 planning_router = APIRouter(prefix="/planning", tags=["planning"])
 
 
@@ -93,24 +84,6 @@ class EventCreateBody(BaseModel):
 class EventUpdateBody(BaseModel):
     name: Optional[str] = None
     weeks_after_milestone_start: Optional[int] = Field(default=None, ge=0)
-
-
-class VacationCellsBody(BaseModel):
-    employee_id: str = Field(min_length=1)
-    dates: List[str] = Field(min_length=1)
-    status: Optional[str] = None
-
-
-class EmployeeCreateBody(BaseModel):
-    name: str = Field(min_length=1)
-    title: str = ""
-    start_date: str = Field(min_length=1)
-
-
-class EmployeeUpdateBody(BaseModel):
-    name: Optional[str] = None
-    title: Optional[str] = None
-    start_date: Optional[str] = None
 
 
 @planning_router.get("")
@@ -212,56 +185,6 @@ def patch_event(event_id: str, body: EventUpdateBody) -> dict:
 @planning_router.delete("/events/{event_id}")
 def remove_event(event_id: str) -> dict:
     return delete_event(event_id)
-
-
-@planning_router.get("/vacations")
-def get_vacations(
-    from_date: Optional[str] = Query(default=None, alias="from"),
-    to_date: Optional[str] = Query(default=None, alias="to"),
-) -> dict:
-    return get_vacation_grid(from_date=from_date, to_date=to_date)
-
-
-@planning_router.put("/vacations/cells")
-def put_vacation_cells(
-    body: VacationCellsBody,
-    user: dict = Depends(get_current_user),
-) -> dict:
-    return update_vacation_cells(
-        body.employee_id,
-        body.dates,
-        body.status,
-        actor_email=str(user.get("email") or ""),
-    )
-
-
-@planning_router.get("/employees")
-def get_employees() -> list:
-    return list_employees()
-
-
-@planning_router.post("/employees")
-def post_employee(body: EmployeeCreateBody, _admin: dict = Depends(require_admin)) -> dict:
-    return create_employee(body.name, body.title, body.start_date)
-
-
-@planning_router.patch("/employees/{employee_id}")
-def patch_employee(
-    employee_id: str,
-    body: EmployeeUpdateBody,
-    _admin: dict = Depends(require_admin),
-) -> dict:
-    return update_employee(
-        employee_id,
-        name=body.name,
-        title=body.title,
-        start_date=body.start_date,
-    )
-
-
-@planning_router.delete("/employees/{employee_id}")
-def remove_employee(employee_id: str, _admin: dict = Depends(require_admin)) -> dict:
-    return delete_employee(employee_id)
 
 
 @planning_router.post("/import/parse")

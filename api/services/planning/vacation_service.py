@@ -150,10 +150,16 @@ def update_vacation_cells(
     employee_name = str(employee_row.get("name") or "")
     emp_start = date.fromisoformat(str(employee_row.get("start_date") or date.today().isoformat()))
     for day_iso in parsed_dates:
-        if date.fromisoformat(day_iso) < emp_start:
+        day = date.fromisoformat(day_iso)
+        if day < emp_start:
             raise HTTPException(
                 status_code=400,
                 detail=f"Cannot set vacation before employee start date ({emp_start.isoformat()}).",
+            )
+        if new_status is not None and day.weekday() >= 5:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot book vacation or away on weekends.",
             )
 
     existing_result = (

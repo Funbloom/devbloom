@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, type ReactElement } from "react";
-import type { PlanningEmployee, VacationEntry } from "../types";
+import type { VacationEmployee, VacationEntry } from "../types";
 import {
   buildDayColumns,
   dayColumnWidth,
@@ -14,9 +14,10 @@ import {
   VACATION_WEEKEND_CELL_COLOR,
   VACATION_WEEKEND_CELL_SELECTED_COLOR,
 } from "../vacationGrid";
-import type { MonthZoom } from "../monthZoom";
+import type { MonthZoom } from "../../planning/monthZoom";
 import {
   cellKey,
+  filterSelectableVacationKeys,
   selectionFromDrag,
   type VacationCellKey,
 } from "../vacationSelection";
@@ -30,7 +31,7 @@ const DAY_NUM_ROW_H = 24;
 type Props = {
   rangeFrom: string;
   rangeTo: string;
-  employees: PlanningEmployee[];
+  employees: VacationEmployee[];
   entries: VacationEntry[];
   holidays: string[];
   selectedKeys: Set<string>;
@@ -84,6 +85,10 @@ export function VacationsGrid({
   );
   const monthGroups = useMemo(() => monthSpans(columns), [columns]);
   const holidaySet = useMemo(() => new Set(holidays), [holidays]);
+  const weekendDates = useMemo(
+    () => new Set(columns.filter((column) => column.isWeekend).map((column) => column.iso)),
+    [columns],
+  );
   const dateOrder = useMemo(() => columns.map((c) => c.iso), [columns]);
   const employeeOrder = useMemo(() => employees.map((e) => e.id), [employees]);
 
@@ -129,7 +134,7 @@ export function VacationsGrid({
 
   const handleCellMouseDown = (employeeId: string, dateIso: string) => {
     const key = cellKey(employeeId, dateIso);
-    if (holidaySet.has(dateIso) || inactiveKeys.has(key)) {
+    if (holidaySet.has(dateIso) || weekendDates.has(dateIso) || inactiveKeys.has(key)) {
       return;
     }
     const anchor = { employeeId, dateIso };
@@ -142,7 +147,8 @@ export function VacationsGrid({
       return;
     }
     const current = { employeeId, dateIso };
-    onSelectKeys(selectionFromDrag(dragAnchor, current, employeeOrder, dateOrder));
+    const dragged = selectionFromDrag(dragAnchor, current, employeeOrder, dateOrder);
+    onSelectKeys(filterSelectableVacationKeys(dragged, holidaySet, weekendDates, inactiveKeys));
   };
 
   return (
@@ -336,7 +342,9 @@ export function VacationsGrid({
                   {columns.map((col) => {
                     const key = cellKey(employee.id, col.iso);
                     const isHoliday = holidaySet.has(col.iso);
+                    const isWeekend = col.isWeekend;
                     const isInactive = inactiveKeys.has(key);
+                    const isBlocked = isHoliday || isWeekend || isInactive;
                     const status = entryMap.get(key);
                     const isSelected = selectedKeys.has(key);
                     return (
@@ -355,11 +363,11 @@ export function VacationsGrid({
                           background: cellBackground(
                             isHoliday,
                             isInactive,
-                            col.isWeekend,
+                            isWeekend,
                             status,
                             isSelected,
                           ),
-                          cursor: isHoliday || isInactive ? "not-allowed" : "cell",
+                          cursor: isBlocked ? "not-allowed" : "cell",
                           boxSizing: "border-box",
                         }}
                       />

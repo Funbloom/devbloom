@@ -2,7 +2,7 @@
 
 import type { ReactElement } from "react";
 import type { SelectionActionState } from "../vacationSelection";
-import { VACATION_HOLIDAY_CELL_COLOR } from "../vacationGrid";
+import { VACATION_HOLIDAY_CELL_COLOR, VACATION_WEEKEND_CELL_COLOR } from "../vacationGrid";
 
 type Props = {
   selectionState: SelectionActionState;
@@ -72,6 +72,20 @@ export function VacationsLeftPanel({
             />
             Purple — US federal holiday
           </div>
+          <div>
+            <span
+              style={{
+                display: "inline-block",
+                width: 12,
+                height: 12,
+                background: VACATION_WEEKEND_CELL_COLOR,
+                borderRadius: 2,
+                marginRight: 6,
+                verticalAlign: "middle",
+              }}
+            />
+            Gray — weekend (not bookable)
+          </div>
         </div>
         <div style={{ display: "grid", gap: 8 }}>
           {selectionState === "available" ? (
@@ -112,6 +126,11 @@ export function VacationsLeftPanel({
           {selectionState === "holiday" ? (
             <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
               Federal holidays cannot be changed.
+            </p>
+          ) : null}
+          {selectionState === "weekend" ? (
+            <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+              Weekends cannot be booked for vacation or away.
             </p>
           ) : null}
           {selectionState === "inactive" ? (

@@ -50,19 +50,59 @@ export type SelectionActionState =
   | "vacation"
   | "away"
   | "holiday"
+  | "weekend"
   | "mixed"
   | "inactive";
+
+export function isSelectableVacationKey(
+  key: string,
+  holidayDates: Set<string>,
+  weekendDates: Set<string>,
+  inactiveKeys: Set<string>,
+): boolean {
+  const parsed = parseCellKey(key);
+  if (!parsed) {
+    return false;
+  }
+  if (inactiveKeys.has(key)) {
+    return false;
+  }
+  if (holidayDates.has(parsed.dateIso)) {
+    return false;
+  }
+  if (weekendDates.has(parsed.dateIso)) {
+    return false;
+  }
+  return true;
+}
+
+export function filterSelectableVacationKeys(
+  keys: Iterable<string>,
+  holidayDates: Set<string>,
+  weekendDates: Set<string>,
+  inactiveKeys: Set<string>,
+): Set<string> {
+  const filtered = new Set<string>();
+  for (const key of keys) {
+    if (isSelectableVacationKey(key, holidayDates, weekendDates, inactiveKeys)) {
+      filtered.add(key);
+    }
+  }
+  return filtered;
+}
 
 export function aggregateSelectionState(
   selectedKeys: Set<string>,
   entryStatusByKey: Map<string, "vacation" | "away_working">,
   holidayDates: Set<string>,
+  weekendDates: Set<string>,
   inactiveKeys: Set<string>,
 ): SelectionActionState {
   if (selectedKeys.size === 0) {
     return "none";
   }
   let hasHoliday = false;
+  let hasWeekend = false;
   let hasInactive = false;
   let hasVacation = false;
   let hasAway = false;
@@ -80,6 +120,10 @@ export function aggregateSelectionState(
       hasHoliday = true;
       continue;
     }
+    if (weekendDates.has(parsed.dateIso)) {
+      hasWeekend = true;
+      continue;
+    }
     const status = entryStatusByKey.get(key);
     if (status === "vacation") {
       hasVacation = true;
@@ -91,6 +135,9 @@ export function aggregateSelectionState(
   }
   if (hasHoliday) {
     return "holiday";
+  }
+  if (hasWeekend) {
+    return "weekend";
   }
   if (hasInactive) {
     return "inactive";

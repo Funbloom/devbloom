@@ -5,7 +5,8 @@ import {
   countAnalyzedRiskChanges,
   countEmployeeUnavailableDays,
 } from "./planningAnalysis";
-import type { PlanningEmployee, PlanningGraph, VacationEntry } from "./types";
+import type { PlanningGraph } from "./types";
+import type { VacationEmployee, VacationEntry } from "../vacations/types";
 
 const REFERENCE = new Date("2026-03-15T12:00:00");
 const PLAN_START = "2026-01-01";
@@ -333,7 +334,7 @@ describe("analyzePlanning", () => {
       ],
     });
 
-    const employee: PlanningEmployee = {
+    const employee: VacationEmployee = {
       id: "emp-erin",
       name: "Erin",
       title: "Dev",
@@ -369,7 +370,7 @@ describe("analyzePlanning", () => {
   });
 
   it("counts unavailable days for employee vacation and holidays", () => {
-    const employee: PlanningEmployee = {
+    const employee: VacationEmployee = {
       id: "emp-1",
       name: "Alex",
       title: "",
@@ -393,6 +394,58 @@ describe("analyzePlanning", () => {
     expect(counts.vacationDays).toBe(1);
     expect(counts.awayDays).toBe(1);
     expect(counts.holidayDays).toBe(1);
+  });
+
+  it("keeps milestone on track when all deliverables are done despite passed delivery date", () => {
+    const graph = makeGraph({
+      milestones: [
+        {
+          id: "m1",
+          project_plan_id: "plan-1",
+          name: "M01 Alpha",
+          duration_weeks: 4,
+          status: "in_progress",
+          risk: "risk",
+          goals: [],
+          order_index: 0,
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+      deliverables: [
+        {
+          id: "d1",
+          milestone_id: "m1",
+          title: "Item A",
+          status: "completed",
+          risk: "on_track",
+          owner: "Alex",
+          due_date: "2026-02-01",
+          order_index: 0,
+          created_at: "",
+          updated_at: "",
+        },
+        {
+          id: "d2",
+          milestone_id: "m1",
+          title: "Item B",
+          status: "ready",
+          risk: "on_track",
+          owner: "Alex",
+          due_date: "2026-02-15",
+          order_index: 1,
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    });
+
+    const result = analyzePlanning(graph, PLAN_START, REFERENCE);
+    const milestone = result.milestones[0];
+    expect(milestone.scheduleSeverity).toBe("on_track");
+    expect(milestone.paceSeverity).toBe("on_track");
+    expect(milestone.deliverablesSeverity).toBe("on_track");
+    expect(result.findings.some((finding) => finding.issueLabel === "Schedule overdue")).toBe(false);
   });
 
   it("builds risk updates from milestone and deliverable analysis", () => {

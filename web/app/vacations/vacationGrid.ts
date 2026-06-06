@@ -5,7 +5,7 @@ import {
   DEFAULT_MONTH_ZOOM,
   orderedMonthKeysInRange,
   type MonthZoom,
-} from "./monthZoom";
+} from "../planning/monthZoom";
 
 export type VacationMonthZoom = MonthZoom;
 export const DEFAULT_VACATION_MONTH_ZOOM = DEFAULT_MONTH_ZOOM;
@@ -59,6 +59,11 @@ function isoFromDate(d: Date): string {
 
 function todayIso(): string {
   return isoFromDate(new Date());
+}
+
+export function isWeekendIso(iso: string): boolean {
+  const day = parseIso(iso).getDay();
+  return day === 0 || day === 6;
 }
 
 export function buildDayColumns(
