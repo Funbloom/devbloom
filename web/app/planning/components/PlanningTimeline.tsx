@@ -1,12 +1,16 @@
 "use client";
 
+import { useMemo } from "react";
 import type { ReactElement } from "react";
+import type { MonthZoom } from "../monthZoom";
 import {
   buildWeekColumns,
   computeMilestoneStartWeeks,
   currentPlanWeekIndex,
   PLANNING_WEEKS_MAX,
-  WEEK_COLUMN_PX,
+  weekColumnOffsets,
+  weekRangeWidthPx,
+  weekTimelineWidthPx,
 } from "../planningTimeline";
 import type { PlanningEvent, PlanningMilestone } from "../types";
 import { RISK_LABELS, riskCellStyle, STATUS_LABELS, statusBarColor } from "./planningColors";
@@ -15,7 +19,8 @@ const STICKY_NAME_W = 200;
 const STICKY_STATUS_W = 110;
 const STICKY_RISK_W = 100;
 const STICKY_LEFT_W = STICKY_NAME_W + STICKY_STATUS_W + STICKY_RISK_W;
-const ROW_H = 44;
+const ROW_H = 68;
+const BAR_H = 28;
 const HEADER_H = 52;
 
 type Props = {
@@ -27,16 +32,19 @@ type Props = {
   onSelectMilestone: (id: string) => void;
   onEditMilestone: (milestone: PlanningMilestone) => void;
   onAddMilestone: () => void;
+  monthZoom: MonthZoom;
 };
 
-function monthSpans(columns: ReturnType<typeof buildWeekColumns>): Array<{ label: string; span: number }> {
-  const spans: Array<{ label: string; span: number }> = [];
+function monthSpans(
+  columns: ReturnType<typeof buildWeekColumns>,
+): Array<{ label: string; widthPx: number }> {
+  const spans: Array<{ label: string; widthPx: number }> = [];
   for (const col of columns) {
     const last = spans[spans.length - 1];
     if (last && last.label === col.month_label) {
-      last.span += 1;
+      last.widthPx += col.weekWidthPx;
     } else {
-      spans.push({ label: col.month_label, span: 1 });
+      spans.push({ label: col.month_label, widthPx: col.weekWidthPx });
     }
   }
   return spans;
@@ -51,13 +59,18 @@ export function PlanningTimeline({
   onSelectMilestone,
   onEditMilestone,
   onAddMilestone,
+  monthZoom,
 }: Props): ReactElement {
-  const columns = buildWeekColumns(startDate, PLANNING_WEEKS_MAX);
+  const columns = useMemo(
+    () => buildWeekColumns(startDate, PLANNING_WEEKS_MAX, monthZoom),
+    [startDate, monthZoom],
+  );
+  const weekOffsets = useMemo(() => weekColumnOffsets(columns), [columns]);
   const startWeeks = computeMilestoneStartWeeks(milestones);
   const ordered = [...milestones].sort((a, b) => a.order_index - b.order_index);
   const currentWeek = currentPlanWeekIndex(startDate);
   const monthGroups = monthSpans(columns);
-  const timelineWidth = columns.length * WEEK_COLUMN_PX;
+  const timelineWidth = weekTimelineWidthPx(columns);
 
   const cellBorder = "1px solid #2a2f3a";
 
@@ -72,7 +85,10 @@ export function PlanningTimeline({
                 position: "absolute",
                 top: 0,
                 bottom: 0,
-                left: STICKY_LEFT_W + currentWeek * WEEK_COLUMN_PX + WEEK_COLUMN_PX / 2,
+                left:
+                  STICKY_LEFT_W +
+                  (weekOffsets[currentWeek] ?? 0) +
+                  (columns[currentWeek]?.weekWidthPx ?? 0) / 2,
                 width: 2,
                 background: "#f97316",
                 zIndex: 5,
@@ -137,7 +153,7 @@ export function PlanningTimeline({
                   <div
                     key={`${group.label}-${idx}`}
                     style={{
-                      width: group.span * WEEK_COLUMN_PX,
+                      width: group.widthPx,
                       borderRight: cellBorder,
                       borderBottom: cellBorder,
                       fontSize: 11,
@@ -155,7 +171,8 @@ export function PlanningTimeline({
                   <div
                     key={col.week_index}
                     style={{
-                      width: WEEK_COLUMN_PX,
+                      width: col.weekWidthPx,
+                      minWidth: col.weekWidthPx,
                       borderRight: cellBorder,
                       fontSize: 9,
                       padding: "2px 2px",
@@ -212,7 +229,17 @@ export function PlanningTimeline({
                       fontSize: 12,
                     }}
                   >
-                    <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span
+                      style={{
+                        fontWeight: 600,
+                        lineHeight: 1.35,
+                        overflow: "hidden",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        wordBreak: "break-word",
+                      }}
+                    >
                       {milestone.name}
                     </span>
                     <button
@@ -271,10 +298,10 @@ export function PlanningTimeline({
                   <div
                     style={{
                       position: "absolute",
-                      top: 10,
-                      left: startWeek * WEEK_COLUMN_PX + 2,
-                      width: duration * WEEK_COLUMN_PX - 4,
-                      height: ROW_H - 20,
+                      top: (ROW_H - BAR_H) / 2,
+                      left: (weekOffsets[startWeek] ?? 0) + 2,
+                      width: weekRangeWidthPx(columns, startWeek, duration) - 4,
+                      height: BAR_H,
                       borderRadius: 6,
                       background: statusBarColor(milestone.status),
                       opacity: 0.92,
@@ -292,8 +319,8 @@ export function PlanningTimeline({
                         title={ev.name}
                         style={{
                           position: "absolute",
-                          top: 4,
-                          left: week * WEEK_COLUMN_PX + WEEK_COLUMN_PX / 2 - 4,
+                          top: (ROW_H - 8) / 2,
+                          left: (weekOffsets[week] ?? 0) + (columns[week]?.weekWidthPx ?? 0) / 2 - 4,
                           width: 8,
                           height: 8,
                           borderRadius: "50%",

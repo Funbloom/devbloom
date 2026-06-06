@@ -1,14 +1,26 @@
 "use client";
 
 import type { ReactElement } from "react";
+import type { MonthZoom } from "../monthZoom";
+import { MonthZoomWidget } from "./MonthZoomWidget";
 
 type Props = {
   startDate: string;
   saving: boolean;
+  monthZoom: MonthZoom;
+  maxExpandedMonths: number;
+  onMonthZoomChange: (zoom: MonthZoom) => void;
   onStartDateChange: (value: string) => void;
 };
 
-export function PlanningLeftPanel({ startDate, saving, onStartDateChange }: Props): ReactElement {
+export function PlanningLeftPanel({
+  startDate,
+  saving,
+  monthZoom,
+  maxExpandedMonths,
+  onMonthZoomChange,
+  onStartDateChange,
+}: Props): ReactElement {
   return (
     <div className="imagegen-panel">
       <h2 className="imagegen-panel-title">Planning</h2>
@@ -33,6 +45,12 @@ export function PlanningLeftPanel({ startDate, saving, onStartDateChange }: Prop
             }}
           />
         </label>
+        <MonthZoomWidget
+          monthZoom={monthZoom}
+          maxExpandedMonths={maxExpandedMonths}
+          cellWidthLabel="Week column width"
+          onMonthZoomChange={onMonthZoomChange}
+        />
         <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)" }}>
           <div>Status bar colors: blue todo, yellow in progress, green ready, dark green completed.</div>
           <div style={{ marginTop: 6 }}>Risk column: green on track, amber caution, red risk.</div>

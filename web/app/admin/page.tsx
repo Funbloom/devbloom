@@ -7,6 +7,13 @@ import { fetchApi, API_BASE } from "../lib/api";
 import { projectKeyFromDisplayName } from "../lib/projectKey";
 import { localAgent, getLocalProjectPath, setLocalProjectPath, isLocalAgentContext } from "../lib/localAgentClient";
 import { useAuth } from "../contexts/AuthContext";
+import {
+  createPlanningEmployee,
+  deletePlanningEmployee,
+  fetchPlanningEmployees,
+  updatePlanningEmployee,
+} from "../planning/vacationClient";
+import type { PlanningEmployee } from "../planning/types";
 
 type SourceItem = {
   id: string;
@@ -107,9 +114,9 @@ export default function AdminPage() {
     currentProjectSources?: SourceItem[];
     otherSources?: SourceItem[];
   }>({ state: "idle" });
-  const [activeTab, setActiveTab] = useState<"projects" | "rag" | "settings" | "tests" | "users">(
-    "projects",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "projects" | "rag" | "settings" | "tests" | "users" | "employees"
+  >("projects");
   const { authUser, session } = useAuth();
   const [users, setUsers] = useState<{
     id: string;
@@ -122,6 +129,19 @@ export default function AdminPage() {
   }[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
+  const [employees, setEmployees] = useState<PlanningEmployee[]>([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
+  const [employeesError, setEmployeesError] = useState<string | null>(null);
+  const [employeesStatus, setEmployeesStatus] = useState<string | null>(null);
+  const [newEmployeeName, setNewEmployeeName] = useState("");
+  const [newEmployeeTitle, setNewEmployeeTitle] = useState("");
+  const [newEmployeeStartDate, setNewEmployeeStartDate] = useState(
+    () => new Date().toISOString().slice(0, 10),
+  );
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
+  const [editEmployeeName, setEditEmployeeName] = useState("");
+  const [editEmployeeTitle, setEditEmployeeTitle] = useState("");
+  const [editEmployeeStartDate, setEditEmployeeStartDate] = useState("");
   const adminTopRef = useRef<HTMLDivElement | null>(null);
 
   const loadSources = async () => {
@@ -165,6 +185,19 @@ export default function AdminPage() {
     } finally {
       setIsProjectsLoading(false);
       setProjectsLoaded(true);
+    }
+  };
+
+  const loadEmployees = async () => {
+    setEmployeesLoading(true);
+    setEmployeesError(null);
+    try {
+      const data = await fetchPlanningEmployees();
+      setEmployees(data);
+    } catch (err) {
+      setEmployeesError(err instanceof Error ? err.message : "Failed to load employees.");
+    } finally {
+      setEmployeesLoading(false);
     }
   };
 
@@ -767,7 +800,9 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    if (activeTab !== "users") return;
+    if (activeTab !== "users" && activeTab !== "employees") {
+      return;
+    }
     requestAnimationFrame(() => {
       adminTopRef.current?.scrollIntoView({ block: "start" });
     });
@@ -829,6 +864,20 @@ export default function AdminPage() {
                 }}
               >
                 Users
+              </button>
+            )}
+            {authUser?.is_admin && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "employees"}
+                className={activeTab === "employees" ? "admin-tab active" : "admin-tab"}
+                onClick={() => {
+                  setActiveTab("employees");
+                  void loadEmployees();
+                }}
+              >
+                Employees
               </button>
             )}
           </div>
@@ -1322,6 +1371,198 @@ export default function AdminPage() {
             )}
             {ragTestStatus.state === "error" && (
               <div className="admin-test-status error">Error: {ragTestStatus.message}</div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "employees" && authUser?.is_admin && (
+          <div className="admin-card admin-test-card">
+            <div className="admin-card-title">Employees</div>
+            <p style={{ margin: "0 0 1rem", fontSize: 14, color: "var(--muted, #94a3b8)" }}>
+              People shown on the Planning tool Vacations tab. Only admins can add or remove
+              employees.
+            </p>
+            {employeesStatus ? <div className="admin-status">{employeesStatus}</div> : null}
+            {employeesError ? <div className="admin-test-status error">{employeesError}</div> : null}
+            <div className="admin-test-grid" style={{ marginBottom: "1rem" }}>
+              <label className="admin-field">
+                <span>Name</span>
+                <input
+                  type="text"
+                  value={newEmployeeName}
+                  onChange={(e) => setNewEmployeeName(e.target.value)}
+                  placeholder="Full name"
+                />
+              </label>
+              <label className="admin-field">
+                <span>Title</span>
+                <input
+                  type="text"
+                  value={newEmployeeTitle}
+                  onChange={(e) => setNewEmployeeTitle(e.target.value)}
+                  placeholder="Job title"
+                />
+              </label>
+              <label className="admin-field">
+                <span>Start date</span>
+                <input
+                  type="date"
+                  value={newEmployeeStartDate}
+                  onChange={(e) => setNewEmployeeStartDate(e.target.value)}
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              className="admin-btn"
+              disabled={employeesLoading || !newEmployeeName.trim()}
+              onClick={() => {
+                void (async () => {
+                  setEmployeesStatus(null);
+                  try {
+                    await createPlanningEmployee(
+                      newEmployeeName.trim(),
+                      newEmployeeTitle.trim(),
+                      newEmployeeStartDate,
+                    );
+                    setNewEmployeeName("");
+                    setNewEmployeeTitle("");
+                    setEmployeesStatus("Employee added.");
+                    await loadEmployees();
+                  } catch (err) {
+                    setEmployeesStatus(
+                      err instanceof Error ? err.message : "Failed to add employee.",
+                    );
+                  }
+                })();
+              }}
+            >
+              Add employee
+            </button>
+            {employeesLoading && <div className="admin-test-status">Loading employees…</div>}
+            {!employeesLoading && !employeesError && (
+              <div className="admin-users-table-wrap" style={{ overflowX: "auto", marginTop: "1rem" }}>
+                <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", padding: "0.5rem" }}>Name</th>
+                      <th style={{ textAlign: "left", padding: "0.5rem" }}>Title</th>
+                      <th style={{ textAlign: "left", padding: "0.5rem" }}>Start date</th>
+                      <th style={{ textAlign: "right", padding: "0.5rem" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.map((employee) => (
+                      <tr key={employee.id}>
+                        {editingEmployeeId === employee.id ? (
+                          <>
+                            <td style={{ padding: "0.5rem" }}>
+                              <input
+                                type="text"
+                                value={editEmployeeName}
+                                onChange={(e) => setEditEmployeeName(e.target.value)}
+                              />
+                            </td>
+                            <td style={{ padding: "0.5rem" }}>
+                              <input
+                                type="text"
+                                value={editEmployeeTitle}
+                                onChange={(e) => setEditEmployeeTitle(e.target.value)}
+                              />
+                            </td>
+                            <td style={{ padding: "0.5rem" }}>
+                              <input
+                                type="date"
+                                value={editEmployeeStartDate}
+                                onChange={(e) => setEditEmployeeStartDate(e.target.value)}
+                              />
+                            </td>
+                            <td style={{ padding: "0.5rem", textAlign: "right" }}>
+                              <button
+                                type="button"
+                                className="admin-btn"
+                                onClick={() => {
+                                  void (async () => {
+                                    setEmployeesStatus(null);
+                                    try {
+                                      await updatePlanningEmployee(employee.id, {
+                                        name: editEmployeeName.trim(),
+                                        title: editEmployeeTitle.trim(),
+                                        start_date: editEmployeeStartDate,
+                                      });
+                                      setEditingEmployeeId(null);
+                                      setEmployeesStatus("Employee updated.");
+                                      await loadEmployees();
+                                    } catch (err) {
+                                      setEmployeesStatus(
+                                        err instanceof Error ? err.message : "Failed to update employee.",
+                                      );
+                                    }
+                                  })();
+                                }}
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="admin-btn"
+                                style={{ marginLeft: 8 }}
+                                onClick={() => setEditingEmployeeId(null)}
+                              >
+                                Cancel
+                              </button>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td style={{ padding: "0.5rem" }}>{employee.name}</td>
+                            <td style={{ padding: "0.5rem" }}>{employee.title || "—"}</td>
+                            <td style={{ padding: "0.5rem" }}>{employee.start_date}</td>
+                            <td style={{ padding: "0.5rem", textAlign: "right" }}>
+                              <button
+                                type="button"
+                                className="admin-btn"
+                                onClick={() => {
+                                  setEditingEmployeeId(employee.id);
+                                  setEditEmployeeName(employee.name);
+                                  setEditEmployeeTitle(employee.title);
+                                  setEditEmployeeStartDate(employee.start_date);
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="admin-btn"
+                                style={{ marginLeft: 8 }}
+                                onClick={() => {
+                                  if (!window.confirm(`Remove ${employee.name}?`)) {
+                                    return;
+                                  }
+                                  void (async () => {
+                                    setEmployeesStatus(null);
+                                    try {
+                                      await deletePlanningEmployee(employee.id);
+                                      setEmployeesStatus("Employee removed.");
+                                      await loadEmployees();
+                                    } catch (err) {
+                                      setEmployeesStatus(
+                                        err instanceof Error ? err.message : "Failed to remove employee.",
+                                      );
+                                    }
+                                  })();
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}

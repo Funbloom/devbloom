@@ -314,8 +314,9 @@ export function MilestoneEditModal({
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "space-between" }}>
           <button
             type="button"
+            className="imagegen-delete-button"
             disabled={saving}
-            style={{ color: "#fca5a5" }}
+            style={{ marginTop: 0, opacity: saving ? 0.6 : 1 }}
             onClick={() => void onDeleteMilestone()}
           >
             Delete milestone
