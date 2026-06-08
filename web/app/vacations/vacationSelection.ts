@@ -52,16 +52,21 @@ export type SelectionActionState =
   | "holiday"
   | "weekend"
   | "mixed"
-  | "inactive";
+  | "inactive"
+  | "readonly";
 
 export function isSelectableVacationKey(
   key: string,
   holidayDates: Set<string>,
   weekendDates: Set<string>,
   inactiveKeys: Set<string>,
+  readonlyKeys: Set<string> = new Set(),
 ): boolean {
   const parsed = parseCellKey(key);
   if (!parsed) {
+    return false;
+  }
+  if (readonlyKeys.has(key)) {
     return false;
   }
   if (inactiveKeys.has(key)) {
@@ -81,10 +86,11 @@ export function filterSelectableVacationKeys(
   holidayDates: Set<string>,
   weekendDates: Set<string>,
   inactiveKeys: Set<string>,
+  readonlyKeys: Set<string> = new Set(),
 ): Set<string> {
   const filtered = new Set<string>();
   for (const key of keys) {
-    if (isSelectableVacationKey(key, holidayDates, weekendDates, inactiveKeys)) {
+    if (isSelectableVacationKey(key, holidayDates, weekendDates, inactiveKeys, readonlyKeys)) {
       filtered.add(key);
     }
   }
@@ -97,10 +103,12 @@ export function aggregateSelectionState(
   holidayDates: Set<string>,
   weekendDates: Set<string>,
   inactiveKeys: Set<string>,
+  readonlyKeys: Set<string> = new Set(),
 ): SelectionActionState {
   if (selectedKeys.size === 0) {
     return "none";
   }
+  let hasReadonly = false;
   let hasHoliday = false;
   let hasWeekend = false;
   let hasInactive = false;
@@ -110,6 +118,10 @@ export function aggregateSelectionState(
   for (const key of selectedKeys) {
     const parsed = parseCellKey(key);
     if (!parsed) {
+      continue;
+    }
+    if (readonlyKeys.has(key)) {
+      hasReadonly = true;
       continue;
     }
     if (inactiveKeys.has(key)) {
@@ -132,6 +144,9 @@ export function aggregateSelectionState(
     } else {
       hasWhite = true;
     }
+  }
+  if (hasReadonly) {
+    return "readonly";
   }
   if (hasHoliday) {
     return "holiday";

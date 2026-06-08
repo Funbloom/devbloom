@@ -24,6 +24,12 @@ import {
 
 const STICKY_NAME_W = 180;
 const ROW_H = 36;
+const CURRENT_USER_NAME_BG = "#1e3a5f";
+const CURRENT_USER_EMPTY_CELL_BG = "#172554";
+const CURRENT_USER_WEEKEND_CELL_BG = "#1e293b";
+const CURRENT_USER_INACTIVE_CELL_BG = "#243044";
+const CURRENT_USER_ROW_ACCENT = "#3b82f6";
+const CURRENT_USER_ROW_BG = "rgba(59, 130, 246, 0.07)";
 const HEADER_H = 52;
 const DAY_LETTER_ROW_H = 18;
 const DAY_NUM_ROW_H = 24;
@@ -37,6 +43,8 @@ type Props = {
   selectedKeys: Set<string>;
   dragAnchor: VacationCellKey | null;
   monthZoom: MonthZoom;
+  currentEmployeeId: string | null;
+  readonlyKeys: Set<string>;
   onSelectKeys: (keys: Set<string>) => void;
   onDragAnchor: (anchor: VacationCellKey | null) => void;
 };
@@ -47,6 +55,7 @@ function cellBackground(
   isWeekend: boolean,
   status: "vacation" | "away_working" | undefined,
   isSelected: boolean,
+  isCurrentUserRow: boolean,
 ): string {
   if (status === "vacation") {
     return isSelected ? "#dc2626" : "#ef4444";
@@ -58,10 +67,16 @@ function cellBackground(
     return VACATION_HOLIDAY_CELL_COLOR;
   }
   if (isInactive) {
-    return "#1e293b";
+    return isCurrentUserRow ? CURRENT_USER_INACTIVE_CELL_BG : "#1e293b";
   }
   if (isWeekend) {
+    if (isCurrentUserRow) {
+      return isSelected ? VACATION_WEEKEND_CELL_SELECTED_COLOR : CURRENT_USER_WEEKEND_CELL_BG;
+    }
     return isSelected ? VACATION_WEEKEND_CELL_SELECTED_COLOR : VACATION_WEEKEND_CELL_COLOR;
+  }
+  if (isCurrentUserRow) {
+    return isSelected ? "#334155" : CURRENT_USER_EMPTY_CELL_BG;
   }
   return isSelected ? "#334155" : "#0f172a";
 }
@@ -75,6 +90,8 @@ export function VacationsGrid({
   selectedKeys,
   dragAnchor,
   monthZoom,
+  currentEmployeeId,
+  readonlyKeys,
   onSelectKeys,
   onDragAnchor,
 }: Props): ReactElement {
@@ -134,7 +151,12 @@ export function VacationsGrid({
 
   const handleCellMouseDown = (employeeId: string, dateIso: string) => {
     const key = cellKey(employeeId, dateIso);
-    if (holidaySet.has(dateIso) || weekendDates.has(dateIso) || inactiveKeys.has(key)) {
+    if (
+      holidaySet.has(dateIso) ||
+      weekendDates.has(dateIso) ||
+      inactiveKeys.has(key) ||
+      readonlyKeys.has(key)
+    ) {
       return;
     }
     const anchor = { employeeId, dateIso };
@@ -148,7 +170,9 @@ export function VacationsGrid({
     }
     const current = { employeeId, dateIso };
     const dragged = selectionFromDrag(dragAnchor, current, employeeOrder, dateOrder);
-    onSelectKeys(filterSelectableVacationKeys(dragged, holidaySet, weekendDates, inactiveKeys));
+    onSelectKeys(
+      filterSelectableVacationKeys(dragged, holidaySet, weekendDates, inactiveKeys, readonlyKeys),
+    );
   };
 
   return (
@@ -313,8 +337,19 @@ export function VacationsGrid({
               No employees yet. Admins can add employees under Settings → Admin → Employees.
             </div>
           ) : (
-            employees.map((employee) => (
-              <div key={employee.id} style={{ display: "flex", height: ROW_H }}>
+            employees.map((employee) => {
+              const isCurrentUserRow =
+                currentEmployeeId !== null && employee.id === currentEmployeeId;
+              return (
+              <div
+                key={employee.id}
+                style={{
+                  display: "flex",
+                  height: ROW_H,
+                  background: isCurrentUserRow ? CURRENT_USER_ROW_BG : undefined,
+                  boxShadow: isCurrentUserRow ? "inset 3px 0 0 0 #3b82f6" : undefined,
+                }}
+              >
                 <div
                   style={{
                     width: STICKY_NAME_W,
@@ -322,7 +357,8 @@ export function VacationsGrid({
                     position: "sticky",
                     left: 0,
                     zIndex: 2,
-                    background: "#111827",
+                    background: isCurrentUserRow ? CURRENT_USER_NAME_BG : "#111827",
+                    borderLeft: isCurrentUserRow ? `3px solid ${CURRENT_USER_ROW_ACCENT}` : undefined,
                     borderRight: cellBorder,
                     borderBottom: cellBorder,
                     padding: "0 8px",
@@ -366,8 +402,9 @@ export function VacationsGrid({
                             isWeekend,
                             status,
                             isSelected,
+                            isCurrentUserRow,
                           ),
-                          cursor: isBlocked ? "not-allowed" : "cell",
+                          cursor: isBlocked || readonlyKeys.has(key) ? "not-allowed" : "cell",
                           boxSizing: "border-box",
                         }}
                       />
@@ -375,7 +412,8 @@ export function VacationsGrid({
                   })}
                 </div>
               </div>
-            ))
+            );
+            })
           )}
         </div>
       </div>

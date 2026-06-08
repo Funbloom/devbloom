@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
+import { useAuth } from "../contexts/AuthContext";
 import { StudioTwoColumnShell } from "../components/studio/StudioTwoColumnShell";
 import { MonthZoomWidget } from "../planning/components/MonthZoomWidget";
 import { clampMonthZoom, orderedMonthKeysBetweenIso, type MonthZoom } from "../planning/monthZoom";
@@ -28,9 +29,12 @@ const emptyVacationGrid = (): VacationGrid => ({
   entries: [],
   holidays: [],
   range: { from: "", to: "" },
+  current_employee_id: null,
+  can_edit_all: false,
 });
 
 export function VacationsPage(): ReactElement {
+  const { authUser } = useAuth();
   const [vacationGrid, setVacationGrid] = useState<VacationGrid>(emptyVacationGrid);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -107,12 +111,44 @@ export function VacationsPage(): ReactElement {
     return set;
   }, [vacationGrid.employees, dayColumns]);
 
+  const currentEmployeeId = useMemo(() => {
+    if (vacationGrid.current_employee_id) {
+      return vacationGrid.current_employee_id;
+    }
+    const email = authUser?.email?.trim().toLowerCase();
+    if (!email) {
+      return null;
+    }
+    const match = vacationGrid.employees.find(
+      (employee) => employee.user_email?.trim().toLowerCase() === email,
+    );
+    return match?.id ?? null;
+  }, [authUser?.email, vacationGrid.current_employee_id, vacationGrid.employees]);
+
+  const readonlyKeys = useMemo(() => {
+    if (vacationGrid.can_edit_all) {
+      return new Set<string>();
+    }
+    const ownId = currentEmployeeId;
+    const set = new Set<string>();
+    for (const employee of vacationGrid.employees) {
+      if (employee.id === ownId) {
+        continue;
+      }
+      for (const column of dayColumns) {
+        set.add(cellKey(employee.id, column.iso));
+      }
+    }
+    return set;
+  }, [vacationGrid.can_edit_all, currentEmployeeId, vacationGrid.employees, dayColumns]);
+
   const selectionState = aggregateSelectionState(
     selectedKeys,
     entryStatusByKey,
     holidayDates,
     weekendDates,
     inactiveKeys,
+    readonlyKeys,
   );
 
   const applyVacationAction = async (cellStatus: "vacation" | "away_working" | null) => {
@@ -121,6 +157,7 @@ export function VacationsPage(): ReactElement {
       holidayDates,
       weekendDates,
       inactiveKeys,
+      readonlyKeys,
     );
     const byEmployee = new Map<string, string[]>();
     for (const key of selectableKeys) {
@@ -156,6 +193,8 @@ export function VacationsPage(): ReactElement {
         <VacationsLeftPanel
           selectionState={selectionState}
           saving={saving}
+          canEditAll={vacationGrid.can_edit_all}
+          hasLinkedEmployee={currentEmployeeId !== null}
           onRequestVacation={() => void applyVacationAction("vacation")}
           onSetAway={() => void applyVacationAction("away_working")}
           onCancelVacation={() => void applyVacationAction(null)}
@@ -190,6 +229,8 @@ export function VacationsPage(): ReactElement {
                 selectedKeys={selectedKeys}
                 dragAnchor={dragAnchor}
                 monthZoom={monthZoom}
+                currentEmployeeId={currentEmployeeId}
+                readonlyKeys={readonlyKeys}
                 onSelectKeys={setSelectedKeys}
                 onDragAnchor={setDragAnchor}
               />

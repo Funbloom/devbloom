@@ -42,11 +42,13 @@ def test_validate_status_accepts_clear() -> None:
     assert _validate_status("vacation") == "vacation"
 
 
+@patch("services.planning.vacation_service.find_employee_id_for_user_email", return_value="e1")
 @patch("services.planning.vacation_service.notify_vacation_change")
 @patch("services.planning.vacation_service.get_supabase_client")
 def test_update_vacation_cells_rejects_before_start_date(
     mock_get_supabase: MagicMock,
     mock_notify: MagicMock,
+    _mock_find_employee: MagicMock,
 ) -> None:
     supabase = MagicMock()
     mock_get_supabase.return_value = supabase
@@ -60,6 +62,24 @@ def test_update_vacation_cells_rejects_before_start_date(
         update_vacation_cells("e1", ["2026-05-15"], "vacation", actor_email="a@b.com")
     assert exc_info.value.status_code == 400
     mock_notify.assert_not_called()
+
+
+@patch("services.planning.vacation_service.find_employee_id_for_user_email", return_value="e1")
+def test_update_vacation_cells_denies_other_row_for_non_admin(
+    mock_find_employee: MagicMock,
+) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        update_vacation_cells("e2", ["2026-07-01"], "vacation", actor_email="a@b.com")
+    assert exc_info.value.status_code == 403
+    mock_find_employee.assert_called_once_with("a@b.com")
+
+
+@patch("services.planning.vacation_service.find_employee_id_for_user_email", return_value=None)
+def test_update_vacation_cells_denies_unlinked_user(mock_find_employee: MagicMock) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        update_vacation_cells("e1", ["2026-07-01"], "vacation", actor_email="a@b.com")
+    assert exc_info.value.status_code == 403
+    mock_find_employee.assert_called_once_with("a@b.com")
 
 
 @patch("services.planning.vacation_notify.requests.post")

@@ -138,10 +138,12 @@ export default function AdminPage() {
   const [newEmployeeStartDate, setNewEmployeeStartDate] = useState(
     () => new Date().toISOString().slice(0, 10),
   );
+  const [newEmployeeUserEmail, setNewEmployeeUserEmail] = useState("");
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [editEmployeeName, setEditEmployeeName] = useState("");
   const [editEmployeeTitle, setEditEmployeeTitle] = useState("");
   const [editEmployeeStartDate, setEditEmployeeStartDate] = useState("");
+  const [editEmployeeUserEmail, setEditEmployeeUserEmail] = useState("");
   const adminTopRef = useRef<HTMLDivElement | null>(null);
 
   const loadSources = async () => {
@@ -1379,8 +1381,8 @@ export default function AdminPage() {
           <div className="admin-card admin-test-card">
             <div className="admin-card-title">Employees</div>
             <p style={{ margin: "0 0 1rem", fontSize: 14, color: "var(--muted, #94a3b8)" }}>
-              People shown on the Planning tool Vacations tab. Only admins can add or remove
-              employees.
+              People shown on the Vacations calendar. Set user email to link a login account to a row
+              so non-admins can edit their own vacations.
             </p>
             {employeesStatus ? <div className="admin-status">{employeesStatus}</div> : null}
             {employeesError ? <div className="admin-test-status error">{employeesError}</div> : null}
@@ -1411,6 +1413,15 @@ export default function AdminPage() {
                   onChange={(e) => setNewEmployeeStartDate(e.target.value)}
                 />
               </label>
+              <label className="admin-field">
+                <span>User email</span>
+                <input
+                  type="email"
+                  value={newEmployeeUserEmail}
+                  onChange={(e) => setNewEmployeeUserEmail(e.target.value)}
+                  placeholder="login@company.com (optional)"
+                />
+              </label>
             </div>
             <button
               type="button"
@@ -1424,9 +1435,11 @@ export default function AdminPage() {
                       newEmployeeName.trim(),
                       newEmployeeTitle.trim(),
                       newEmployeeStartDate,
+                      newEmployeeUserEmail.trim() || undefined,
                     );
                     setNewEmployeeName("");
                     setNewEmployeeTitle("");
+                    setNewEmployeeUserEmail("");
                     setEmployeesStatus("Employee added.");
                     await loadEmployees();
                   } catch (err) {
@@ -1448,6 +1461,7 @@ export default function AdminPage() {
                       <th style={{ textAlign: "left", padding: "0.5rem" }}>Name</th>
                       <th style={{ textAlign: "left", padding: "0.5rem" }}>Title</th>
                       <th style={{ textAlign: "left", padding: "0.5rem" }}>Start date</th>
+                      <th style={{ textAlign: "left", padding: "0.5rem" }}>User email</th>
                       <th style={{ textAlign: "right", padding: "0.5rem" }}>Actions</th>
                     </tr>
                   </thead>
@@ -1477,6 +1491,14 @@ export default function AdminPage() {
                                 onChange={(e) => setEditEmployeeStartDate(e.target.value)}
                               />
                             </td>
+                            <td style={{ padding: "0.5rem" }}>
+                              <input
+                                type="email"
+                                value={editEmployeeUserEmail}
+                                onChange={(e) => setEditEmployeeUserEmail(e.target.value)}
+                                placeholder="login@company.com"
+                              />
+                            </td>
                             <td style={{ padding: "0.5rem", textAlign: "right" }}>
                               <button
                                 type="button"
@@ -1489,6 +1511,7 @@ export default function AdminPage() {
                                         name: editEmployeeName.trim(),
                                         title: editEmployeeTitle.trim(),
                                         start_date: editEmployeeStartDate,
+                                        user_email: editEmployeeUserEmail.trim() || null,
                                       });
                                       setEditingEmployeeId(null);
                                       setEmployeesStatus("Employee updated.");
@@ -1518,6 +1541,7 @@ export default function AdminPage() {
                             <td style={{ padding: "0.5rem" }}>{employee.name}</td>
                             <td style={{ padding: "0.5rem" }}>{employee.title || "—"}</td>
                             <td style={{ padding: "0.5rem" }}>{employee.start_date}</td>
+                            <td style={{ padding: "0.5rem" }}>{employee.user_email || "—"}</td>
                             <td style={{ padding: "0.5rem", textAlign: "right" }}>
                               <button
                                 type="button"
@@ -1527,6 +1551,7 @@ export default function AdminPage() {
                                   setEditEmployeeName(employee.name);
                                   setEditEmployeeTitle(employee.title);
                                   setEditEmployeeStartDate(employee.start_date);
+                                  setEditEmployeeUserEmail(employee.user_email ?? "");
                                 }}
                               >
                                 Edit

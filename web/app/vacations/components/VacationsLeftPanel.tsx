@@ -7,6 +7,8 @@ import { VACATION_HOLIDAY_CELL_COLOR, VACATION_WEEKEND_CELL_COLOR } from "../vac
 type Props = {
   selectionState: SelectionActionState;
   saving: boolean;
+  canEditAll: boolean;
+  hasLinkedEmployee: boolean;
   onRequestVacation: () => void;
   onSetAway: () => void;
   onCancelVacation: () => void;
@@ -16,6 +18,8 @@ type Props = {
 export function VacationsLeftPanel({
   selectionState,
   saving,
+  canEditAll,
+  hasLinkedEmployee,
   onRequestVacation,
   onSetAway,
   onCancelVacation,
@@ -29,6 +33,17 @@ export function VacationsLeftPanel({
           Drag to select days on the grid. Changes are saved immediately and notify the team chat
           when configured.
         </p>
+        {!canEditAll && !hasLinkedEmployee ? (
+          <p style={{ margin: 0, fontSize: 12, color: "#fbbf24" }}>
+            Your account is not linked to an employee row. Ask an admin to set your user email on
+            your employee record.
+          </p>
+        ) : null}
+        {!canEditAll && hasLinkedEmployee ? (
+          <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+            You can edit only your own row. Admins can edit any row.
+          </p>
+        ) : null}
         <div style={{ fontSize: 12, color: "var(--muted, #94a3b8)", display: "grid", gap: 4 }}>
           <div>
             <span
@@ -136,6 +151,11 @@ export function VacationsLeftPanel({
           {selectionState === "inactive" ? (
             <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
               Some selected days are before an employee&apos;s start date.
+            </p>
+          ) : null}
+          {selectionState === "readonly" ? (
+            <p style={{ margin: 0, fontSize: 12, color: "var(--muted, #94a3b8)" }}>
+              You can only edit your own row.
             </p>
           ) : null}
           {selectionState === "none" ? (

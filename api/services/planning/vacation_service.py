@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from services.core.rag import get_supabase_client
-from services.planning.employee_service import list_employees
+from services.planning.employee_service import find_employee_id_for_user_email, list_employees
 from services.planning.us_federal_holidays import us_federal_holidays_in_range
 from services.planning.vacation_notify import notify_vacation_change
 
@@ -68,6 +68,8 @@ def _row_to_entry(row: Dict[str, Any]) -> Dict[str, Any]:
 def get_vacation_grid(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    actor_email: str = "",
+    is_admin: bool = False,
 ) -> Dict[str, Any]:
     if from_date and to_date:
         start = _parse_date(from_date, "from")
@@ -99,11 +101,14 @@ def get_vacation_grid(
     )
     entries = [_row_to_entry(row) for row in (result.data or [])]
     holidays = us_federal_holidays_in_range(start, end)
+    current_employee_id = find_employee_id_for_user_email(actor_email)
     return {
         "employees": employees,
         "entries": entries,
         "holidays": holidays,
         "range": {"from": start.isoformat(), "to": end.isoformat()},
+        "current_employee_id": current_employee_id,
+        "can_edit_all": is_admin,
     }
 
 
@@ -124,10 +129,23 @@ def update_vacation_cells(
     dates: List[str],
     status: Optional[str],
     actor_email: str = "",
+    is_admin: bool = False,
 ) -> Dict[str, Any]:
     eid = (employee_id or "").strip()
     if not eid:
         raise HTTPException(status_code=400, detail="employee_id is required.")
+    if not is_admin:
+        own_employee_id = find_employee_id_for_user_email(actor_email)
+        if not own_employee_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Your account is not linked to an employee. Contact an admin.",
+            )
+        if own_employee_id != eid:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only edit your own vacation row.",
+            )
     if not dates:
         raise HTTPException(status_code=400, detail="dates must not be empty.")
     new_status = _validate_status(status)

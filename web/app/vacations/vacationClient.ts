@@ -47,18 +47,24 @@ export async function createVacationEmployee(
   name: string,
   title: string,
   startDate: string,
+  userEmail?: string,
 ): Promise<VacationEmployee> {
   const response = await fetchApi("/vacations/employees", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, title, start_date: startDate }),
+    body: JSON.stringify({
+      name,
+      title,
+      start_date: startDate,
+      user_email: userEmail?.trim() || null,
+    }),
   });
   return parseJson<VacationEmployee>(response, "Create employee");
 }
 
 export async function updateVacationEmployee(
   id: string,
-  patch: { name?: string; title?: string; start_date?: string },
+  patch: { name?: string; title?: string; start_date?: string; user_email?: string | null },
 ): Promise<VacationEmployee> {
   const response = await fetchApi(`/vacations/employees/${encodeURIComponent(id)}`, {
     method: "PATCH",
