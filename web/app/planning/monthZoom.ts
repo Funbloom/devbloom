@@ -9,6 +9,8 @@ export const ZOOM_PERCENT_MAX = 100;
 export const DEFAULT_ZOOM_PERCENT = 50;
 
 export const MONTH_ZOOM_MONTH_MIN = 1;
+/** Expanded month count at 100% zoom (current month + next). */
+export const MONTH_ZOOM_EXPANDED_AT_MAX = 2;
 export const MONTH_ZOOM_COMPACT_CELL_PX = 14;
 export const MONTH_ZOOM_CELL_PX_AT_ZERO = 14;
 export const MONTH_ZOOM_CELL_PX_AT_MID = 40;
@@ -33,7 +35,10 @@ export function monthZoomFromPercent(
   const expandedMonthCount =
     clampedPercent === 0
       ? max
-      : Math.max(MONTH_ZOOM_MONTH_MIN, Math.round(max - progress * (max - 1)));
+      : Math.max(
+          MONTH_ZOOM_EXPANDED_AT_MAX,
+          Math.round(max - progress * (max - MONTH_ZOOM_EXPANDED_AT_MAX)),
+        );
 
   let zoomedCellPx: number;
   if (progress <= 0.5) {
@@ -126,4 +131,80 @@ export function clampMonthZoom(zoom: MonthZoom, maxExpandedMonths: number): Mont
 
 export function cellWidthPx(monthKey: string, zoom: MonthZoom, expandedKeys: Set<string>): number {
   return expandedKeys.has(monthKey) ? zoom.zoomedCellPx : MONTH_ZOOM_COMPACT_CELL_PX;
+}
+
+type ViewportZoomColumn = {
+  month_key: string;
+  weekWidthPx: number;
+  isZoomed: boolean;
+};
+
+export function applyViewportWeekZoom(
+  columns: ViewportZoomColumn[],
+  zoom: MonthZoom,
+  expandedMonthKeys: Set<string>,
+  viewportWidthPx: number,
+  stickyLeftPx: number,
+): void {
+  if (zoom.zoomPercent < ZOOM_PERCENT_MAX || viewportWidthPx <= 0) {
+    return;
+  }
+  let expandedWeeks = 0;
+  for (const col of columns) {
+    if (expandedMonthKeys.has(col.month_key)) {
+      expandedWeeks += 1;
+    }
+  }
+  if (expandedWeeks <= 0) {
+    return;
+  }
+  const timelineViewportPx = Math.max(0, viewportWidthPx - stickyLeftPx);
+  const zoomedPx = Math.max(
+    MONTH_ZOOM_CELL_PX_AT_MID,
+    Math.floor(timelineViewportPx / expandedWeeks),
+  );
+  for (const col of columns) {
+    if (expandedMonthKeys.has(col.month_key)) {
+      col.weekWidthPx = zoomedPx;
+      col.isZoomed = true;
+    }
+  }
+}
+
+type ViewportZoomDayColumn = {
+  monthKey: string;
+  dayWidthPx: number;
+  isZoomed: boolean;
+};
+
+export function applyViewportDayZoom(
+  columns: ViewportZoomDayColumn[],
+  zoom: MonthZoom,
+  expandedMonthKeys: Set<string>,
+  viewportWidthPx: number,
+  stickyLeftPx: number,
+): void {
+  if (zoom.zoomPercent < ZOOM_PERCENT_MAX || viewportWidthPx <= 0) {
+    return;
+  }
+  let expandedDays = 0;
+  for (const col of columns) {
+    if (expandedMonthKeys.has(col.monthKey)) {
+      expandedDays += 1;
+    }
+  }
+  if (expandedDays <= 0) {
+    return;
+  }
+  const timelineViewportPx = Math.max(0, viewportWidthPx - stickyLeftPx);
+  const zoomedPx = Math.max(
+    MONTH_ZOOM_CELL_PX_AT_MID,
+    Math.floor(timelineViewportPx / expandedDays),
+  );
+  for (const col of columns) {
+    if (expandedMonthKeys.has(col.monthKey)) {
+      col.dayWidthPx = zoomedPx;
+      col.isZoomed = true;
+    }
+  }
 }

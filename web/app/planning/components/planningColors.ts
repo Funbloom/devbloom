@@ -29,6 +29,19 @@ export function statusBarColor(status: MilestoneStatus): string {
   }
 }
 
+export function riskBarColor(risk: MilestoneRisk): string {
+  switch (risk) {
+    case "on_track":
+      return "#22c55e";
+    case "caution":
+      return "#eab308";
+    case "risk":
+      return "#ef4444";
+    default:
+      return "#64748b";
+  }
+}
+
 export function riskCellStyle(risk: MilestoneRisk): CSSProperties {
   switch (risk) {
     case "on_track":

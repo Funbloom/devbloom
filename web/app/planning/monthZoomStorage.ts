@@ -9,6 +9,7 @@ import {
 } from "./monthZoom";
 
 export const PLANNING_MONTH_ZOOM_STORAGE_KEY = "devbloom_planning_month_zoom";
+export const GLOBAL_PLANNING_MONTH_ZOOM_STORAGE_KEY = "devbloom_planning_global_month_zoom";
 export const VACATION_MONTH_ZOOM_STORAGE_KEY = "devbloom_vacation_month_zoom";
 
 function parseStoredMonthZoom(raw: string): MonthZoom | null {

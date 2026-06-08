@@ -1,4 +1,5 @@
 import {
+  applyViewportWeekZoom,
   buildExpandedMonthKeys,
   cellWidthPx,
   clampMonthZoom,
@@ -10,6 +11,7 @@ import {
 import type { PlanningMilestone, ProjectPlan } from "./types";
 
 export const PLANNING_WEEKS_MAX = 104;
+export const GLOBAL_PLANNING_MONTHS_DEFAULT = 24;
 /** Default week column width when month zoom is not applied. */
 export const WEEK_COLUMN_PX = 28;
 
@@ -17,7 +19,11 @@ export type WeekColumn = {
   week_index: number;
   month_label: string;
   month_key: string;
+  month_stripe: 0 | 1;
+  week_stripe: 0 | 1;
   range_label: string;
+  week_start_iso: string;
+  week_end_iso: string;
   isZoomed: boolean;
   weekWidthPx: number;
 };
@@ -36,51 +42,162 @@ function addDays(base: Date, days: number): Date {
   return copy;
 }
 
-function monthShort(d: Date): string {
-  return d.toLocaleString("en-US", { month: "short" }).toUpperCase();
+export function startOfWeekSunday(date: Date): Date {
+  const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  copy.setDate(copy.getDate() - copy.getDay());
+  return copy;
 }
 
-function formatDay(d: Date): string {
-  return String(d.getDate());
+export function monthLongName(date: Date): string {
+  return date.toLocaleString("en-US", { month: "long" });
+}
+
+export function monthStripeFromDate(date: Date): 0 | 1 {
+  const stripe = (date.getFullYear() * 12 + date.getMonth()) % 2;
+  return stripe as 0 | 1;
+}
+
+export function isoFromDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export function formatWeekRangeLabel(weekStart: Date, weekEnd: Date): string {
+  if (weekStart.getMonth() === weekEnd.getMonth()) {
+    return `${weekStart.getDate()}-${weekEnd.getDate()}`;
+  }
+  return `${weekStart.getDate()}-${weekEnd.getDate()}`;
+}
+
+function buildWeekColumn(
+  weekIndex: number,
+  weekStart: Date,
+  expandedMonthKeys: Set<string>,
+  clampedZoom: MonthZoom,
+): WeekColumn {
+  const weekEnd = addDays(weekStart, 6);
+  const monthKey = monthKeyFromDate(weekStart);
+  return {
+    week_index: weekIndex,
+    month_label: monthLongName(weekStart),
+    month_key: monthKey,
+    month_stripe: monthStripeFromDate(weekStart),
+    week_stripe: (weekIndex % 2) as 0 | 1,
+    range_label: formatWeekRangeLabel(weekStart, weekEnd),
+    week_start_iso: isoFromDate(weekStart),
+    week_end_iso: isoFromDate(weekEnd),
+    isZoomed: expandedMonthKeys.has(monthKey),
+    weekWidthPx: cellWidthPx(monthKey, clampedZoom, expandedMonthKeys),
+  };
+}
+
+export function planningTimelineAnchor(startDate: string): Date {
+  return startOfWeekSunday(parsePlanStart(startDate));
 }
 
 export function planningRangeMonthKeys(
   startDate: string,
   weekCount: number = PLANNING_WEEKS_MAX,
 ): string[] {
-  const start = parsePlanStart(startDate);
-  const end = addDays(start, weekCount * 7 - 1);
-  return orderedMonthKeysInRange(start, end);
+  const anchor = planningTimelineAnchor(startDate);
+  const end = addDays(anchor, weekCount * 7 - 1);
+  return orderedMonthKeysInRange(anchor, end);
 }
 
-export function buildWeekColumns(
-  startDate: string,
-  weekCount: number = PLANNING_WEEKS_MAX,
+export function buildWeekColumnsFromAnchor(
+  anchor: Date,
+  weekCount: number,
   zoom: MonthZoom = DEFAULT_MONTH_ZOOM,
+  viewportWidthPx: number = 0,
+  stickyLeftPx: number = 0,
 ): WeekColumn[] {
-  const start = parsePlanStart(startDate);
-  const rangeMonthKeys = planningRangeMonthKeys(startDate, weekCount);
+  const end = addDays(anchor, weekCount * 7 - 1);
+  const rangeMonthKeys = orderedMonthKeysInRange(anchor, end);
   const clampedZoom = clampMonthZoom(zoom, rangeMonthKeys.length);
   const expandedMonthKeys = buildExpandedMonthKeys(
     clampedZoom.expandedMonthCount,
     rangeMonthKeys,
   );
   const columns: WeekColumn[] = [];
-  for (let week = 0; week < weekCount; week++) {
-    const weekStart = addDays(start, week * 7);
-    const weekEnd = addDays(weekStart, 6);
-    const monthKey = monthKeyFromDate(weekStart);
-    const isZoomed = expandedMonthKeys.has(monthKey);
-    columns.push({
-      week_index: week,
-      month_label: monthShort(weekStart),
-      month_key: monthKey,
-      range_label: `${formatDay(weekStart)}-${formatDay(weekEnd)}`,
-      isZoomed,
-      weekWidthPx: cellWidthPx(monthKey, clampedZoom, expandedMonthKeys),
-    });
+  for (let week = 0; week < weekCount; week += 1) {
+    const weekStart = addDays(anchor, week * 7);
+    columns.push(buildWeekColumn(week, weekStart, expandedMonthKeys, clampedZoom));
   }
+  applyViewportWeekZoom(columns, clampedZoom, expandedMonthKeys, viewportWidthPx, stickyLeftPx);
   return columns;
+}
+
+export function buildWeekColumns(
+  startDate: string,
+  weekCount: number = PLANNING_WEEKS_MAX,
+  zoom: MonthZoom = DEFAULT_MONTH_ZOOM,
+  viewportWidthPx: number = 0,
+  stickyLeftPx: number = 0,
+): WeekColumn[] {
+  return buildWeekColumnsFromAnchor(
+    planningTimelineAnchor(startDate),
+    weekCount,
+    zoom,
+    viewportWidthPx,
+    stickyLeftPx,
+  );
+}
+
+export function defaultGlobalRangeStartIso(today: Date = new Date()): string {
+  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  return isoFromDate(startOfWeekSunday(firstOfMonth));
+}
+
+export function defaultGlobalRangeEndIso(today: Date = new Date()): string {
+  const endMonth = new Date(today.getFullYear(), today.getMonth() + GLOBAL_PLANNING_MONTHS_DEFAULT, 0);
+  return isoFromDate(endMonth);
+}
+
+export function buildCalendarWeekColumns(
+  rangeStartIso: string,
+  rangeEndIso: string,
+  zoom: MonthZoom = DEFAULT_MONTH_ZOOM,
+  viewportWidthPx: number = 0,
+  stickyLeftPx: number = 0,
+): WeekColumn[] {
+  const rangeStart = parsePlanStart(rangeStartIso);
+  const rangeEnd = parsePlanStart(rangeEndIso);
+  const anchor = startOfWeekSunday(rangeStart);
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const weekCount = Math.min(
+    PLANNING_WEEKS_MAX,
+    Math.max(1, Math.ceil((rangeEnd.getTime() - anchor.getTime() + msPerDay) / (7 * msPerDay))),
+  );
+  return buildWeekColumnsFromAnchor(anchor, weekCount, zoom, viewportWidthPx, stickyLeftPx);
+}
+
+export function defaultPlanningScrollLeftPx(
+  columns: WeekColumn[],
+  stickyLeftPx: number,
+  viewportWidthPx: number,
+): number {
+  const todayIndex = currentWeekIndexInColumns(columns);
+  if (todayIndex === null) {
+    return 0;
+  }
+  const offsets = weekColumnOffsets(columns);
+  const todayOffset = offsets[todayIndex] ?? 0;
+  const timelineViewportPx = Math.max(0, viewportWidthPx - stickyLeftPx);
+  if (timelineViewportPx <= 0) {
+    return Math.max(0, todayOffset);
+  }
+  return Math.max(0, todayOffset - Math.floor(timelineViewportPx * 0.1));
+}
+
+export function calendarRangeMonthKeys(
+  rangeStartIso: string,
+  rangeEndIso: string,
+): string[] {
+  const anchor = startOfWeekSunday(parsePlanStart(rangeStartIso));
+  const end = parsePlanStart(rangeEndIso);
+  return orderedMonthKeysInRange(anchor, end);
 }
 
 export function weekTimelineWidthPx(columns: WeekColumn[]): number {
@@ -110,6 +227,18 @@ export function weekRangeWidthPx(
   return width;
 }
 
+export function weekIndexForDate(columns: WeekColumn[], dateIso: string): number | null {
+  const target = parsePlanStart(dateIso).getTime();
+  for (const col of columns) {
+    const start = parsePlanStart(col.week_start_iso).getTime();
+    const end = parsePlanStart(col.week_end_iso).getTime();
+    if (target >= start && target <= end) {
+      return col.week_index;
+    }
+  }
+  return null;
+}
+
 export function computeMilestoneStartWeeks(milestones: PlanningMilestone[]): Map<string, number> {
   const ordered = [...milestones].sort((a, b) => a.order_index - b.order_index);
   const map = new Map<string, number>();
@@ -122,14 +251,42 @@ export function computeMilestoneStartWeeks(milestones: PlanningMilestone[]): Map
 }
 
 export function currentPlanWeekIndex(startDate: string, today: Date = new Date()): number | null {
-  const start = parsePlanStart(startDate);
+  const anchor = planningTimelineAnchor(startDate);
   const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const startMidnight = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  if (todayMidnight < startMidnight) {
+  const anchorMidnight = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  if (todayMidnight < anchorMidnight) {
     return null;
   }
-  const diffMs = todayMidnight.getTime() - startMidnight.getTime();
+  const diffMs = todayMidnight.getTime() - anchorMidnight.getTime();
   return Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+}
+
+export function currentWeekIndexInColumns(
+  columns: WeekColumn[],
+  today: Date = new Date(),
+): number | null {
+  return weekIndexForDate(columns, isoFromDate(today));
+}
+
+/** 0–1 position within a Sun–Sat week column (center of today's day slot). */
+export function dayOffsetFractionInWeek(today: Date = new Date()): number {
+  const dayOfWeek = today.getDay();
+  return (dayOfWeek + 0.5) / 7;
+}
+
+export function todayLineLeftPx(
+  columns: WeekColumn[],
+  weekOffsets: number[],
+  stickyLeftPx: number,
+  today: Date = new Date(),
+): number | null {
+  const weekIndex = weekIndexForDate(columns, isoFromDate(today));
+  if (weekIndex === null || weekIndex < 0 || weekIndex >= columns.length) {
+    return null;
+  }
+  const column = columns[weekIndex];
+  const fraction = dayOffsetFractionInWeek(today);
+  return stickyLeftPx + (weekOffsets[weekIndex] ?? 0) + column.weekWidthPx * fraction;
 }
 
 export function defaultStartDateIso(): string {
@@ -147,10 +304,7 @@ export function planStartOrDefault(plan: ProjectPlan | null): string {
 export function addDaysToIso(iso: string, days: number): string {
   const base = parsePlanStart(iso);
   const shifted = addDays(base, days);
-  const y = shifted.getFullYear();
-  const m = String(shifted.getMonth() + 1).padStart(2, "0");
-  const day = String(shifted.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return isoFromDate(shifted);
 }
 
 export function milestoneDeliveryDateIso(
@@ -161,6 +315,12 @@ export function milestoneDeliveryDateIso(
   const milestoneStartOffsetDays = startWeek * 7;
   const deliveryOffsetDays = milestoneStartOffsetDays + Math.max(1, durationWeeks) * 7;
   return addDaysToIso(planStart, deliveryOffsetDays);
+}
+
+export function formatDueLabel(deliveryIso: string): string {
+  const date = parsePlanStart(deliveryIso);
+  const month = date.toLocaleString("en-US", { month: "short" });
+  return `Due: ${month} ${date.getDate()}`;
 }
 
 export function durationWeeksFromDeliveryDate(
@@ -174,4 +334,29 @@ export function durationWeeksFromDeliveryDate(
   const diffMs = deliveryDate.getTime() - milestoneStart.getTime();
   const days = Math.max(0, Math.round(diffMs / (24 * 60 * 60 * 1000)));
   return Math.max(1, Math.ceil(days / 7));
+}
+
+export type MonthSpan = {
+  label: string;
+  monthKey: string;
+  monthStripe: 0 | 1;
+  widthPx: number;
+};
+
+export function monthSpans(columns: WeekColumn[]): MonthSpan[] {
+  const spans: MonthSpan[] = [];
+  for (const col of columns) {
+    const last = spans[spans.length - 1];
+    if (last && last.monthKey === col.month_key) {
+      last.widthPx += col.weekWidthPx;
+    } else {
+      spans.push({
+        label: col.month_label,
+        monthKey: col.month_key,
+        monthStripe: col.month_stripe,
+        widthPx: col.weekWidthPx,
+      });
+    }
+  }
+  return spans;
 }

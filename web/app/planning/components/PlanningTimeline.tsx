@@ -1,27 +1,33 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { ReactElement } from "react";
 import type { MonthZoom } from "../monthZoom";
 import {
   buildWeekColumns,
   computeMilestoneStartWeeks,
-  currentPlanWeekIndex,
+  defaultPlanningScrollLeftPx,
+  monthSpans,
   PLANNING_WEEKS_MAX,
+  todayLineLeftPx,
   weekColumnOffsets,
   weekRangeWidthPx,
   weekTimelineWidthPx,
 } from "../planningTimeline";
+import { useTimelineViewportWidth } from "../useTimelineViewportWidth";
 import type { PlanningEvent, PlanningMilestone } from "../types";
+import {
+  PLANNING_STICKY_LEFT_W,
+  PLANNING_STICKY_NAME_W,
+  PLANNING_STICKY_RISK_W,
+  PLANNING_STICKY_STATUS_W,
+  PlanningTimelineHeader,
+} from "./PlanningTimelineHeader";
+import { PlanningTimelineWeekGrid } from "./PlanningTimelineWeekGrid";
 import { RISK_LABELS, riskCellStyle, STATUS_LABELS, statusBarColor } from "./planningColors";
 
-const STICKY_NAME_W = 200;
-const STICKY_STATUS_W = 110;
-const STICKY_RISK_W = 100;
-const STICKY_LEFT_W = STICKY_NAME_W + STICKY_STATUS_W + STICKY_RISK_W;
-const ROW_H = 68;
-const BAR_H = 28;
-const HEADER_H = 52;
+const ROW_H = 76;
+const BAR_H = 36;
 
 type Props = {
   startDate: string;
@@ -36,21 +42,6 @@ type Props = {
   compact?: boolean;
 };
 
-function monthSpans(
-  columns: ReturnType<typeof buildWeekColumns>,
-): Array<{ label: string; widthPx: number }> {
-  const spans: Array<{ label: string; widthPx: number }> = [];
-  for (const col of columns) {
-    const last = spans[spans.length - 1];
-    if (last && last.label === col.month_label) {
-      last.widthPx += col.weekWidthPx;
-    } else {
-      spans.push({ label: col.month_label, widthPx: col.weekWidthPx });
-    }
-  }
-  return spans;
-}
-
 export function PlanningTimeline({
   startDate,
   milestones,
@@ -63,18 +54,43 @@ export function PlanningTimeline({
   monthZoom,
   compact = false,
 }: Props): ReactElement {
+  const { scrollRef, viewportWidth } = useTimelineViewportWidth();
+
   const columns = useMemo(
-    () => buildWeekColumns(startDate, PLANNING_WEEKS_MAX, monthZoom),
-    [startDate, monthZoom],
+    () =>
+      buildWeekColumns(
+        startDate,
+        PLANNING_WEEKS_MAX,
+        monthZoom,
+        viewportWidth,
+        PLANNING_STICKY_LEFT_W,
+      ),
+    [startDate, monthZoom, viewportWidth],
   );
   const weekOffsets = useMemo(() => weekColumnOffsets(columns), [columns]);
   const startWeeks = computeMilestoneStartWeeks(milestones);
   const ordered = [...milestones].sort((a, b) => a.order_index - b.order_index);
-  const currentWeek = currentPlanWeekIndex(startDate);
-  const monthGroups = monthSpans(columns);
+  const monthGroups = useMemo(() => monthSpans(columns), [columns]);
   const timelineWidth = weekTimelineWidthPx(columns);
 
+  const todayLineLeft = useMemo(
+    () => todayLineLeftPx(columns, weekOffsets, PLANNING_STICKY_LEFT_W),
+    [columns, weekOffsets],
+  );
+
   const cellBorder = "1px solid #2a2f3a";
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || viewportWidth <= 0) {
+      return;
+    }
+    element.scrollLeft = defaultPlanningScrollLeftPx(
+      columns,
+      PLANNING_STICKY_LEFT_W,
+      viewportWidth,
+    );
+  }, [columns, scrollRef, viewportWidth]);
 
   return (
     <div
@@ -86,6 +102,7 @@ export function PlanningTimeline({
       }}
     >
       <div
+        ref={scrollRef}
         style={{
           overflowX: "auto",
           overflowY: "auto",
@@ -95,117 +112,18 @@ export function PlanningTimeline({
           borderRadius: 10,
         }}
       >
-        <div style={{ minWidth: STICKY_LEFT_W + timelineWidth, position: "relative" }}>
-          {currentWeek !== null && currentWeek >= 0 && currentWeek < PLANNING_WEEKS_MAX && (
-            <div
-              aria-hidden
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left:
-                  STICKY_LEFT_W +
-                  (weekOffsets[currentWeek] ?? 0) +
-                  (columns[currentWeek]?.weekWidthPx ?? 0) / 2,
-                width: 2,
-                background: "#f97316",
-                zIndex: 5,
-                pointerEvents: "none",
-              }}
-            />
-          )}
-
-          <div style={{ display: "flex", height: HEADER_H, background: "#111827" }}>
-            <div
-              style={{
-                position: "sticky",
-                left: 0,
-                zIndex: 4,
-                display: "flex",
-                background: "#111827",
-                borderRight: cellBorder,
-              }}
-            >
-              <div
-                style={{
-                  width: STICKY_NAME_W,
-                  padding: "8px 10px",
-                  fontWeight: 600,
-                  fontSize: 12,
-                  borderRight: cellBorder,
-                  display: "flex",
-                  alignItems: "flex-end",
-                }}
-              >
-                Milestone
-              </div>
-              <div
-                style={{
-                  width: STICKY_STATUS_W,
-                  padding: "8px 8px",
-                  fontWeight: 600,
-                  fontSize: 12,
-                  borderRight: cellBorder,
-                  display: "flex",
-                  alignItems: "flex-end",
-                }}
-              >
-                Status
-              </div>
-              <div
-                style={{
-                  width: STICKY_RISK_W,
-                  padding: "8px 8px",
-                  fontWeight: 600,
-                  fontSize: 12,
-                  display: "flex",
-                  alignItems: "flex-end",
-                }}
-              >
-                Risk
-              </div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", width: timelineWidth }}>
-              <div style={{ display: "flex", height: HEADER_H / 2 }}>
-                {monthGroups.map((group, idx) => (
-                  <div
-                    key={`${group.label}-${idx}`}
-                    style={{
-                      width: group.widthPx,
-                      borderRight: cellBorder,
-                      borderBottom: cellBorder,
-                      fontSize: 11,
-                      fontWeight: 600,
-                      padding: "4px 6px",
-                      textAlign: "center",
-                    }}
-                  >
-                    {group.label}
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: "flex", height: HEADER_H / 2 }}>
-                {columns.map((col) => (
-                  <div
-                    key={col.week_index}
-                    style={{
-                      width: col.weekWidthPx,
-                      minWidth: col.weekWidthPx,
-                      borderRight: cellBorder,
-                      fontSize: 9,
-                      padding: "2px 2px",
-                      textAlign: "center",
-                      color: "var(--muted, #94a3b8)",
-                      overflow: "hidden",
-                    }}
-                    title={`Week ${col.week_index + 1}`}
-                  >
-                    {col.range_label}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+        <div style={{ minWidth: PLANNING_STICKY_LEFT_W + timelineWidth, position: "relative" }}>
+          <PlanningTimelineHeader
+            stickyColumns={[
+              { label: "Milestone", width: PLANNING_STICKY_NAME_W },
+              { label: "Status", width: PLANNING_STICKY_STATUS_W },
+              { label: "Risk", width: PLANNING_STICKY_RISK_W },
+            ]}
+            columns={columns}
+            monthGroups={monthGroups}
+            timelineWidth={timelineWidth}
+            todayLineLeft={todayLineLeft}
+          />
 
           {ordered.map((milestone) => {
             const startWeek = startWeeks.get(milestone.id) ?? 0;
@@ -237,7 +155,7 @@ export function PlanningTimeline({
                 >
                   <div
                     style={{
-                      width: STICKY_NAME_W,
+                      width: PLANNING_STICKY_NAME_W,
                       padding: "6px 8px",
                       borderRight: cellBorder,
                       display: "flex",
@@ -282,7 +200,7 @@ export function PlanningTimeline({
                   </div>
                   <div
                     style={{
-                      width: STICKY_STATUS_W,
+                      width: PLANNING_STICKY_STATUS_W,
                       padding: "6px 8px",
                       borderRight: cellBorder,
                       fontSize: 11,
@@ -294,7 +212,7 @@ export function PlanningTimeline({
                   </div>
                   <div
                     style={{
-                      width: STICKY_RISK_W,
+                      width: PLANNING_STICKY_RISK_W,
                       padding: "6px 8px",
                       fontSize: 11,
                       display: "flex",
@@ -313,11 +231,17 @@ export function PlanningTimeline({
                     height: ROW_H,
                   }}
                 >
+                  <PlanningTimelineWeekGrid
+                    columns={columns}
+                    height={ROW_H}
+                    cellBorder={cellBorder}
+                  />
                   <div
                     style={{
                       position: "absolute",
                       top: (ROW_H - BAR_H) / 2,
                       left: (weekOffsets[startWeek] ?? 0) + 2,
+                      zIndex: 1,
                       width: weekRangeWidthPx(columns, startWeek, duration) - 4,
                       height: BAR_H,
                       borderRadius: 6,
@@ -360,7 +284,7 @@ export function PlanningTimeline({
                 position: "sticky",
                 left: 0,
                 zIndex: 3,
-                width: STICKY_LEFT_W,
+                width: PLANNING_STICKY_LEFT_W,
                 padding: "8px 10px",
                 background: "#0b1220",
                 borderRight: cellBorder,
@@ -386,7 +310,13 @@ export function PlanningTimeline({
                 Add milestone
               </button>
             </div>
-            <div style={{ width: timelineWidth }} />
+            <div style={{ position: "relative", width: timelineWidth, height: ROW_H }}>
+              <PlanningTimelineWeekGrid
+                columns={columns}
+                height={ROW_H}
+                cellBorder={cellBorder}
+              />
+            </div>
           </div>
         </div>
       </div>

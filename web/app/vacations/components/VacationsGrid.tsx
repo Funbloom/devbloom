@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, type ReactElement } from "react";
+import { useEffect, useMemo, type ReactElement } from "react";
 import type { VacationEmployee, VacationEntry } from "../types";
 import {
   buildDayColumns,
@@ -9,11 +9,15 @@ import {
   monthSpans,
   todayLineLeftPx,
   timelineWidthPx,
-  VACATION_WEEK_DOW_COLORS,
   VACATION_HOLIDAY_CELL_COLOR,
   VACATION_WEEKEND_CELL_COLOR,
   VACATION_WEEKEND_CELL_SELECTED_COLOR,
 } from "../vacationGrid";
+import { useTimelineViewportWidth } from "../../planning/useTimelineViewportWidth";
+import {
+  VACATION_STICKY_NAME_W,
+  VacationCalendarHeader,
+} from "./VacationCalendarHeader";
 import type { MonthZoom } from "../../planning/monthZoom";
 import {
   cellKey,
@@ -22,7 +26,6 @@ import {
   type VacationCellKey,
 } from "../vacationSelection";
 
-const STICKY_NAME_W = 180;
 const ROW_H = 36;
 const CURRENT_USER_NAME_BG = "#1e3a5f";
 const CURRENT_USER_EMPTY_CELL_BG = "#172554";
@@ -30,10 +33,6 @@ const CURRENT_USER_WEEKEND_CELL_BG = "#1e293b";
 const CURRENT_USER_INACTIVE_CELL_BG = "#243044";
 const CURRENT_USER_ROW_ACCENT = "#3b82f6";
 const CURRENT_USER_ROW_BG = "rgba(59, 130, 246, 0.07)";
-const HEADER_H = 52;
-const DAY_LETTER_ROW_H = 18;
-const DAY_NUM_ROW_H = 24;
-
 type Props = {
   rangeFrom: string;
   rangeTo: string;
@@ -95,10 +94,17 @@ export function VacationsGrid({
   onSelectKeys,
   onDragAnchor,
 }: Props): ReactElement {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const { scrollRef, viewportWidth } = useTimelineViewportWidth();
   const columns = useMemo(
-    () => buildDayColumns(rangeFrom, rangeTo, monthZoom),
-    [rangeFrom, rangeTo, monthZoom],
+    () =>
+      buildDayColumns(
+        rangeFrom,
+        rangeTo,
+        monthZoom,
+        viewportWidth,
+        VACATION_STICKY_NAME_W,
+      ),
+    [rangeFrom, rangeTo, monthZoom, viewportWidth],
   );
   const monthGroups = useMemo(() => monthSpans(columns), [columns]);
   const holidaySet = useMemo(() => new Set(holidays), [holidays]);
@@ -130,7 +136,7 @@ export function VacationsGrid({
   }, [employees, columns]);
 
   const timelineWidth = timelineWidthPx(columns);
-  const todayLeft = todayLineLeftPx(columns, STICKY_NAME_W);
+  const todayLeft = todayLineLeftPx(columns, VACATION_STICKY_NAME_W);
   const cellBorder = "1px solid #2a2f3a";
 
   useEffect(() => {
@@ -181,156 +187,13 @@ export function VacationsGrid({
         ref={scrollRef}
         style={{ overflowX: "auto", overflowY: "auto", flex: 1, border: cellBorder, borderRadius: 10 }}
       >
-        <div style={{ minWidth: STICKY_NAME_W + timelineWidth, position: "relative" }}>
-          {todayLeft !== null ? (
-            <div
-              aria-hidden
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left: todayLeft,
-                width: 2,
-                background: "#f97316",
-                zIndex: 5,
-                pointerEvents: "none",
-              }}
-            />
-          ) : null}
-
-          <div style={{ display: "flex", height: HEADER_H, position: "sticky", top: 0, zIndex: 4 }}>
-            <div
-              style={{
-                width: STICKY_NAME_W,
-                minWidth: STICKY_NAME_W,
-                position: "sticky",
-                left: 0,
-                zIndex: 6,
-                background: "#111827",
-                borderRight: cellBorder,
-                borderBottom: cellBorder,
-                display: "flex",
-                alignItems: "flex-end",
-                padding: "6px 8px",
-                fontSize: 11,
-                fontWeight: 600,
-                color: "#94a3b8",
-              }}
-            >
-              Name
-            </div>
-            <div style={{ display: "flex" }}>
-              {monthGroups.map((group) => (
-                <div
-                  key={group.monthKey}
-                  style={{
-                    width: columns
-                      .filter((c) => c.monthKey === group.monthKey)
-                      .reduce((sum, c) => sum + dayColumnWidth(c), 0),
-                    borderBottom: cellBorder,
-                    borderRight: cellBorder,
-                    textAlign: "center",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: "#cbd5e1",
-                    paddingTop: 6,
-                  }}
-                >
-                  {group.label}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              height: DAY_LETTER_ROW_H,
-              position: "sticky",
-              top: HEADER_H,
-              zIndex: 3,
-              background: "#111827",
-            }}
-          >
-            <div
-              style={{
-                width: STICKY_NAME_W,
-                minWidth: STICKY_NAME_W,
-                position: "sticky",
-                left: 0,
-                zIndex: 6,
-                background: "#111827",
-                borderRight: cellBorder,
-                borderBottom: cellBorder,
-              }}
-            />
-            <div style={{ display: "flex" }}>
-              {columns.map((col) => (
-                <div
-                  key={`dow-${col.iso}`}
-                  style={{
-                    width: dayColumnWidth(col),
-                    minWidth: dayColumnWidth(col),
-                    borderRight: cellBorder,
-                    borderBottom: cellBorder,
-                    background: VACATION_WEEK_DOW_COLORS[col.weekStripe],
-                    fontSize: 9,
-                    fontWeight: 600,
-                    color: col.isToday ? "#f97316" : "#e2e8f0",
-                    textAlign: "center",
-                    lineHeight: `${DAY_LETTER_ROW_H}px`,
-                  }}
-                  title={col.iso}
-                >
-                  {col.dayOfWeekLetter}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              height: DAY_NUM_ROW_H,
-              position: "sticky",
-              top: HEADER_H + DAY_LETTER_ROW_H,
-              zIndex: 3,
-              background: "#111827",
-            }}
-          >
-            <div
-              style={{
-                width: STICKY_NAME_W,
-                minWidth: STICKY_NAME_W,
-                position: "sticky",
-                left: 0,
-                zIndex: 6,
-                background: "#111827",
-                borderRight: cellBorder,
-                borderBottom: cellBorder,
-              }}
-            />
-            <div style={{ display: "flex" }}>
-              {columns.map((col) => (
-                <div
-                  key={col.iso}
-                  style={{
-                    width: dayColumnWidth(col),
-                    minWidth: dayColumnWidth(col),
-                    borderRight: cellBorder,
-                    borderBottom: cellBorder,
-                    fontSize: 9,
-                    color: col.isToday ? "#f97316" : "#64748b",
-                    fontWeight: col.isToday ? 700 : 400,
-                    textAlign: "center",
-                    lineHeight: `${DAY_NUM_ROW_H}px`,
-                  }}
-                >
-                  {col.dayOfMonth}
-                </div>
-              ))}
-            </div>
-          </div>
+        <div style={{ minWidth: VACATION_STICKY_NAME_W + timelineWidth, position: "relative" }}>
+          <VacationCalendarHeader
+            columns={columns}
+            monthGroups={monthGroups}
+            timelineWidth={timelineWidth}
+            todayLineLeft={todayLeft}
+          />
 
           {employees.length === 0 ? (
             <div style={{ padding: 16, color: "var(--muted, #94a3b8)", fontSize: 13 }}>
@@ -352,8 +215,8 @@ export function VacationsGrid({
               >
                 <div
                   style={{
-                    width: STICKY_NAME_W,
-                    minWidth: STICKY_NAME_W,
+                    width: VACATION_STICKY_NAME_W,
+                    minWidth: VACATION_STICKY_NAME_W,
                     position: "sticky",
                     left: 0,
                     zIndex: 2,

@@ -1,5 +1,6 @@
 import { fetchApi } from "../lib/api";
 import type {
+  GlobalPlanningResponse,
   MilestoneRisk,
   MilestoneStatus,
   PlanningDeliverable,
@@ -22,6 +23,11 @@ export async function fetchPlanningGraph(projectKey: string): Promise<PlanningGr
     `/planning?project_key=${encodeURIComponent(projectKey)}`,
   );
   return parseJson<PlanningGraph>(response, "Load planning");
+}
+
+export async function fetchGlobalPlanning(): Promise<GlobalPlanningResponse> {
+  const response = await fetchApi("/planning/global");
+  return parseJson<GlobalPlanningResponse>(response, "Load global planning");
 }
 
 export async function clearProjectPlanning(projectKey: string): Promise<void> {

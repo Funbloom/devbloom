@@ -53,6 +53,17 @@ export type PlanningGraph = {
   events: PlanningEvent[];
 };
 
+export type GlobalPlanningProject = {
+  project_key: string;
+  display_name: string;
+  plan: ProjectPlan | null;
+  milestones: PlanningMilestone[];
+};
+
+export type GlobalPlanningResponse = {
+  projects: GlobalPlanningProject[];
+};
+
 export type MilestoneTimelineRow = PlanningMilestone & {
   start_week: number;
 };

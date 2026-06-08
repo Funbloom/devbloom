@@ -11,9 +11,20 @@ import { PlanningDeleteAllConfirmDialog } from "./components/PlanningDeleteAllCo
 import { PlanningImportConflictDialog } from "./components/PlanningImportConflictDialog";
 import { PlanningAnalysisModal } from "./components/PlanningAnalysisModal";
 import { PlanningImportPreviewModal } from "./components/PlanningImportPreviewModal";
+import { GlobalPlanningLeftPanel } from "./components/GlobalPlanningLeftPanel";
+import {
+  GlobalPlanningTimeline,
+  globalPlanningMaxExpandedMonths,
+} from "./components/GlobalPlanningTimeline";
 import { PlanningLeftPanel } from "./components/PlanningLeftPanel";
 import { MonthZoomWidget } from "./components/MonthZoomWidget";
 import { PlanningTimeline } from "./components/PlanningTimeline";
+import { defaultEnabledProjectKeys } from "./globalPlanningView";
+import {
+  loadEnabledProjectKeys,
+  readStoredEnabledProjectKeys,
+  saveEnabledProjectKeys,
+} from "./globalProjectsStorage";
 import { applyPlanningImport, parsePlanningImport } from "./planningImportClient";
 import type { ImportApplyMode, ImportedPlanningData } from "./planningImportTypes";
 import {
@@ -24,6 +35,7 @@ import {
   deleteDeliverable,
   deleteEvent,
   deleteMilestone,
+  fetchGlobalPlanning,
   fetchPlanningGraph,
   updateDeliverable,
   updateEvent,
@@ -39,6 +51,7 @@ import {
 } from "./planningTimeline";
 import type {
   MilestoneStatus,
+  GlobalPlanningProject,
   PlanningDeliverable,
   PlanningEmployee,
   PlanningGraph,
@@ -50,10 +63,22 @@ import {
 } from "./planningAnalysis";
 import { clampMonthZoom, type MonthZoom } from "./monthZoom";
 import {
+  GLOBAL_PLANNING_MONTH_ZOOM_STORAGE_KEY,
   loadMonthZoom,
   PLANNING_MONTH_ZOOM_STORAGE_KEY,
   saveMonthZoom,
 } from "./monthZoomStorage";
+
+type PlanningTab = "current" | "global";
+const PLANNING_TAB_STORAGE_KEY = "devbloom_planning_tab";
+
+function loadPlanningTab(): PlanningTab {
+  if (typeof window === "undefined") {
+    return "current";
+  }
+  const raw = window.sessionStorage.getItem(PLANNING_TAB_STORAGE_KEY);
+  return raw === "global" ? "global" : "current";
+}
 
 const emptyGraph = (): PlanningGraph => ({
   plan: null,
@@ -86,6 +111,14 @@ export function PlanningPage(): ReactElement {
   const [deleteAllError, setDeleteAllError] = useState<string | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [employees, setEmployees] = useState<PlanningEmployee[]>([]);
+  const [planningTab, setPlanningTab] = useState<PlanningTab>(() => loadPlanningTab());
+  const [globalProjects, setGlobalProjects] = useState<GlobalPlanningProject[]>([]);
+  const [globalLoading, setGlobalLoading] = useState(false);
+  const [globalStatus, setGlobalStatus] = useState<string | null>(null);
+  const [enabledProjectKeys, setEnabledProjectKeys] = useState<Set<string>>(new Set());
+  const [globalMonthZoom, setGlobalMonthZoom] = useState<MonthZoom>(() =>
+    loadMonthZoom(GLOBAL_PLANNING_MONTH_ZOOM_STORAGE_KEY),
+  );
 
   const planningMaxExpandedMonths = useMemo(
     () => planningRangeMonthKeys(startDate, PLANNING_WEEKS_MAX).length,
@@ -99,6 +132,26 @@ export function PlanningPage(): ReactElement {
   useEffect(() => {
     saveMonthZoom(PLANNING_MONTH_ZOOM_STORAGE_KEY, planningMonthZoom);
   }, [planningMonthZoom]);
+
+  const globalMaxExpandedMonths = useMemo(
+    () => globalPlanningMaxExpandedMonths(globalProjects, enabledProjectKeys),
+    [globalProjects, enabledProjectKeys],
+  );
+
+  useEffect(() => {
+    setGlobalMonthZoom((prev) => clampMonthZoom(prev, globalMaxExpandedMonths));
+  }, [globalMaxExpandedMonths]);
+
+  useEffect(() => {
+    saveMonthZoom(GLOBAL_PLANNING_MONTH_ZOOM_STORAGE_KEY, globalMonthZoom);
+  }, [globalMonthZoom]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.sessionStorage.setItem(PLANNING_TAB_STORAGE_KEY, planningTab);
+  }, [planningTab]);
 
   const loadGraph = useCallback(async (key: string) => {
     if (!key) {
@@ -132,6 +185,22 @@ export function PlanningPage(): ReactElement {
     }
   }, []);
 
+  const loadGlobalPlanning = useCallback(async () => {
+    setGlobalLoading(true);
+    setGlobalStatus(null);
+    try {
+      const data = await fetchGlobalPlanning();
+      setGlobalProjects(data.projects);
+      const defaults = defaultEnabledProjectKeys(data.projects);
+      const stored = readStoredEnabledProjectKeys();
+      setEnabledProjectKeys(loadEnabledProjectKeys(stored, defaults));
+    } catch (err) {
+      setGlobalStatus(err instanceof Error ? err.message : "Failed to load global planning.");
+    } finally {
+      setGlobalLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const sync = () => {
       if (typeof window === "undefined") {
@@ -155,6 +224,12 @@ export function PlanningPage(): ReactElement {
     void loadGraph(projectKey);
     void loadEmployees();
   }, [projectKey, loadGraph, loadEmployees]);
+
+  useEffect(() => {
+    if (planningTab === "global") {
+      void loadGlobalPlanning();
+    }
+  }, [planningTab, loadGlobalPlanning]);
 
   const refresh = async () => {
     if (projectKey) {
@@ -357,43 +432,89 @@ export function PlanningPage(): ReactElement {
     [mergeDeliverable, mergeMilestone],
   );
 
-  const leftPanel = (
-    <PlanningLeftPanel
-      startDate={startDate}
-      saving={saving || importParsing}
-      importDisabled={!projectKey}
-      analyseDisabled={!projectKey || !hasPlanningData}
-      deleteAllDisabled={!projectKey || !hasPlanningData}
-      onStartDateChange={(value) => void handleStartDateChange(value)}
-      onImportFileSelected={(file) => void handleImportFileSelected(file)}
-      onAnalyseClick={() => setAnalysisOpen(true)}
-      onDeleteAllClick={() => {
-        setDeleteAllError(null);
-        setDeleteAllConfirmOpen(true);
-      }}
-    />
+  const handleToggleGlobalProject = (key: string, enabled: boolean) => {
+    setEnabledProjectKeys((prev) => {
+      const next = new Set(prev);
+      if (enabled) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      saveEnabledProjectKeys(next);
+      return next;
+    });
+  };
+
+  const handleSelectAllGlobalProjects = () => {
+    const next = new Set(globalProjects.map((project) => project.project_key));
+    setEnabledProjectKeys(next);
+    saveEnabledProjectKeys(next);
+  };
+
+  const handleClearAllGlobalProjects = () => {
+    const next = new Set<string>();
+    setEnabledProjectKeys(next);
+    saveEnabledProjectKeys(next);
+  };
+
+  const planningTabSwitcher = (
+    <div className="admin-tabs" style={{ marginBottom: 12 }}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={planningTab === "current"}
+        className={planningTab === "current" ? "admin-tab active" : "admin-tab"}
+        onClick={() => setPlanningTab("current")}
+      >
+        Current Project
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={planningTab === "global"}
+        className={planningTab === "global" ? "admin-tab active" : "admin-tab"}
+        onClick={() => setPlanningTab("global")}
+      >
+        All Projects
+      </button>
+    </div>
   );
 
-  const rightPanel = (
-    <div
-      className="imagegen-panel"
-      style={{
-        flex: showMilestoneDetail ? "0 0 auto" : 1,
-        minHeight: showMilestoneDetail ? "auto" : 0,
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <h2 className="imagegen-panel-title">Timeline</h2>
-      {projectKey && !loading ? (
-        <MonthZoomWidget
-          monthZoom={planningMonthZoom}
-          maxExpandedMonths={planningMaxExpandedMonths}
-          onMonthZoomChange={setPlanningMonthZoom}
+  const leftPanel = (
+    <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+      {planningTabSwitcher}
+      {planningTab === "current" ? (
+        <PlanningLeftPanel
+          startDate={startDate}
+          saving={saving || importParsing}
+          importDisabled={!projectKey}
+          analyseDisabled={!projectKey || !hasPlanningData}
+          deleteAllDisabled={!projectKey || !hasPlanningData}
+          onStartDateChange={(value) => void handleStartDateChange(value)}
+          onImportFileSelected={(file) => void handleImportFileSelected(file)}
+          onAnalyseClick={() => setAnalysisOpen(true)}
+          onDeleteAllClick={() => {
+            setDeleteAllError(null);
+            setDeleteAllConfirmOpen(true);
+          }}
         />
-      ) : null}
+      ) : (
+        <GlobalPlanningLeftPanel
+          projects={globalProjects}
+          enabledKeys={enabledProjectKeys}
+          loading={globalLoading}
+          onToggleProject={handleToggleGlobalProject}
+          onSelectAll={handleSelectAllGlobalProjects}
+          onClearAll={handleClearAllGlobalProjects}
+        />
+      )}
+    </div>
+  );
+
+  const rightPanel =
+    planningTab === "current" ? (
       <div
-        className="imagegen-panel-body"
+        className="imagegen-panel"
         style={{
           flex: showMilestoneDetail ? "0 0 auto" : 1,
           minHeight: showMilestoneDetail ? "auto" : 0,
@@ -401,63 +522,123 @@ export function PlanningPage(): ReactElement {
           flexDirection: "column",
         }}
       >
-        {!projectKey ? (
-          <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>
-            Select a project in the header to open its planning timeline.
-          </p>
-        ) : (
-          <>
-            {status ? (
-              <p role="status" style={{ margin: "0 0 8px", color: "#fca5a5", fontSize: 13 }}>
-                {status}
-              </p>
-            ) : null}
-            {loading ? (
-              <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>Loading planning data...</p>
-            ) : (
-              <>
-                <PlanningTimeline
-                  startDate={startDate}
-                  milestones={graph.milestones}
-                  events={graph.events}
-                  selectedMilestoneId={selectedMilestoneId}
-                  saving={saving}
-                  monthZoom={planningMonthZoom}
-                  compact={showMilestoneDetail}
-                  onSelectMilestone={setSelectedMilestoneId}
-                  onEditMilestone={setEditMilestone}
-                  onAddMilestone={() => void handleAddMilestone()}
-                />
-                <DeliverablesPanel
-                  milestone={selectedMilestone}
-                  deliverables={graph.deliverables}
-                  employees={employees}
-                  planStartDate={startDate}
-                  startWeek={
-                    selectedMilestone
-                      ? milestoneStartWeeks.get(selectedMilestone.id) ?? 0
-                      : 0
-                  }
-                  disabled={saving || importParsing}
-                  onMilestoneUpdated={mergeMilestone}
-                  onDeliverableUpdated={mergeDeliverable}
-                  onDeliverableCreated={appendDeliverable}
-                  onDeliverableDeleted={removeDeliverableFromGraph}
-                  onSaveMilestone={updateMilestone}
-                  onSaveDeliverable={updateDeliverable}
-                  onCreateDeliverable={(milestoneId) =>
-                    createDeliverable(milestoneId, "New item", "todo", "", null, "on_track")
-                  }
-                  onDeleteDeliverable={deleteDeliverable}
-                  onError={(message) => setStatus(message)}
-                />
-              </>
-            )}
-          </>
-        )}
+        <h2 className="imagegen-panel-title">Timeline</h2>
+        {projectKey && !loading ? (
+          <MonthZoomWidget
+            monthZoom={planningMonthZoom}
+            maxExpandedMonths={planningMaxExpandedMonths}
+            onMonthZoomChange={setPlanningMonthZoom}
+          />
+        ) : null}
+        <div
+          className="imagegen-panel-body"
+          style={{
+            flex: showMilestoneDetail ? "0 0 auto" : 1,
+            minHeight: showMilestoneDetail ? "auto" : 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {!projectKey ? (
+            <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>
+              Select a project in the header to open its planning timeline.
+            </p>
+          ) : (
+            <>
+              {status ? (
+                <p role="status" style={{ margin: "0 0 8px", color: "#fca5a5", fontSize: 13 }}>
+                  {status}
+                </p>
+              ) : null}
+              {loading ? (
+                <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>Loading planning data...</p>
+              ) : (
+                <>
+                  <PlanningTimeline
+                    startDate={startDate}
+                    milestones={graph.milestones}
+                    events={graph.events}
+                    selectedMilestoneId={selectedMilestoneId}
+                    saving={saving}
+                    monthZoom={planningMonthZoom}
+                    compact={showMilestoneDetail}
+                    onSelectMilestone={setSelectedMilestoneId}
+                    onEditMilestone={setEditMilestone}
+                    onAddMilestone={() => void handleAddMilestone()}
+                  />
+                  <DeliverablesPanel
+                    milestone={selectedMilestone}
+                    deliverables={graph.deliverables}
+                    employees={employees}
+                    planStartDate={startDate}
+                    startWeek={
+                      selectedMilestone
+                        ? milestoneStartWeeks.get(selectedMilestone.id) ?? 0
+                        : 0
+                    }
+                    disabled={saving || importParsing}
+                    onMilestoneUpdated={mergeMilestone}
+                    onDeliverableUpdated={mergeDeliverable}
+                    onDeliverableCreated={appendDeliverable}
+                    onDeliverableDeleted={removeDeliverableFromGraph}
+                    onSaveMilestone={updateMilestone}
+                    onSaveDeliverable={updateDeliverable}
+                    onCreateDeliverable={(milestoneId) =>
+                      createDeliverable(milestoneId, "New item", "todo", "", null, "on_track")
+                    }
+                    onDeleteDeliverable={deleteDeliverable}
+                    onError={(message) => setStatus(message)}
+                  />
+                </>
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    ) : (
+      <div
+        className="imagegen-panel"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <h2 className="imagegen-panel-title">Global timeline</h2>
+        {!globalLoading ? (
+          <MonthZoomWidget
+            monthZoom={globalMonthZoom}
+            maxExpandedMonths={globalMaxExpandedMonths}
+            onMonthZoomChange={setGlobalMonthZoom}
+          />
+        ) : null}
+        <div
+          className="imagegen-panel-body"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {globalStatus ? (
+            <p role="status" style={{ margin: "0 0 8px", color: "#fca5a5", fontSize: 13 }}>
+              {globalStatus}
+            </p>
+          ) : null}
+          {globalLoading ? (
+            <p style={{ margin: 0, color: "var(--muted, #94a3b8)" }}>Loading global planning...</p>
+          ) : (
+            <GlobalPlanningTimeline
+              projects={globalProjects}
+              enabledKeys={enabledProjectKeys}
+              monthZoom={globalMonthZoom}
+            />
+          )}
+        </div>
+      </div>
+    );
 
   return (
     <>
@@ -616,7 +797,12 @@ export function PlanningPage(): ReactElement {
         left={leftPanel}
         right={rightPanel}
         rightStyle={{
-          minHeight: showMilestoneDetail ? "auto" : "min(75vh, 920px)",
+          minHeight:
+            planningTab === "global"
+              ? "min(75vh, 920px)"
+              : showMilestoneDetail
+                ? "auto"
+                : "min(75vh, 920px)",
         }}
       />
     </>

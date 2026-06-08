@@ -736,3 +736,70 @@ def delete_event(event_id: str) -> Dict[str, Any]:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to delete event: {exc}") from exc
+
+
+def get_global_planning_view() -> Dict[str, Any]:
+    """Return all projects with optional plan + milestones for the global planning view."""
+    try:
+        supabase = get_supabase_client()
+        projects_result = (
+            supabase.table("projects")
+            .select("project_key,display_name,created_at,updated_at")
+            .order("created_at", desc=False)
+            .execute()
+        )
+        projects = projects_result.data or []
+
+        plans_result = (
+            supabase.table("project_plans")
+            .select("id,project_key,start_date,created_at,updated_at")
+            .execute()
+        )
+        plans_by_key: Dict[str, Dict[str, Any]] = {}
+        plan_ids: List[str] = []
+        for row in plans_result.data or []:
+            key = str(row.get("project_key") or "")
+            if not key:
+                continue
+            plans_by_key[key] = row
+            plan_ids.append(str(row.get("id") or ""))
+
+        milestones_by_plan: Dict[str, List[Dict[str, Any]]] = {}
+        if plan_ids:
+            ms_result = (
+                supabase.table("planning_milestones")
+                .select(
+                    "id,project_plan_id,name,duration_weeks,status,risk,goals,order_index,created_at,updated_at"
+                )
+                .in_("project_plan_id", plan_ids)
+                .order("order_index", desc=False)
+                .execute()
+            )
+            for row in ms_result.data or []:
+                plan_id = str(row.get("project_plan_id") or "")
+                milestones_by_plan.setdefault(plan_id, []).append(row)
+
+        entries: List[Dict[str, Any]] = []
+        for project in projects:
+            key = str(project.get("project_key") or "")
+            plan = plans_by_key.get(key)
+            milestones: List[Dict[str, Any]] = []
+            if plan:
+                milestones = milestones_by_plan.get(str(plan.get("id") or ""), [])
+            entries.append(
+                {
+                    "project_key": key,
+                    "display_name": str(project.get("display_name") or key),
+                    "plan": plan,
+                    "milestones": milestones,
+                }
+            )
+
+        return {"projects": entries}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load global planning view: {exc}",
+        ) from exc

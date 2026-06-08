@@ -15,6 +15,7 @@ from services.planning.planning_service import (
     delete_deliverable,
     delete_event,
     delete_milestone,
+    get_global_planning_view,
     get_plan_by_project_key,
     reorder_milestones,
     update_deliverable,
@@ -89,6 +90,11 @@ class EventUpdateBody(BaseModel):
 @planning_router.get("")
 def get_plan(project_key: str = Query(..., min_length=1)) -> dict:
     return get_plan_by_project_key(project_key)
+
+
+@planning_router.get("/global")
+def get_planning_global() -> dict:
+    return get_global_planning_view()
 
 
 @planning_router.put("/plan")
