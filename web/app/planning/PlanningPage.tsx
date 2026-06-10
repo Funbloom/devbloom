@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { StudioTwoColumnShell } from "../components/studio/StudioTwoColumnShell";
+import { useAuth } from "../contexts/AuthContext";
 import { STORAGE_KEY_ACTIVE_PROJECT, STORAGE_KEY_ACTIVE_PROJECT_NAME } from "../lib/activeProject";
 import { fetchVacationEmployees } from "../vacations/vacationClient";
 import { DeliverablesPanel } from "./components/DeliverablesPanel";
-import { MilestoneEditModal } from "./components/MilestoneEditModal";
 import { PlanningDeleteAllConfirmDialog } from "./components/PlanningDeleteAllConfirmDialog";
 import { PlanningImportConflictDialog } from "./components/PlanningImportConflictDialog";
 import { PlanningAnalysisModal } from "./components/PlanningAnalysisModal";
@@ -54,6 +54,7 @@ import type {
   GlobalPlanningProject,
   PlanningDeliverable,
   PlanningEmployee,
+  PlanningEvent,
   PlanningGraph,
   PlanningMilestone,
 } from "./types";
@@ -88,12 +89,13 @@ const emptyGraph = (): PlanningGraph => ({
 });
 
 export function PlanningPage(): ReactElement {
+  const { authUser } = useAuth();
+  const canDeleteMilestone = Boolean(authUser?.is_admin);
   const [projectKey, setProjectKey] = useState("");
   const [activeProjectName, setActiveProjectName] = useState("");
   const [graph, setGraph] = useState<PlanningGraph>(emptyGraph);
   const [startDate, setStartDate] = useState(defaultStartDateIso());
   const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
-  const [editMilestone, setEditMilestone] = useState<PlanningMilestone | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -308,7 +310,6 @@ export function PlanningPage(): ReactElement {
       await clearProjectPlanning(projectKey);
       setDeleteAllConfirmOpen(false);
       setSelectedMilestoneId(null);
-      setEditMilestone(null);
       await refresh();
     } catch (err) {
       setDeleteAllError(err instanceof Error ? err.message : "Failed to delete planning data.");
@@ -365,7 +366,12 @@ export function PlanningPage(): ReactElement {
       ...prev,
       milestones: prev.milestones.map((milestone) =>
         milestone.id === updated.id
-          ? { ...milestone, ...updated, goals: updated.goals ?? [] }
+          ? {
+              ...milestone,
+              ...updated,
+              goals: updated.goals ?? [],
+              notes: updated.notes ?? "",
+            }
           : milestone,
       ),
     }));
@@ -398,6 +404,52 @@ export function PlanningPage(): ReactElement {
       deliverables: prev.deliverables.filter((deliverable) => deliverable.id !== deliverableId),
     }));
   }, []);
+
+  const mergeEvent = useCallback((updated: PlanningEvent) => {
+    setGraph((prev) => ({
+      ...prev,
+      events: prev.events.map((event) => (event.id === updated.id ? { ...event, ...updated } : event)),
+    }));
+  }, []);
+
+  const appendEvent = useCallback((created: PlanningEvent) => {
+    setGraph((prev) => ({
+      ...prev,
+      events: [...prev.events, created],
+    }));
+  }, []);
+
+  const removeEventFromGraph = useCallback((eventId: string) => {
+    setGraph((prev) => ({
+      ...prev,
+      events: prev.events.filter((event) => event.id !== eventId),
+    }));
+  }, []);
+
+  const handleDeleteMilestone = useCallback(async () => {
+    if (!selectedMilestone) {
+      return;
+    }
+    const milestoneId = selectedMilestone.id;
+    setSaving(true);
+    setStatus(null);
+    try {
+      await deleteMilestone(milestoneId);
+      setGraph((prev) => ({
+        ...prev,
+        milestones: prev.milestones.filter((milestone) => milestone.id !== milestoneId),
+        deliverables: prev.deliverables.filter((deliverable) => deliverable.milestone_id !== milestoneId),
+        events: prev.events.filter((event) => event.milestone_id !== milestoneId),
+      }));
+      setSelectedMilestoneId(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete milestone.";
+      setStatus(message);
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedMilestone]);
 
   const handleApplyAnalyzedRisks = useCallback(
     async (analysisResult: PlanningAnalysisResult) => {
@@ -563,12 +615,12 @@ export function PlanningPage(): ReactElement {
                     monthZoom={planningMonthZoom}
                     compact={showMilestoneDetail}
                     onSelectMilestone={setSelectedMilestoneId}
-                    onEditMilestone={setEditMilestone}
                     onAddMilestone={() => void handleAddMilestone()}
                   />
                   <DeliverablesPanel
                     milestone={selectedMilestone}
                     deliverables={graph.deliverables}
+                    events={graph.events}
                     employees={employees}
                     planStartDate={startDate}
                     startWeek={
@@ -581,12 +633,20 @@ export function PlanningPage(): ReactElement {
                     onDeliverableUpdated={mergeDeliverable}
                     onDeliverableCreated={appendDeliverable}
                     onDeliverableDeleted={removeDeliverableFromGraph}
+                    onEventCreated={appendEvent}
+                    onEventUpdated={mergeEvent}
+                    onEventDeleted={removeEventFromGraph}
                     onSaveMilestone={updateMilestone}
                     onSaveDeliverable={updateDeliverable}
                     onCreateDeliverable={(milestoneId) =>
                       createDeliverable(milestoneId, "New item", "todo", "", null, "on_track")
                     }
                     onDeleteDeliverable={deleteDeliverable}
+                    onCreateEvent={createEvent}
+                    onSaveEvent={updateEvent}
+                    onDeleteEvent={deleteEvent}
+                    onDeleteMilestone={handleDeleteMilestone}
+                    canDeleteMilestone={canDeleteMilestone}
                     onError={(message) => setStatus(message)}
                   />
                 </>
@@ -691,105 +751,6 @@ export function PlanningPage(): ReactElement {
           saving={saving}
           onChoose={handleImportConflictChoice}
           onCancel={() => setImportConflictOpen(false)}
-        />
-      ) : null}
-
-      {editMilestone ? (
-        <MilestoneEditModal
-          milestone={editMilestone}
-          deliverables={graph.deliverables}
-          events={graph.events}
-          saving={saving}
-          onClose={() => setEditMilestone(null)}
-          onSaveMilestone={async (patch) => {
-            setSaving(true);
-            try {
-              await updateMilestone(editMilestone.id, patch);
-              await refresh();
-              setEditMilestone(null);
-            } catch (err) {
-              setStatus(err instanceof Error ? err.message : "Failed to save milestone.");
-            } finally {
-              setSaving(false);
-            }
-          }}
-          onDeleteMilestone={async () => {
-            setSaving(true);
-            try {
-              await deleteMilestone(editMilestone.id);
-              setEditMilestone(null);
-              setSelectedMilestoneId(null);
-              await refresh();
-            } catch (err) {
-              setStatus(err instanceof Error ? err.message : "Failed to delete milestone.");
-            } finally {
-              setSaving(false);
-            }
-          }}
-          onAddDeliverable={async (title, status: MilestoneStatus) => {
-            setSaving(true);
-            try {
-              await createDeliverable(editMilestone.id, title, status);
-              await refresh();
-              const updated = await fetchPlanningGraph(projectKey);
-              setGraph(updated);
-              const ms = updated.milestones.find((m) => m.id === editMilestone.id);
-              if (ms) {
-                setEditMilestone(ms);
-              }
-            } finally {
-              setSaving(false);
-            }
-          }}
-          onUpdateDeliverable={async (id, patch) => {
-            setSaving(true);
-            try {
-              await updateDeliverable(id, patch);
-              await refresh();
-            } finally {
-              setSaving(false);
-            }
-          }}
-          onDeleteDeliverable={async (id) => {
-            setSaving(true);
-            try {
-              await deleteDeliverable(id);
-              await refresh();
-            } finally {
-              setSaving(false);
-            }
-          }}
-          onAddEvent={async (name, weeksAfter) => {
-            setSaving(true);
-            try {
-              await createEvent(editMilestone.id, name, weeksAfter);
-              await refresh();
-            } catch (err) {
-              setStatus(err instanceof Error ? err.message : "Failed to add event.");
-            } finally {
-              setSaving(false);
-            }
-          }}
-          onUpdateEvent={async (id, patch) => {
-            setSaving(true);
-            try {
-              await updateEvent(id, patch);
-              await refresh();
-            } catch (err) {
-              setStatus(err instanceof Error ? err.message : "Failed to update event.");
-            } finally {
-              setSaving(false);
-            }
-          }}
-          onDeleteEvent={async (id) => {
-            setSaving(true);
-            try {
-              await deleteEvent(id);
-              await refresh();
-            } finally {
-              setSaving(false);
-            }
-          }}
         />
       ) : null}
 

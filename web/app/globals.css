@@ -3613,3 +3613,32 @@ button:disabled {
     max-height: 180px;
   }
 }
+
+.planning-rich-text-editor:empty::before,
+.planning-rich-text-editor[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  color: #64748b;
+  pointer-events: none;
+}
+
+.planning-rich-text-editor ul,
+.planning-rich-text-display ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.planning-rich-text-editor ol,
+.planning-rich-text-display ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.planning-rich-text-editor p,
+.planning-rich-text-display p {
+  margin: 0 0 8px;
+}
+
+.planning-rich-text-editor p:last-child,
+.planning-rich-text-display p:last-child {
+  margin-bottom: 0;
+}

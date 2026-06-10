@@ -26,7 +26,7 @@ import {
 import { PlanningTimelineWeekGrid } from "./PlanningTimelineWeekGrid";
 import { RISK_LABELS, riskCellStyle, STATUS_LABELS, statusBarColor } from "./planningColors";
 
-const ROW_H = 76;
+const ROW_H = 56;
 const BAR_H = 36;
 
 type Props = {
@@ -36,7 +36,6 @@ type Props = {
   selectedMilestoneId: string | null;
   saving: boolean;
   onSelectMilestone: (id: string) => void;
-  onEditMilestone: (milestone: PlanningMilestone) => void;
   onAddMilestone: () => void;
   monthZoom: MonthZoom;
   compact?: boolean;
@@ -49,7 +48,6 @@ export function PlanningTimeline({
   selectedMilestoneId,
   saving,
   onSelectMilestone,
-  onEditMilestone,
   onAddMilestone,
   monthZoom,
   compact = false,
@@ -156,7 +154,7 @@ export function PlanningTimeline({
                   <div
                     style={{
                       width: PLANNING_STICKY_NAME_W,
-                      padding: "6px 8px",
+                      padding: "4px 8px",
                       borderRight: cellBorder,
                       display: "flex",
                       flexDirection: "column",
@@ -178,30 +176,11 @@ export function PlanningTimeline({
                     >
                       {milestone.name}
                     </span>
-                    <button
-                      type="button"
-                      style={{
-                        alignSelf: "flex-start",
-                        fontSize: 11,
-                        padding: "2px 6px",
-                        borderRadius: 6,
-                        border: "1px solid #475569",
-                        background: "#1e293b",
-                        color: "#e2e8f0",
-                        cursor: "pointer",
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEditMilestone(milestone);
-                      }}
-                    >
-                      Edit
-                    </button>
                   </div>
                   <div
                     style={{
                       width: PLANNING_STICKY_STATUS_W,
-                      padding: "6px 8px",
+                      padding: "4px 8px",
                       borderRight: cellBorder,
                       fontSize: 11,
                       display: "flex",
@@ -213,7 +192,7 @@ export function PlanningTimeline({
                   <div
                     style={{
                       width: PLANNING_STICKY_RISK_W,
-                      padding: "6px 8px",
+                      padding: "4px 8px",
                       fontSize: 11,
                       display: "flex",
                       alignItems: "center",

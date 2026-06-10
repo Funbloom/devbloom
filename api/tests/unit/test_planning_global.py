@@ -42,6 +42,7 @@ def test_get_global_planning_view_joins_projects_and_milestones(
                         "status": "todo",
                         "risk": "on_track",
                         "goals": [],
+                        "notes": "",
                         "order_index": 0,
                         "created_at": "t",
                         "updated_at": "t",

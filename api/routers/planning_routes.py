@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel, Field
+
+from core.auth import require_admin
 
 from services.planning.planning_import_pkg.planning_import_service import apply_import, parse_import_file
 from services.planning.planning_import_pkg.planning_import_types import ImportedPlanningData
@@ -38,6 +40,7 @@ class MilestoneCreateBody(BaseModel):
     status: str = "todo"
     risk: str = "on_track"
     goals: List[str] = Field(default_factory=list)
+    notes: str = ""
 
 
 class MilestoneUpdateBody(BaseModel):
@@ -46,6 +49,7 @@ class MilestoneUpdateBody(BaseModel):
     status: Optional[str] = None
     risk: Optional[str] = None
     goals: Optional[List[str]] = None
+    notes: Optional[str] = None
 
 
 class MilestoneReorderBody(BaseModel):
@@ -116,6 +120,7 @@ def post_milestone(body: MilestoneCreateBody) -> dict:
         status=body.status,
         risk=body.risk,
         goals=body.goals,
+        notes=body.notes,
     )
 
 
@@ -128,11 +133,12 @@ def patch_milestone(milestone_id: str, body: MilestoneUpdateBody) -> dict:
         status=body.status,
         risk=body.risk,
         goals=body.goals,
+        notes=body.notes,
     )
 
 
 @planning_router.delete("/milestones/{milestone_id}")
-def remove_milestone(milestone_id: str) -> dict:
+def remove_milestone(milestone_id: str, _admin: dict = Depends(require_admin)) -> dict:
     return delete_milestone(milestone_id)
 
 

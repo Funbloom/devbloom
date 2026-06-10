@@ -1,7 +1,8 @@
 "use client";
 
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { PlanningImportButton } from "./PlanningImportButton";
+import { PlanningDateInput } from "./PlanningDateInput";
 
 type Props = {
   startDate: string;
@@ -13,6 +14,14 @@ type Props = {
   onImportFileSelected: (file: File) => void;
   onAnalyseClick: () => void;
   onDeleteAllClick: () => void;
+};
+
+const startDateInputStyle: CSSProperties = {
+  padding: "8px 10px",
+  borderRadius: 8,
+  border: "1px solid #334155",
+  background: "#0f172a",
+  color: "#f1f5f9",
 };
 
 export function PlanningLeftPanel({
@@ -36,18 +45,11 @@ export function PlanningLeftPanel({
         </p>
         <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
           <span>Project start date</span>
-          <input
-            type="date"
+          <PlanningDateInput
             value={startDate}
             disabled={saving}
-            onChange={(e) => onStartDateChange(e.target.value)}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #334155",
-              background: "#0f172a",
-              color: "#f1f5f9",
-            }}
+            style={startDateInputStyle}
+            onCommit={onStartDateChange}
           />
         </label>
         <PlanningImportButton

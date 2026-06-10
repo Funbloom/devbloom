@@ -18,6 +18,7 @@ export type PlanningMilestone = {
   status: MilestoneStatus;
   risk: MilestoneRisk;
   goals: string[];
+  notes: string;
   order_index: number;
   created_at: string;
   updated_at: string;

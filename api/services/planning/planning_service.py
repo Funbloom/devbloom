@@ -124,7 +124,7 @@ def get_plan_by_project_key(project_key: str) -> Dict[str, Any]:
         ms_result = (
             supabase.table("planning_milestones")
             .select(
-                "id,project_plan_id,name,duration_weeks,status,risk,goals,order_index,created_at,updated_at"
+                "id,project_plan_id,name,duration_weeks,status,risk,goals,notes,order_index,created_at,updated_at"
             )
             .eq("project_plan_id", plan_id)
             .order("order_index", desc=False)
@@ -256,6 +256,7 @@ def create_milestone(
     status: str = "todo",
     risk: str = "on_track",
     goals: Optional[List[str]] = None,
+    notes: Optional[str] = None,
 ) -> Dict[str, Any]:
     key = (project_key or "").strip()
     cleaned_name = (name or "").strip()
@@ -281,6 +282,7 @@ def create_milestone(
             "status": status_val,
             "risk": risk_val,
             "goals": goals or [],
+            "notes": notes or "",
             "order_index": order_index,
             "created_at": now,
             "updated_at": now,
@@ -300,6 +302,7 @@ def update_milestone(
     status: Optional[str] = None,
     risk: Optional[str] = None,
     goals: Optional[List[str]] = None,
+    notes: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {}
     if name is not None:
@@ -317,6 +320,8 @@ def update_milestone(
         payload["risk"] = _validate_milestone_risk(risk)
     if goals is not None:
         payload["goals"] = goals
+    if notes is not None:
+        payload["notes"] = notes
     if not payload:
         raise HTTPException(status_code=400, detail="No fields to update.")
 
@@ -769,7 +774,7 @@ def get_global_planning_view() -> Dict[str, Any]:
             ms_result = (
                 supabase.table("planning_milestones")
                 .select(
-                    "id,project_plan_id,name,duration_weeks,status,risk,goals,order_index,created_at,updated_at"
+                    "id,project_plan_id,name,duration_weeks,status,risk,goals,notes,order_index,created_at,updated_at"
                 )
                 .in_("project_plan_id", plan_ids)
                 .order("order_index", desc=False)

@@ -82,6 +82,7 @@ export async function updateMilestone(
     status: MilestoneStatus;
     risk: MilestoneRisk;
     goals: string[];
+    notes: string;
   }>,
 ): Promise<PlanningMilestone> {
   const response = await fetchApi(`/planning/milestones/${encodeURIComponent(milestoneId)}`, {

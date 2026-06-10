@@ -17,6 +17,7 @@ function milestone(partial: Partial<PlanningMilestone> & { id: string; name: str
     status: "todo",
     risk: "on_track",
     goals: [],
+    notes: "",
     order_index: 0,
     created_at: "",
     updated_at: "",
