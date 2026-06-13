@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { DismissButton } from "../components/DismissButton";
 import { getLocalProjectPath, localAgent } from "../lib/localAgentClient";
 
 function isStrictLocalhost(): boolean {
@@ -153,13 +153,15 @@ export default function MeshGenPage() {
   if (!eligible) {
     return (
       <div style={{ maxWidth: 640, margin: "2rem auto", padding: "0 1rem" }}>
-        <h1 style={{ marginTop: 0 }}>Mesh Gen</h1>
+        <div className="app-modal-header app-modal-header--center" style={{ marginBottom: "1rem" }}>
+          <h1 style={{ margin: 0, flex: 1 }}>Mesh Gen</h1>
+          <DismissButton href="/" label="Back" />
+        </div>
         <p style={{ color: "var(--muted, #94a3b8)" }}>
           This tool is only available when you open the app at{" "}
           <strong>http://localhost</strong> or <strong>http://127.0.0.1</strong>. It calls{" "}
           <a href="https://github.com/Tencent-Hunyuan/Hunyuan3D-2">Hunyuan3D-2</a> inside the local agent on your machine.
         </p>
-        <Link href="/">Back</Link>
       </div>
     );
   }

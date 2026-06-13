@@ -181,10 +181,18 @@ def test_resolve_openai_image_size_gpt_image_15_landscape_uses_legacy_preset():
 
 
 def test_resolve_openai_image_size_gpt_image_2_uses_true_16_9_and_9_16():
-    assert image_tool.resolve_openai_image_size("gpt-image-2", 1024, 576) == "1088x612"
-    assert image_tool.resolve_openai_image_size("gpt-image-2", 576, 1024) == "612x1088"
+    assert image_tool.resolve_openai_image_size("gpt-image-2", 1024, 576) == "1088x608"
+    assert image_tool.resolve_openai_image_size("gpt-image-2", 576, 1024) == "608x1088"
     assert image_tool.resolve_openai_image_size("gpt-image-2", 2048, 1152) == "2048x1152"
     assert image_tool.resolve_openai_image_size("gpt-image-2", 1024, 1024) == "1024x1024"
+
+
+def test_resolve_openai_image_size_gpt_image_2_dims_divisible_by_16():
+    for w, h in ((1024, 576), (576, 1024), (2048, 1152), (1024, 1024)):
+        size = image_tool.resolve_openai_image_size("gpt-image-2", w, h)
+        pw, ph = size.split("x")
+        assert int(pw) % 16 == 0
+        assert int(ph) % 16 == 0
 
 
 def test_generate_openai_image_bytes_gpt_image_2_edit_omits_input_fidelity(monkeypatch):
@@ -280,5 +288,5 @@ def test_generate_openai_image_bytes_gpt_image_2_passes_custom_landscape_size(mo
         model_name="gpt-image-2",
     )
 
-    assert called["generate"]["size"] == "1088x612"
+    assert called["generate"]["size"] == "1088x608"
     assert called["generate"]["model"] == "gpt-image-2"

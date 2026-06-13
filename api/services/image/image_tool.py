@@ -75,13 +75,18 @@ def _openai_legacy_preset_size(width: int, height: int) -> str:
     return "1024x1536"
 
 
+def _openai_dim_snap_16(value: int) -> int:
+    """OpenAI gpt-image-2 requires width and height each divisible by 16."""
+    return max(16, (int(value) // 16) * 16)
+
+
 def _openai_gpt_image_2_size(width: int, height: int) -> str:
     """gpt-image-2 custom size: true 16:9 landscape, 9:16 portrait, square; OpenAI constraints applied."""
     w = max(16, int(width))
     h = max(16, int(height))
 
     if w == h:
-        side = max(256, ((w + 15) // 16) * 16)
+        side = max(256, _openai_dim_snap_16(w))
         while side * side < _OPENAI_GPT_IMAGE_2_MIN_PIXELS:
             side += 16
         while side > _OPENAI_GPT_IMAGE_2_MAX_EDGE or side * side > _OPENAI_GPT_IMAGE_2_MAX_PIXELS:
@@ -101,6 +106,8 @@ def _openai_gpt_image_2_size(width: int, height: int) -> str:
             out_w, out_h = 16 * n, 9 * n
         else:
             out_w, out_h = 9 * n, 16 * n
+        out_w = _openai_dim_snap_16(out_w)
+        out_h = _openai_dim_snap_16(out_h)
         pixels = out_w * out_h
         if (
             out_w <= _OPENAI_GPT_IMAGE_2_MAX_EDGE
@@ -109,7 +116,7 @@ def _openai_gpt_image_2_size(width: int, height: int) -> str:
         ):
             return f"{out_w}x{out_h}"
         n -= 1
-    return "1088x612" if landscape else "612x1088"
+    return "1088x608" if landscape else "608x1088"
 
 
 def resolve_openai_image_size(model_name: str, width: int, height: int) -> str:

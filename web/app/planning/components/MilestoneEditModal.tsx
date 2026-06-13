@@ -9,6 +9,7 @@ import type {
   PlanningEvent,
   PlanningMilestone,
 } from "../types";
+import { DismissButton } from "../../components/DismissButton";
 import { RISK_LABELS, STATUS_LABELS } from "./planningColors";
 
 type Props = {
@@ -136,13 +137,11 @@ export function MilestoneEditModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <h2 id="milestone-edit-title" style={{ margin: 0, fontSize: 18 }}>
+        <div className="app-modal-header app-modal-header--center">
+          <h2 id="milestone-edit-title" style={{ margin: 0, fontSize: 18, flex: 1 }}>
             Edit milestone
           </h2>
-          <button type="button" onClick={onClose} style={{ padding: "4px 10px" }}>
-            Close
-          </button>
+          <DismissButton onClick={onClose} />
         </div>
 
         <label style={{ display: "grid", gap: 6, fontSize: 13 }}>

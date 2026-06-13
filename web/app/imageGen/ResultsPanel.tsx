@@ -1,7 +1,8 @@
 "use client";
 
-import type { KeyboardEvent, MouseEvent } from "react";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import { resolveImageDisplayUrl } from "./client";
+import { ImageFullscreenPreview } from "../components/ImageFullscreenPreview";
 import type { GeneratedImage } from "./types";
 
 type Props = {
@@ -49,6 +50,8 @@ export function ResultsPanel({
   sketchSelectionDisabled = false,
   projectKey = "",
 }: Props) {
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+
   const inner = (
     <>
       <div className="imagegen-panel">
@@ -100,6 +103,16 @@ export function ResultsPanel({
               if (!sketchSelectable || selectionDisabled) return;
               onSketchSelectionChange?.(img.id, !sketchSelected);
             };
+            const displayUrl = projectKey.trim() ? resolveImageDisplayUrl(img, projectKey) : img.url;
+            const openPreview = (): void => {
+              if (sketchSelectable) {
+                return;
+              }
+              setPreviewImage({
+                url: displayUrl,
+                title: img.prompt?.trim() || "Generated image",
+              });
+            };
             return (
             <div
               key={img.id}
@@ -138,10 +151,13 @@ export function ResultsPanel({
                         outline: "none",
                       },
                     }
-                  : {})}
+                  : {
+                      onClick: openPreview,
+                      style: { cursor: "zoom-in" },
+                    })}
               >
                 <img
-                  src={projectKey.trim() ? resolveImageDisplayUrl(img, projectKey) : img.url}
+                  src={displayUrl}
                   alt={img.prompt}
                   className={
                     sketchSelectable
@@ -149,6 +165,14 @@ export function ResultsPanel({
                       : "imagegen-card-image"
                   }
                   draggable={false}
+                  {...(sketchSelectable
+                    ? {}
+                    : {
+                        onClick: (event: MouseEvent<HTMLImageElement>) => {
+                          event.stopPropagation();
+                          openPreview();
+                        },
+                      })}
                 />
               </div>
               <div className="imagegen-card-meta">
@@ -252,6 +276,15 @@ export function ResultsPanel({
           )}
         </div>
       </div>
+      {previewImage ? (
+        <ImageFullscreenPreview
+          imageUrl={previewImage.url}
+          title={previewImage.title}
+          onClose={() => {
+            setPreviewImage(null);
+          }}
+        />
+      ) : null}
     </>
   );
   if (embedded) return inner;

@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "../lib/supabase";
+import { DismissButton } from "../components/DismissButton";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL_BASE || "http://localhost:8000";
 
@@ -60,7 +60,10 @@ export default function LoginPage() {
 
   return (
     <div className="login-page" style={{ maxWidth: 360, margin: "4rem auto", padding: "0 1rem" }}>
-      <h1 style={{ marginBottom: "1rem" }}>Sign in</h1>
+      <div className="app-modal-header app-modal-header--center" style={{ marginBottom: "1rem" }}>
+        <h1 style={{ margin: 0, flex: 1 }}>Sign in</h1>
+        <DismissButton href="/" label="Back" aria-label="Back to home" />
+      </div>
       {error && (
         <div role="alert" style={{ color: "var(--error, #c00)", marginBottom: "1rem" }}>
           {error}
@@ -102,9 +105,6 @@ export default function LoginPage() {
       >
         Sign in with Google
       </button>
-      <p style={{ marginTop: "2rem", fontSize: "0.9rem" }}>
-        <Link href="/">Back to home</Link>
-      </p>
     </div>
   );
 }

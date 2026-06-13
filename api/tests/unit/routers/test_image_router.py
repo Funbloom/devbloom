@@ -32,6 +32,32 @@ def test_edit_image_nanobanana_uses_default_gpt_model(monkeypatch):
     assert called["reference_image_filenames"] == ["hero.png"]
 
 
+def test_edit_image_nanobanana_includes_extra_reference_images(monkeypatch):
+    called: dict[str, object] = {}
+
+    monkeypatch.setattr(image_router, "check_can_generate_images", lambda *args, **kwargs: None)
+    monkeypatch.setattr(image_router, "increment_usage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(image_router, "find_image_path", lambda *args, **kwargs: None)
+
+    def fake_generate_image(**kwargs):
+        called.update(kwargs)
+        return {"images": [{"filename": "out.png", "url": "/images/out.png"}]}
+
+    monkeypatch.setattr(image_router, "generate_image", fake_generate_image)
+
+    body = image_router.EditImageNanobananaRequest(
+        changes="match the hat style",
+        reference="hero.png",
+        reference_image_filenames=["hat_ref.png", "hero.png", "style_ref.png"],
+        project_key="demo",
+    )
+    user = {"id": "user-1", "is_admin": False}
+
+    image_router.edit_image_nanobanana_route(body, user)
+
+    assert called["reference_image_filenames"] == ["hero.png", "hat_ref.png", "style_ref.png"]
+
+
 def test_edit_image_nanobanana_preserves_explicit_gpt_model(monkeypatch):
     called: dict[str, object] = {}
 

@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import type { ReactElement } from "react";
 import type { ImportApplyMode } from "../planningImportTypes";
 
+import { DismissButton } from "../../components/DismissButton";
+
 type Props = {
   existingMilestoneCount: number;
   saving: boolean;
@@ -60,9 +62,12 @@ export function PlanningImportConflictDialog({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="planning-import-conflict-title" style={{ margin: 0, fontSize: 18 }}>
-          Existing plan found
-        </h2>
+        <div className="app-modal-header app-modal-header--center">
+          <h2 id="planning-import-conflict-title" style={{ margin: 0, fontSize: 18, flex: 1 }}>
+            Existing plan found
+          </h2>
+          <DismissButton disabled={saving} onClick={onCancel} />
+        </div>
         <p style={{ margin: 0, fontSize: 13, color: "#94a3b8", lineHeight: 1.5 }}>
           This project already has {existingMilestoneCount} milestone
           {existingMilestoneCount === 1 ? "" : "s"}. Choose how to apply the import.

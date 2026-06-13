@@ -144,6 +144,8 @@ export async function editImageNanobanana(params: {
   height?: number;
   /** Same model ids as Image Gen left tab / generate_image. */
   model?: string;
+  /** Extra reference images beyond the primary `reference` (filenames, nested paths, or URLs). */
+  referenceImageFilenames?: string[];
 }): Promise<BackendImageResult[]> {
   confirmGeminiImageIfNeeded({ modelId: params.model });
   const body: Record<string, unknown> = {
@@ -154,6 +156,11 @@ export async function editImageNanobanana(params: {
   if (typeof params.width === "number") body.width = params.width;
   if (typeof params.height === "number") body.height = params.height;
   if (params.model?.trim()) body.model = params.model.trim();
+  if (params.referenceImageFilenames?.length) {
+    body.reference_image_filenames = params.referenceImageFilenames
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+  }
   const response = await fetchApi("/tools/edit_image_nanobanana", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -552,7 +559,7 @@ export async function putImageGenerated(
   images: Record<string, unknown>[],
   options?: { private?: boolean }
 ): Promise<void> {
-  await fetchApi("/tools/image_generated", {
+  const response = await fetchApi("/tools/image_generated", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -561,6 +568,10 @@ export async function putImageGenerated(
       private: options?.private ?? false,
     }),
   });
+  if (!response.ok) {
+    const errBody = (await response.json().catch(() => ({}))) as { detail?: ErrorDetail };
+    throw new Error(extractErrorMessage(response.status, errBody.detail));
+  }
 }
 
 /** Admin → Settings → Default Storage for Images (local vs cloud). */

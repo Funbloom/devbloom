@@ -142,6 +142,10 @@ class EditImageNanobananaRequest(BaseModel):
         max_length=4000,
         description="HTTPS URL to the image, or bare filename under project Images/",
     )
+    reference_image_filenames: list[str] | None = Field(
+        default=None,
+        description="Additional reference images (filenames, nested UI paths, or URLs) beyond the primary reference.",
+    )
     project_key: str | None = None
     width: int = 1024
     height: int = 1024
@@ -366,8 +370,19 @@ def edit_image_nanobanana_route(
     ref = (body.reference or "").strip()
     if not ref:
         raise HTTPException(status_code=400, detail="Reference image URL or filename is required.")
+    extra_refs = [str(r).strip() for r in (body.reference_image_filenames or []) if r and str(r).strip()]
+    all_refs: list[str] = []
+    for candidate in [ref, *extra_refs]:
+        if candidate and candidate not in all_refs:
+            all_refs.append(candidate)
+    all_refs = all_refs[:16]
+    ref_intro = (
+        "You are given a reference image and additional reference images for context. "
+        if len(all_refs) > 1
+        else "You are given a reference image. "
+    )
     prompt = (
-        "You are given a reference image. Apply the following edits. "
+        f"{ref_intro}Apply the following edits. "
         "Preserve subject identity and overall composition unless the edit requires otherwise.\n\n"
         f"Requested changes:\n{changes}"
     )
@@ -410,7 +425,7 @@ def edit_image_nanobanana_route(
             num_images=1,
             model=model_key,
             project_key=body.project_key,
-            reference_image_filenames=[ref],
+            reference_image_filenames=all_refs,
             images_output_dir=out_dir,
         )
         n = len(result.get("images") or [])

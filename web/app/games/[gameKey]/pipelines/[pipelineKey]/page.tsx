@@ -6,6 +6,8 @@ import { fetchApi } from "../../../../lib/api";
 import { readImagegenMainStyleId, writeImagegenMainStyleId } from "../../../../lib/imagegenMainStyle";
 import type { Style } from "../../../../storyboard/types";
 import { localAgent, getLocalProjectPath, isLocalAgentContext } from "../../../../lib/localAgentClient";
+import { ImageFullscreenPreview } from "../../../../components/ImageFullscreenPreview";
+import { DismissButton } from "../../../../components/DismissButton";
 
 function resolveGiftImageFileName(g: Record<string, unknown>): string | null {
   const fn = g.imageFileName ?? g.image_filename;
@@ -553,8 +555,7 @@ function PipelinePageContent({
     if (el) pendingMainListScrollTop.current = el.scrollTop;
   }, []);
 
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
-  const [previewImageTitle, setPreviewImageTitle] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
   const [locationUpdateImageBlobs, setLocationUpdateImageBlobs] = useState<Record<string, string>>({});
   const [locationUpdateImagesLoading, setLocationUpdateImagesLoading] = useState(false);
 
@@ -3168,8 +3169,7 @@ function PipelinePageContent({
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setPreviewImageTitle(title);
-                                      setPreviewImageUrl(blobUrl);
+                                      setPreviewImage({ url: blobUrl, title });
                                     }}
                                     title="View image"
                                     style={{
@@ -3413,8 +3413,10 @@ function PipelinePageContent({
                             style={{ width: "100%", height: "100%", objectFit: "contain", cursor: "zoom-in" }}
                             onClick={() => {
                               if (!imageUrl) return;
-                              setPreviewImageUrl(imageUrl);
-                              setPreviewImageTitle(gift.displayName || gift.id || "Gift image");
+                              setPreviewImage({
+                                url: imageUrl,
+                                title: gift.displayName || gift.id || "Gift image",
+                              });
                             }}
                             onError={() => {
                               if (!imgName) return;
@@ -3756,49 +3758,15 @@ function PipelinePageContent({
           </div>
         </div>
       )}
-      {previewImageUrl && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setPreviewImageUrl(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(2, 6, 23, 0.75)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 60,
-            padding: "1.5rem",
+      {previewImage ? (
+        <ImageFullscreenPreview
+          imageUrl={previewImage.url}
+          title={previewImage.title}
+          onClose={() => {
+            setPreviewImage(null);
           }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              maxWidth: "min(1100px, 96vw)",
-              maxHeight: "90vh",
-              background: "rgba(15, 23, 42, 0.95)",
-              border: "1px solid rgba(148, 163, 184, 0.25)",
-              borderRadius: 12,
-              padding: "1rem",
-              display: "grid",
-              gap: "0.75rem",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
-              <strong style={{ fontSize: 14 }}>{previewImageTitle || "Image preview"}</strong>
-              <button type="button" onClick={() => setPreviewImageUrl(null)}>
-                Close
-              </button>
-            </div>
-            <img
-              src={previewImageUrl}
-              alt={previewImageTitle || "Image preview"}
-              style={{ width: "100%", maxHeight: "75vh", objectFit: "contain", borderRadius: 8 }}
-            />
-          </div>
-        </div>
-      )}
+        />
+      ) : null}
       {(pipelineKey === "gift_images" || pipelineKey === "cities") && showEditGift && (
         <div
           style={{
@@ -3824,7 +3792,17 @@ function PipelinePageContent({
               gap: "0.75rem",
             }}
           >
-            <h3 style={{ margin: 0 }}>Edit Gift</h3>
+            <div className="app-modal-header app-modal-header--center">
+              <h3 style={{ margin: 0, flex: 1 }}>Edit Gift</h3>
+              <DismissButton
+                onClick={() => {
+                  setShowEditGift(false);
+                  setEditGiftStatus(null);
+                  setEditGiftImageFile(null);
+                  setEditGiftImageMode("keep");
+                }}
+              />
+            </div>
             <label style={{ display: "grid", gap: "0.25rem" }}>
               <span>Gift id</span>
               <input value={editGiftId} disabled />

@@ -2,6 +2,40 @@ import { API_BASE } from "./config";
 import { normalizeImageUrl, parseNestedUiRelFromUrl, resolveImageDisplayUrl } from "./client";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
 
+/** True when the image URL/metadata is for the given project (excludes cross-project gallery bleed). */
+export function imageBelongsToProject(img: GeneratedImage, projectKey: string): boolean {
+  const pk = projectKey.trim().toLowerCase();
+  if (!pk) {
+    return false;
+  }
+  const url = (img.url || "").trim();
+  if (!url) {
+    return true;
+  }
+  try {
+    const parsed = new URL(url, API_BASE);
+    const queryPk = parsed.searchParams.get("project_key")?.trim().toLowerCase();
+    if (queryPk && queryPk !== pk) {
+      return false;
+    }
+  } catch {
+    // continue with path checks
+  }
+  const cloudMatch = url.match(/\/generated\/([^/]+)\//i);
+  if (cloudMatch?.[1]) {
+    return cloudMatch[1].trim().toLowerCase() === pk;
+  }
+  return true;
+}
+
+export function filterImagesForProject(images: GeneratedImage[], projectKey: string): GeneratedImage[] {
+  const pk = projectKey.trim();
+  if (!pk) {
+    return [];
+  }
+  return images.filter((img) => imageBelongsToProject(img, pk));
+}
+
 function parseTab(o: Record<string, unknown>): ImageTab {
   const t = o.tab;
   if (t === "characters") return "characters";

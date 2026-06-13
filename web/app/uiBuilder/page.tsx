@@ -12,6 +12,7 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { fetchApi } from "../lib/api";
+import { DismissButton } from "../components/DismissButton";
 import { API_BASE, STORAGE_KEY_PROJECT } from "../imageGen/config";
 import {
   editImageNanobanana,
@@ -704,6 +705,8 @@ export default function UIBuilderPage() {
       width?: number;
       height?: number;
       model?: string;
+      referenceImageIds?: string[];
+      referenceImages?: GeneratedImage[];
     };
     try {
       job = JSON.parse(raw) as {
@@ -713,6 +716,8 @@ export default function UIBuilderPage() {
         width?: number;
         height?: number;
         model?: string;
+        referenceImageIds?: string[];
+        referenceImages?: GeneratedImage[];
       };
     } catch {
       setStatus("Invalid edit job.");
@@ -744,6 +749,39 @@ export default function UIBuilderPage() {
 
     void (async () => {
       try {
+        const extraRefs: string[] = [];
+        for (const img of job.referenceImages ?? []) {
+          if (!img) {
+            continue;
+          }
+          try {
+            const ref = resolveReferenceForEditApi(img);
+            if (ref !== reference && !extraRefs.includes(ref)) {
+              extraRefs.push(ref);
+            }
+          } catch {
+            // skip unresolvable refs
+          }
+        }
+        const refIds = (job.referenceImageIds ?? []).filter((id) => typeof id === "string" && id.trim());
+        const unresolvedIds = refIds.filter((id) => !(job.referenceImages ?? []).some((img) => img?.id === id));
+        if (unresolvedIds.length) {
+          const all = await loadAllImages();
+          for (const id of unresolvedIds) {
+            const img = all.find((item) => item.id === id);
+            if (!img) {
+              continue;
+            }
+            try {
+              const ref = resolveReferenceForEditApi(img);
+              if (ref !== reference && !extraRefs.includes(ref)) {
+                extraRefs.push(ref);
+              }
+            } catch {
+              // skip unresolvable refs
+            }
+          }
+        }
         const results = await editImageNanobanana({
           changes: job.changes,
           reference,
@@ -751,6 +789,7 @@ export default function UIBuilderPage() {
           width: editW,
           height: editH,
           model: editModel,
+          referenceImageFilenames: extraRefs.length ? extraRefs : undefined,
         });
         if (!results.length) {
           setStatus("Edit finished but returned no image.");
@@ -1898,9 +1937,9 @@ export default function UIBuilderPage() {
 
                 {tab === "draw" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                    <button type="button" onClick={handleBackFromDrawWithoutSave}>
-                      Back
-                    </button>
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      <DismissButton label="Back" onClick={handleBackFromDrawWithoutSave} />
+                    </div>
                     <label style={{ display: "grid", gap: "0.35rem", fontSize: 13 }}>
                       <span>Drawing name</span>
                       <input

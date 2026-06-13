@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { API_BASE } from "../../lib/api";
+import { DismissButton } from "../../components/DismissButton";
 import { isLocalAgentContext, localAgent, localAgentDownloadUrl, localAgentWebInstallUrl, fetchLocalAgentLatestVersion, getCachedLocalAgentAppdataInstalled, getCachedLocalAgentInstalledVersion, setCachedLocalAgentAppdataInstalled, setCachedLocalAgentInstalledVersion, isPythonVersion310Plus, PYTHON_WINDOWS_INSTALLER_URL, type LocalAgentInfo, type LocalModelsInstallationStatus } from "../../lib/localAgentClient";
 
 type InstallTab = "basic" | "advanced";
@@ -929,26 +930,14 @@ export default function AdminInstallationPage() {
               e.stopPropagation();
             }}
           >
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-              <strong id="installation-instructions-title" style={{ fontSize: 17, margin: 0, lineHeight: 1.3 }}>
+            <div className="app-modal-header">
+              <strong id="installation-instructions-title" style={{ fontSize: 17, margin: 0, lineHeight: 1.3, flex: 1 }}>
                 {instructionByTopic[instructionTopic].title}
               </strong>
-              <button
-                type="button"
+              <DismissButton
                 aria-label="Close instructions"
                 onClick={() => setInstructionTopic(null)}
-                style={{
-                  flexShrink: 0,
-                  padding: "6px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #475569",
-                  background: "#1e293b",
-                  color: "var(--color-text, #f1f5f9)",
-                  cursor: "pointer",
-                }}
-              >
-                Close
-              </button>
+              />
             </div>
             <pre
               style={{

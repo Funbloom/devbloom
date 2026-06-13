@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactElement } from "react";
+import { DismissButton } from "../../components/DismissButton";
 import { RISK_LABELS } from "./planningColors";
 import { formatPlanningDateLong } from "../milestoneDetail";
 import {
@@ -288,8 +289,8 @@ export function PlanningAnalysisModal({
         }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-          <div>
+        <div className="app-modal-header">
+          <div className="app-modal-header__content">
             <h2 id="planning-analysis-title" style={{ margin: 0, fontSize: 18 }}>
               Planning analysis
             </h2>
@@ -304,31 +305,25 @@ export function PlanningAnalysisModal({
               </p>
             ) : null}
           </div>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            {result && onApplyAnalyzedRisks ? (
-              <button
-                type="button"
-                className="imagegen-button"
-                disabled={risksBusy || riskChangeCount === 0}
-                onClick={() => void handleUpdateRisks()}
-              >
-                {updatingRisks
-                  ? "Updating risks…"
-                  : riskChangeCount === 0
-                    ? "Risks up to date"
-                    : `Update risks (${riskChangeCount})`}
-              </button>
-            ) : null}
+          <DismissButton disabled={risksBusy} onClick={onClose} />
+        </div>
+
+        {result && onApplyAnalyzedRisks ? (
+          <div style={{ display: "flex", justifyContent: "flex-start" }}>
             <button
               type="button"
-              className="imagegen-button-secondary"
-              disabled={risksBusy}
-              onClick={onClose}
+              className="imagegen-button"
+              disabled={risksBusy || riskChangeCount === 0}
+              onClick={() => void handleUpdateRisks()}
             >
-              Close
+              {updatingRisks
+                ? "Updating risks…"
+                : riskChangeCount === 0
+                  ? "Risks up to date"
+                  : `Update risks (${riskChangeCount})`}
             </button>
           </div>
-        </div>
+        ) : null}
 
         {updateRisksError ? (
           <p role="alert" style={{ margin: 0, fontSize: 13, color: "#fca5a5" }}>

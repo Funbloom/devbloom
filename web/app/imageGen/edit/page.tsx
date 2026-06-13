@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { DismissButton } from "../../components/DismissButton";
 import { IMAGEGEN_DEFAULT_IMAGE_MODEL, IMAGE_MODEL_OPTIONS } from "../../lib/imageModels";
 import { getStyles, normalizeImageUrl } from "../client";
+import { STORAGE_KEY_PROJECT } from "../config";
+import { EditReferenceImagePicker } from "../EditReferenceImagePicker";
 import {
   IMAGEGEN_EDIT_CONTEXT_KEY,
   IMAGEGEN_EDIT_JOB_KEY,
@@ -21,6 +24,9 @@ type PersistedEditOptions = {
   model: string;
   sizePreset: SizePreset;
   qualityPreset: QualityPreset;
+  referenceImageIdsByProject?: Record<string, string[]>;
+  /** Legacy — migrated into referenceImageIdsByProject on load */
+  referenceImageIds?: string[];
 };
 
 const IMAGEGEN_EDIT_OPTIONS_STORAGE_KEY = "imagegen_edit_options_v1";
@@ -54,8 +60,28 @@ export default function ImageGenEditPage() {
   const [model, setModel] = useState<string>(IMAGEGEN_DEFAULT_IMAGE_MODEL);
   const [sizePreset, setSizePreset] = useState<SizePreset>("square");
   const [qualityPreset, setQualityPreset] = useState<QualityPreset>("high");
+  const [referenceImageIdsByProject, setReferenceImageIdsByProject] = useState<Record<string, string[]>>({});
+  const [selectedReferenceImages, setSelectedReferenceImages] = useState<GeneratedImage[]>([]);
+  const [projectKey, setProjectKey] = useState("");
   const [optionsHydrated, setOptionsHydrated] = useState(false);
   const [hasPersistedOptions, setHasPersistedOptions] = useState(false);
+
+  const referenceImageIds = referenceImageIdsByProject[projectKey.trim()] ?? [];
+
+  const setReferenceImageIds = useCallback(
+    (value: string[] | ((prev: string[]) => string[])) => {
+      const pk = projectKey.trim();
+      if (!pk) {
+        return;
+      }
+      setReferenceImageIdsByProject((prev) => {
+        const current = prev[pk] ?? [];
+        const next = typeof value === "function" ? value(current) : value;
+        return { ...prev, [pk]: next };
+      });
+    },
+    [projectKey],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -81,8 +107,26 @@ export default function ImageGenEditPage() {
       if (parsed.qualityPreset === "high" || parsed.qualityPreset === "medium" || parsed.qualityPreset === "low") {
         setQualityPreset(parsed.qualityPreset);
       }
+      const byProject: Record<string, string[]> = {};
+      if (parsed.referenceImageIdsByProject && typeof parsed.referenceImageIdsByProject === "object") {
+        for (const [key, ids] of Object.entries(parsed.referenceImageIdsByProject)) {
+          if (!key.trim() || !Array.isArray(ids)) {
+            continue;
+          }
+          byProject[key.trim()] = ids.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+        }
+      }
+      const activeKey =
+        (typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY_PROJECT) : null)?.trim() ?? "";
+      if (Array.isArray(parsed.referenceImageIds) && parsed.referenceImageIds.length && activeKey && !byProject[activeKey]) {
+        byProject[activeKey] = parsed.referenceImageIds.filter(
+          (id): id is string => typeof id === "string" && id.trim().length > 0,
+        );
+      }
+      if (Object.keys(byProject).length > 0) {
+        setReferenceImageIdsByProject(byProject);
+      }
     } catch {
-      // ignore invalid storage payload
       setHasPersistedOptions(false);
     } finally {
       setOptionsHydrated(true);
@@ -102,6 +146,16 @@ export default function ImageGenEditPage() {
   }, []);
 
   useEffect(() => {
+    const syncProjectKey = () => {
+      const key = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY_PROJECT) : null;
+      setProjectKey(key?.trim() ?? "");
+    };
+    syncProjectKey();
+    window.addEventListener("activeProjectChanged", syncProjectKey);
+    return () => window.removeEventListener("activeProjectChanged", syncProjectKey);
+  }, []);
+
+  useEffect(() => {
     if (!optionsHydrated) {
       return;
     }
@@ -113,13 +167,14 @@ export default function ImageGenEditPage() {
       model,
       sizePreset,
       qualityPreset,
+      referenceImageIdsByProject,
     };
     try {
       window.localStorage.setItem(IMAGEGEN_EDIT_OPTIONS_STORAGE_KEY, JSON.stringify(payload));
     } catch {
       // ignore quota / private mode
     }
-  }, [selectedStyleId, model, sizePreset, qualityPreset, optionsHydrated]);
+  }, [selectedStyleId, model, sizePreset, qualityPreset, referenceImageIdsByProject, optionsHydrated]);
 
   useEffect(() => {
     if (!optionsHydrated) {
@@ -180,20 +235,20 @@ export default function ImageGenEditPage() {
     sessionStorage.removeItem(IMAGEGEN_EDIT_CONTEXT_KEY);
     const returnTo = sessionStorage.getItem(IMAGEGEN_EDIT_RETURN_KEY);
     sessionStorage.removeItem(IMAGEGEN_EDIT_RETURN_KEY);
-    sessionStorage.setItem(
-      IMAGEGEN_EDIT_JOB_KEY,
-      JSON.stringify({
-        changes: finalChanges,
-        image: source,
-        width: dims.width,
-        height: dims.height,
-        model,
-        sizePreset,
-        qualityPreset,
-        styleName: selectedStyle?.name ?? null,
-        ...(returnTo?.trim() ? { returnTo: returnTo.trim() } : {}),
-      }),
-    );
+    const jobPayload = {
+      changes: finalChanges,
+      image: source,
+      width: dims.width,
+      height: dims.height,
+      model,
+      sizePreset,
+      qualityPreset,
+      styleName: selectedStyle?.name ?? null,
+      referenceImageIds,
+      referenceImages: selectedReferenceImages,
+      ...(returnTo?.trim() ? { returnTo: returnTo.trim() } : {}),
+    };
+    sessionStorage.setItem(IMAGEGEN_EDIT_JOB_KEY, JSON.stringify(jobPayload));
     const qs = new URLSearchParams();
     qs.set("runEdit", "1");
     const rt = returnTo?.trim();
@@ -245,10 +300,14 @@ export default function ImageGenEditPage() {
               display: "flex",
               flexDirection: "column",
               height: "100%",
+              minHeight: 0,
             }}
           >
             <h2 className="imagegen-panel-title">Edit Options</h2>
-            <div className="imagegen-panel-body" style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+            <div
+              className="imagegen-panel-body imagegen-edit-options-body"
+              style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}
+            >
               <label className="imagegen-label" htmlFor="edit-style">Style</label>
               <select
                 id="edit-style"
@@ -301,38 +360,35 @@ export default function ImageGenEditPage() {
                 <option value="medium">Medium (512)</option>
                 <option value="low">Low (256)</option>
               </select>
+
+              <EditReferenceImagePicker
+                projectKey={projectKey}
+                sourceImageId={source?.id ?? null}
+                selectedIds={referenceImageIds}
+                onSelectedIdsChange={setReferenceImageIds}
+                onSelectedImagesChange={setSelectedReferenceImages}
+              />
             </div>
           </div>
         </aside>
 
         <section className="imagegen-right" style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <div className="imagegen-panel" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <div
-              style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "0.75rem",
-                flexShrink: 0,
-                paddingTop: "0.25rem",
-              }}
-            >
-              <button
-                type="button"
-                className="imagegen-delete-button"
-                onClick={() => {
-                  const rt = sessionStorage.getItem(IMAGEGEN_EDIT_RETURN_KEY)?.trim();
-                  if (rt?.startsWith("/") && !rt.startsWith("//")) {
-                    router.push(rt);
-                  } else {
-                    router.push("/imageGen");
-                  }
-                }}
-              >
-                Back
-              </button>
-              <h1 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 600 }}>Edit image</h1>
+            <div className="imagegen-edit-header">
+              <h1 className="imagegen-edit-header-title">Edit image</h1>
+              <div className="app-page-header-bar__actions">
+                <DismissButton
+                  label="Back"
+                  onClick={() => {
+                    const rt = sessionStorage.getItem(IMAGEGEN_EDIT_RETURN_KEY)?.trim();
+                    if (rt?.startsWith("/") && !rt.startsWith("//")) {
+                      router.push(rt);
+                    } else {
+                      router.push("/imageGen");
+                    }
+                  }}
+                />
+              </div>
             </div>
             <div
               className="imagegen-panel-body"

@@ -7,12 +7,14 @@ import { API_BASE } from "./config";
 import {
   applyImageStorageDefaults,
   editImageNanobanana,
+  getImageGenerated,
   normalizeImageUrl,
   resolveReferenceForEditApi,
 } from "./client";
 import { IMAGEGEN_EDIT_JOB_KEY, UIBUILDER_PENDING_BREAKDOWN_EXPORTS_RELOAD_KEY } from "./editKeys";
 import { isGeminiImageConfirmCancelled } from "../lib/confirmGeminiImage";
 import { clearEditDraft } from "./imagegenPanelSnapshot";
+import { parseStoredImages } from "./persistence";
 import type { GeneratedImage, ImageLocation, ImageTab } from "./types";
 
 type GenerateActivity = { message: string; isError: boolean } | null;
@@ -58,6 +60,8 @@ export function RunEditImageEffect({
       height?: number;
       model?: string;
       styleName?: string | null;
+      referenceImageIds?: string[];
+      referenceImages?: GeneratedImage[];
     };
     try {
       job = JSON.parse(raw) as {
@@ -68,6 +72,8 @@ export function RunEditImageEffect({
         height?: number;
         model?: string;
         styleName?: string | null;
+        referenceImageIds?: string[];
+        referenceImages?: GeneratedImage[];
       };
     } catch {
       setStatus("Invalid edit job.");
@@ -91,6 +97,54 @@ export function RunEditImageEffect({
       typeof job.height === "number" && Number.isFinite(job.height) && job.height > 0 ? Math.round(job.height) : 1024;
     const editModel = job.model?.trim() || imageModel;
 
+    const resolveExtraReferenceFilenames = async (): Promise<string[]> => {
+      const extras: string[] = [];
+      const fromJob = job.referenceImages ?? [];
+      for (const img of fromJob) {
+        if (!img) {
+          continue;
+        }
+        try {
+          const ref = resolveReferenceForEditApi(img);
+          if (ref !== reference && !extras.includes(ref)) {
+            extras.push(ref);
+          }
+        } catch {
+          // skip unresolvable refs
+        }
+      }
+      const ids = (job.referenceImageIds ?? []).filter((id) => typeof id === "string" && id.trim());
+      const unresolvedIds = ids.filter((id) => !fromJob.some((img) => img?.id === id));
+      if (unresolvedIds.length === 0) {
+        return extras;
+      }
+      const pk = projectKey.trim();
+      if (!pk) {
+        return extras;
+      }
+      try {
+        const { images: rawImages } = await getImageGenerated(pk);
+        const projectImages = parseStoredImages(rawImages, pk);
+        for (const id of unresolvedIds) {
+          const img = projectImages.find((item) => item.id === id);
+          if (!img) {
+            continue;
+          }
+          try {
+            const ref = resolveReferenceForEditApi(img);
+            if (ref !== reference && !extras.includes(ref)) {
+              extras.push(ref);
+            }
+          } catch {
+            // skip unresolvable refs
+          }
+        }
+      } catch {
+        // ignore load failures
+      }
+      return extras;
+    };
+
     setIsEditImageGenerating(true);
     setGenerateActivity({
       message: `Editing image (${editModel}) at ${editW}×${editH} — this may take a while…`,
@@ -98,6 +152,7 @@ export function RunEditImageEffect({
     });
     void (async () => {
       try {
+        const extraRefs = await resolveExtraReferenceFilenames();
         const results = await editImageNanobanana({
           changes: job.changes,
           reference,
@@ -105,6 +160,7 @@ export function RunEditImageEffect({
           width: editW,
           height: editH,
           model: editModel,
+          referenceImageFilenames: extraRefs.length ? extraRefs : undefined,
         });
         const now = new Date().toISOString();
         const promptLabel = `Edit: ${job.changes}\n\n(From: ${job.image.prompt.slice(0, 200)}${

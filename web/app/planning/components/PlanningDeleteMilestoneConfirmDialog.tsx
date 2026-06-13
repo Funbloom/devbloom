@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import type { ReactElement } from "react";
 
+import { DismissButton } from "../../components/DismissButton";
+
 type Props = {
   milestoneName: string;
   deliverableCount: number;
@@ -65,9 +67,12 @@ export function PlanningDeleteMilestoneConfirmDialog({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="planning-delete-milestone-title" style={{ margin: 0, fontSize: 18 }}>
-          Delete milestone?
-        </h2>
+        <div className="app-modal-header app-modal-header--center">
+          <h2 id="planning-delete-milestone-title" style={{ margin: 0, fontSize: 18, flex: 1 }}>
+            Delete milestone?
+          </h2>
+          <DismissButton disabled={saving} onClick={onCancel} />
+        </div>
         <p style={{ margin: 0, fontSize: 13, color: "#94a3b8", lineHeight: 1.5 }}>
           This permanently removes{" "}
           <strong style={{ color: "#e2e8f0" }}>{milestoneName}</strong>, including{" "}

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import type { CSSProperties, ReactElement } from "react";
+import { DismissButton } from "../../components/DismissButton";
 import {
   formatImportDate,
   formatImportRisk,
@@ -100,8 +101,8 @@ export function PlanningImportPreviewModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-          <div>
+        <div className="app-modal-header">
+          <div className="app-modal-header__content">
             <h2 id="planning-import-preview-title" style={{ margin: 0, fontSize: 18 }}>
               Import preview
             </h2>
@@ -110,9 +111,7 @@ export function PlanningImportPreviewModal({
               <strong style={{ color: "#e2e8f0" }}>{activeProjectName || "active project"}</strong>.
             </p>
           </div>
-          <button type="button" className="imagegen-button-secondary" disabled={saving} onClick={onClose}>
-            Cancel
-          </button>
+          <DismissButton disabled={saving} onClick={onClose} />
         </div>
 
         {importedName ? (

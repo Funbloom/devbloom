@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Character, Location, Storyboard, Style } from "./types";
 
+import { ImageFullscreenPreview } from "../components/ImageFullscreenPreview";
+import { DismissButton } from "../components/DismissButton";
 import { fetchApi, API_BASE } from "../lib/api";
 
 type GeneratedImageItem = { id: string; url: string; prompt?: string; tab?: string };
@@ -93,6 +95,14 @@ export function StoryboardSidebar(props: Props) {
   const [pickLocationImageGenOpen, setPickLocationImageGenOpen] = useState(false);
   const [generatedLocationImages, setGeneratedLocationImages] = useState<GeneratedImageItem[]>([]);
   const [loadingGeneratedLocationImages, setLoadingGeneratedLocationImages] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+
+  function openStoryboardImagePreview(url: string, title: string): void {
+    if (!url.trim()) {
+      return;
+    }
+    setPreviewImage({ url, title });
+  }
   const {
     storyboards,
     selectedId,
@@ -233,6 +243,7 @@ export function StoryboardSidebar(props: Props) {
   };
 
   return (
+    <>
     <div
       className="chat-left"
       style={{ flexBasis: "25%", maxWidth: "25%" }}
@@ -375,7 +386,15 @@ export function StoryboardSidebar(props: Props) {
                     {src && (
                       <div className="image-grid">
                         <div className="image-item">
-                          <img className="image-preview character-image" src={src} alt={ch.name} />
+                          <img
+                            className="image-preview character-image"
+                            src={src}
+                            alt={ch.name}
+                            style={{ cursor: "zoom-in" }}
+                            onClick={() => {
+                              openStoryboardImagePreview(src, ch.name);
+                            }}
+                          />
                           <div className="image-name">{ch.image}</div>
                         </div>
                       </div>
@@ -471,9 +490,9 @@ export function StoryboardSidebar(props: Props) {
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <h3 id="pick-imagegen-title" style={{ margin: 0, fontSize: 16 }}>Pick from Image Gen (characters)</h3>
-                    <button type="button" onClick={() => setPickImageGenOpen(false)} aria-label="Close">×</button>
+                  <div className="app-modal-header app-modal-header--center">
+                    <h3 id="pick-imagegen-title" style={{ margin: 0, fontSize: 16, flex: 1 }}>Pick from Image Gen (characters)</h3>
+                    <DismissButton onClick={() => setPickImageGenOpen(false)} />
                   </div>
                   {loadingGeneratedImages && <div className="status">Loading…</div>}
                   {!loadingGeneratedImages && generatedCharacterImages.length === 0 && (
@@ -535,7 +554,15 @@ export function StoryboardSidebar(props: Props) {
                     {src && (
                       <div className="image-grid">
                         <div className="image-item">
-                          <img className="image-preview character-image" src={src} alt={loc.name} />
+                          <img
+                            className="image-preview character-image"
+                            src={src}
+                            alt={loc.name}
+                            style={{ cursor: "zoom-in" }}
+                            onClick={() => {
+                              openStoryboardImagePreview(src, loc.name);
+                            }}
+                          />
                           <div className="image-name">{loc.image}</div>
                         </div>
                       </div>
@@ -631,9 +658,9 @@ export function StoryboardSidebar(props: Props) {
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <h3 id="pick-location-imagegen-title" style={{ margin: 0, fontSize: 16 }}>Pick from Image Gen (Image tab)</h3>
-                    <button type="button" onClick={() => setPickLocationImageGenOpen(false)} aria-label="Close">×</button>
+                  <div className="app-modal-header app-modal-header--center">
+                    <h3 id="pick-location-imagegen-title" style={{ margin: 0, fontSize: 16, flex: 1 }}>Pick from Image Gen (Image tab)</h3>
+                    <DismissButton onClick={() => setPickLocationImageGenOpen(false)} />
                   </div>
                   {loadingGeneratedLocationImages && <div className="status">Loading…</div>}
                   {!loadingGeneratedLocationImages && generatedLocationImages.length === 0 && (
@@ -688,6 +715,16 @@ export function StoryboardSidebar(props: Props) {
       )}
       </div>
     </div>
+    {previewImage ? (
+        <ImageFullscreenPreview
+          imageUrl={previewImage.url}
+          title={previewImage.title}
+          onClose={() => {
+            setPreviewImage(null);
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 

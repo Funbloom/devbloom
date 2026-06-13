@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { ImageFullscreenPreview } from "../components/ImageFullscreenPreview";
 import type { Character, Location, Storyboard, Tile } from "./types";
 import { TILE_IMAGE_SIZE_OPTIONS, type TileImageSizePreset } from "./tileImageSize";
 
@@ -89,6 +90,14 @@ export function TilesPanel(props: Props) {
   const [selectedCharacterByTile, setSelectedCharacterByTile] = useState<Record<string, string>>({});
   const [promptByTile, setPromptByTile] = useState<Record<string, string>>({});
   const [presentationMode, setPresentationMode] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+
+  function openTileImagePreview(url: string, title: string): void {
+    if (!url.trim()) {
+      return;
+    }
+    setPreviewImage({ url, title });
+  }
 
   useImageUrlLog(tiles);
 
@@ -211,6 +220,10 @@ export function TilesPanel(props: Props) {
                           className="storyboard-tile-presentation-img"
                           src={tileSrc}
                           alt={tile.prompt || `Tile ${tile.tile_number}`}
+                          style={{ cursor: "zoom-in" }}
+                          onClick={() => {
+                            openTileImagePreview(tileSrc, tile.prompt || `Tile ${tile.tile_number}`);
+                          }}
                         />
                       ) : (
                         <div className="storyboard-tile-presentation-placeholder">No image</div>
@@ -243,6 +256,13 @@ export function TilesPanel(props: Props) {
                               className="image-preview"
                               src={tileSrc}
                               alt={`Tile ${tile.tile_number}`}
+                              style={{ cursor: "zoom-in" }}
+                              onClick={() => {
+                                openTileImagePreview(
+                                  tileSrc,
+                                  tile.prompt || `Tile ${tile.tile_number}`,
+                                );
+                              }}
                             />
                           </div>
                         </div>
@@ -425,6 +445,15 @@ export function TilesPanel(props: Props) {
       <div className="status">
         {isSaving ? "Saving..." : status || ""}
       </div>
+      {previewImage ? (
+        <ImageFullscreenPreview
+          imageUrl={previewImage.url}
+          title={previewImage.title}
+          onClose={() => {
+            setPreviewImage(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
