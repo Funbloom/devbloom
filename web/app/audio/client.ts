@@ -4,15 +4,66 @@ export type InworldVoiceRow = {
   voiceId?: string;
   displayName?: string;
   langCode?: string;
+  lang_code?: string;
   description?: string;
   source?: string;
   name?: string;
+  languages?: string[];
+  tags?: string[];
+  categories?: string[];
+  ageGroup?: string;
+  age_group?: string;
+  gender?: string;
 };
 
 export type InworldVoiceOption = {
   voiceId: string;
   label: string;
+  displayName: string;
+  description: string;
+  tags: string[];
+  categories: string[];
+  ageGroup: string;
+  gender: string;
+  source: string;
+  langCode: string;
 };
+
+function normalizeStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((item: unknown) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item: string) => item.length > 0);
+}
+
+function pickAgeGroup(row: InworldVoiceRow): string {
+  const camel = row.ageGroup?.trim() ?? "";
+  if (camel) {
+    return camel;
+  }
+  const snake = row.age_group?.trim() ?? "";
+  return snake;
+}
+
+function pickLangCode(row: InworldVoiceRow): string {
+  const camel = row.langCode?.trim() ?? "";
+  if (camel) {
+    return camel;
+  }
+  const snake = row.lang_code?.trim() ?? "";
+  if (snake) {
+    return snake;
+  }
+  if (Array.isArray(row.languages) && row.languages.length > 0) {
+    const first = row.languages[0]?.trim() ?? "";
+    if (first) {
+      return first.replace(/-/g, "_").toUpperCase();
+    }
+  }
+  return "";
+}
 
 function pickVoiceId(row: InworldVoiceRow): string {
   const camel = row.voiceId?.trim() ?? "";
@@ -66,7 +117,18 @@ export async function fetchInworldVoices(): Promise<InworldVoiceOption[]> {
       if (!voiceId) {
         return null;
       }
-      return { voiceId, label: formatVoiceLabel(row, voiceId) };
+      return {
+        voiceId,
+        label: formatVoiceLabel(row, voiceId),
+        displayName: row.displayName?.trim() || voiceId,
+        description: row.description?.trim() ?? "",
+        tags: normalizeStringArray(row.tags),
+        categories: normalizeStringArray(row.categories),
+        ageGroup: pickAgeGroup(row),
+        gender: row.gender?.trim() ?? "",
+        source: row.source?.trim() ?? "",
+        langCode: pickLangCode(row),
+      };
     })
     .filter((option: InworldVoiceOption | null): option is InworldVoiceOption => option !== null);
   options.sort((a, b) => a.label.localeCompare(b.label));
@@ -78,10 +140,39 @@ export type SynthesizeSpeechParams = {
   voiceId: string;
   modelId?: string;
   deliveryMode?: string;
+  temperature?: number;
 };
 
+export type VoicePreviewParams = {
+  voiceId: string;
+  modelId?: string;
+};
+
+export async function fetchInworldVoicePreviewMp3(params: VoicePreviewParams): Promise<Blob> {
+  const voiceId = encodeURIComponent(params.voiceId.trim());
+  const modelId = encodeURIComponent((params.modelId ?? "inworld-tts-2").trim());
+  const response: Response = await fetchApi(
+    `/inworld/voices/preview?voice_id=${voiceId}&model_id=${modelId}`,
+    { method: "GET" },
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    let detail = text || `Voice preview failed (${response.status}).`;
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      if (typeof parsed.detail === "string") {
+        detail = parsed.detail;
+      }
+    } catch {
+      // keep
+    }
+    throw new Error(detail);
+  }
+  return await response.blob();
+}
+
 export async function synthesizeInworldMp3(params: SynthesizeSpeechParams): Promise<Blob> {
-  const payload: Record<string, string> = {
+  const payload: Record<string, string | number> = {
     text: params.text.trim(),
     voice_id: params.voiceId.trim(),
     model_id: (params.modelId ?? "inworld-tts-2").trim(),
@@ -89,6 +180,9 @@ export async function synthesizeInworldMp3(params: SynthesizeSpeechParams): Prom
   const mode = params.deliveryMode?.trim();
   if (mode) {
     payload.delivery_mode = mode;
+  }
+  if (params.temperature !== undefined) {
+    payload.temperature = params.temperature;
   }
   const response: Response = await fetchApi("/inworld/tts/synthesize", {
     method: "POST",

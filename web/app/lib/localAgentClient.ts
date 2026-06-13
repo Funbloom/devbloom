@@ -381,6 +381,15 @@ export const localAgent = {
       }),
     });
   },
+  deleteFile(projectRoot: string, relativePath: string): Promise<{ ok: boolean }> {
+    return requestLocalAgent("/files/delete", {
+      method: "POST",
+      body: JSON.stringify({
+        project_root: projectRoot,
+        relative_path: relativePath,
+      }),
+    });
+  },
   resizeImagesInDirectory(body: {
     directory_path: string;
     width: number;

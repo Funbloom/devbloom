@@ -9,6 +9,7 @@ import type { StudioActivity } from "../components/studio/types";
 import {
   blobToRawBase64,
   fetchInworldVoices,
+  fetchInworldVoicePreviewMp3,
   synthesizeInworldMp3,
   type InworldVoiceOption,
 } from "./client";
@@ -38,7 +39,24 @@ import {
   writeVoiceGenBatchMp3Mode,
   type BatchExistingMp3Mode,
 } from "./voiceGenBatchMode";
+import { OutputMp3ClipCard } from "./components/OutputMp3ClipCard";
+import { VoiceBrowser } from "./components/VoiceBrowser";
+import { buildBatchClipMp3FileName, buildVoiceGenMp3FileName, batchClipMatchesMp3FileName } from "./voiceGenFilename";
+import {
+  isInworldTts2Model,
+  readVoiceGenTemperature,
+  synthesizeTemperatureForModel,
+  writeVoiceGenTemperature,
+} from "./voiceGenTemperature";
 import { readVoiceGenOutputDir, writeVoiceGenOutputDir } from "./voiceGenOutputDir";
+import { readVoiceGenSelectedVoice, writeVoiceGenSelectedVoice } from "./voiceGenSelectedVoice";
+import {
+  deleteVoiceGenClipFiles,
+  readVoiceGenTrackText,
+  readVoiceGenTrackTextFile,
+  writeVoiceGenTrackText,
+  writeVoiceGenTrackTextFile,
+} from "./voiceGenTrackText";
 
 function loadPersistedBatch(): {
   fileName: string;
@@ -70,10 +88,12 @@ function getInitialBatch(): ReturnType<typeof loadPersistedBatch> {
 type TtsModelOption = { id: string; label: string };
 
 type LeftPaneTab = "single" | "batch";
+type RightPaneTab = "voices" | "output";
 
 type OutputMp3Preview = {
   name: string;
   url: string;
+  trackedText: string | null;
 };
 
 function isMp3FileName(name: string): boolean {
@@ -88,27 +108,82 @@ const TTS_MODEL_OPTIONS: TtsModelOption[] = [
 
 const DELIVERY_MODES = ["STABLE", "BALANCED", "CREATIVE"] as const;
 
-function slugForFilename(text: string, maxLen: number): string {
-  const cleaned: string = text
-    .trim()
-    .replace(/[^a-zA-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, maxLen);
-  return cleaned.length > 0 ? cleaned : "clip";
+const TEMPERATURE_MIN = 0.05;
+const TEMPERATURE_MAX = 2;
+const TEMPERATURE_STEP = 0.05;
+
+function clampVoiceGenTemperature(value: number): number {
+  return Math.min(TEMPERATURE_MAX, Math.max(TEMPERATURE_MIN, value));
+}
+
+type VoiceGenTemperatureSliderProps = {
+  temperature: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+};
+
+function VoiceGenTemperatureSlider(props: VoiceGenTemperatureSliderProps): ReactElement {
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <label className="imagegen-label" htmlFor="voice-gen-temperature" style={{ margin: 0 }}>
+          Temperature (TTS 1.5)
+        </label>
+        <span style={{ fontSize: 12, color: "#94a3b8", fontVariantNumeric: "tabular-nums" }}>
+          {props.temperature.toFixed(2)}
+        </span>
+      </div>
+      <input
+        id="voice-gen-temperature"
+        type="range"
+        min={TEMPERATURE_MIN}
+        max={TEMPERATURE_MAX}
+        step={TEMPERATURE_STEP}
+        disabled={props.disabled}
+        value={props.temperature}
+        onChange={(event) => {
+          const next = Number(event.target.value);
+          if (!Number.isFinite(next)) {
+            return;
+          }
+          props.onChange(clampVoiceGenTemperature(next));
+        }}
+        style={{ width: "100%", marginBottom: 6, accentColor: "#3b82f6" }}
+      />
+      <p style={{ margin: "0 0 0.75rem", fontSize: 12, color: "#64748b" }}>
+        Higher values produce more varied speech (default 1.0). TTS-2 uses delivery mode instead.
+      </p>
+    </>
+  );
+}
+
+function findBatchClipForMp3(clips: NarrationBatchClip[], mp3FileName: string): NarrationBatchClip | null {
+  for (const clip of clips) {
+    if (batchClipMatchesMp3FileName(clip.id, mp3FileName)) {
+      return clip;
+    }
+  }
+  return null;
 }
 
 export default function VoiceGenPage(): ReactElement {
   const [leftTab, setLeftTab] = useState<LeftPaneTab>("single");
+  const [rightTab, setRightTab] = useState<RightPaneTab>("voices");
   const [scriptText, setScriptText] = useState<string>("");
   const [voiceOptions, setVoiceOptions] = useState<InworldVoiceOption[]>([]);
   const [voicesError, setVoicesError] = useState<string | null>(null);
   const [voicesLoading, setVoicesLoading] = useState<boolean>(true);
-  const [voiceId, setVoiceId] = useState<string>("");
+  const [voiceId, setVoiceId] = useState<string>(() => readVoiceGenSelectedVoice());
   const [modelId, setModelId] = useState<string>(TTS_MODEL_OPTIONS[0].id);
   const [deliveryMode, setDeliveryMode] = useState<string>("BALANCED");
+  const [temperature, setTemperature] = useState<number>(() => readVoiceGenTemperature());
   const [working, setWorking] = useState<boolean>(false);
   const [activity, setActivity] = useState<StudioActivity>(null);
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
+
+  const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const voicePreviewUrlRef = useRef<string | null>(null);
+  const voicePreviewRequestRef = useRef<number>(0);
 
   const [batchJsonName, setBatchJsonName] = useState<string>(() => getInitialBatch().fileName);
   const [batchParseError, setBatchParseError] = useState<string | null>(() => getInitialBatch().parseError);
@@ -120,9 +195,12 @@ export default function VoiceGenPage(): ReactElement {
   const [eligibleLocalAgent, setEligibleLocalAgent] = useState<boolean>(false);
   const [localAgentOk, setLocalAgentOk] = useState<boolean>(false);
   const [outputDir, setOutputDir] = useState<string>(() => readVoiceGenOutputDir());
+  const [trackText, setTrackText] = useState<boolean>(() => readVoiceGenTrackText());
   const [outputMp3s, setOutputMp3s] = useState<OutputMp3Preview[]>([]);
   const [outputMp3sLoading, setOutputMp3sLoading] = useState<boolean>(false);
   const outputMp3UrlsRef = useRef<string[]>([]);
+
+  const selectedVoice = voiceOptions.find((option) => option.voiceId === voiceId);
 
   const revokeOutputMp3Urls = useCallback((): void => {
     for (const url of outputMp3UrlsRef.current) {
@@ -138,6 +216,14 @@ export default function VoiceGenPage(): ReactElement {
       setOutputMp3s(next);
     },
     [revokeOutputMp3Urls]
+  );
+
+  const synthOptionsForModel = useCallback(
+    (targetModelId: string) => ({
+      deliveryMode: isInworldTts2Model(targetModelId) ? deliveryMode : undefined,
+      temperature: synthesizeTemperatureForModel(targetModelId, temperature),
+    }),
+    [deliveryMode, temperature],
   );
 
   const refreshOutputDirMp3s = useCallback(async (): Promise<void> => {
@@ -159,7 +245,8 @@ export default function VoiceGenPage(): ReactElement {
         try {
           const blob: Blob = await localAgent.readBinary(root, entry.name);
           const url: string = URL.createObjectURL(blob);
-          next.push({ name: entry.name, url });
+          const trackedText = await readVoiceGenTrackTextFile(root, entry.name);
+          next.push({ name: entry.name, url, trackedText });
         } catch {
           // skip files that fail to read
         }
@@ -250,17 +337,79 @@ export default function VoiceGenPage(): ReactElement {
       if (current && voiceOptions.some((optionItem) => optionItem.voiceId === current)) {
         return current;
       }
-      return voiceOptions[0].voiceId;
+      const nextVoiceId = voiceOptions[0].voiceId;
+      writeVoiceGenSelectedVoice(nextVoiceId);
+      return nextVoiceId;
     });
   }, [voiceOptions]);
 
+  const stopVoicePreview = useCallback((): void => {
+    const audio = voicePreviewAudioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.src = "";
+    }
+    if (voicePreviewUrlRef.current) {
+      URL.revokeObjectURL(voicePreviewUrlRef.current);
+      voicePreviewUrlRef.current = null;
+    }
+  }, []);
+
+  const playVoicePreview = useCallback(
+    async (selectedVoiceId: string): Promise<void> => {
+      const id = selectedVoiceId.trim();
+      if (!id) {
+        return;
+      }
+      const requestId = voicePreviewRequestRef.current + 1;
+      voicePreviewRequestRef.current = requestId;
+      stopVoicePreview();
+      try {
+        const blob: Blob = await fetchInworldVoicePreviewMp3({
+          voiceId: id,
+          modelId,
+        });
+        if (requestId !== voicePreviewRequestRef.current) {
+          return;
+        }
+        const url: string = URL.createObjectURL(blob);
+        voicePreviewUrlRef.current = url;
+        const audio = new Audio(url);
+        voicePreviewAudioRef.current = audio;
+        audio.onended = () => {
+          if (voicePreviewUrlRef.current === url) {
+            URL.revokeObjectURL(url);
+            voicePreviewUrlRef.current = null;
+          }
+        };
+        await audio.play();
+      } catch {
+        if (requestId === voicePreviewRequestRef.current) {
+          stopVoicePreview();
+        }
+      }
+    },
+    [modelId, stopVoicePreview],
+  );
+
+  const handleSelectVoice = useCallback(
+    (selectedVoiceId: string): void => {
+      setVoiceId(selectedVoiceId);
+      writeVoiceGenSelectedVoice(selectedVoiceId);
+      void playVoicePreview(selectedVoiceId);
+    },
+    [playVoicePreview],
+  );
+
   useEffect(() => {
     return (): void => {
+      voicePreviewRequestRef.current += 1;
+      stopVoicePreview();
       if (audioBlobUrl) {
         URL.revokeObjectURL(audioBlobUrl);
       }
     };
-  }, [audioBlobUrl]);
+  }, [audioBlobUrl, stopVoicePreview]);
 
   async function handlePickOutputFolder(): Promise<void> {
     if (!eligibleLocalAgent) {
@@ -302,7 +451,7 @@ export default function VoiceGenPage(): ReactElement {
         text: scriptText,
         voiceId,
         modelId,
-        deliveryMode: modelId === "inworld-tts-2" ? deliveryMode : undefined,
+        ...synthOptionsForModel(modelId),
       });
       const savesToFolder: boolean = Boolean(outputDir.trim() && eligibleLocalAgent && localAgentOk);
       if (!savesToFolder) {
@@ -315,13 +464,17 @@ export default function VoiceGenPage(): ReactElement {
       }
       let msg = savesToFolder ? "MP3 saved to output folder." : "MP3 ready — use the preview player.";
       if (savesToFolder) {
-        const stamp: string = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        const safeName = `voice_gen_${stamp}.mp3`;
+        const voiceLabel = selectedVoice?.displayName.trim() || voiceId.trim() || "voice";
+        const safeName = buildVoiceGenMp3FileName(voiceLabel, scriptText);
         const root = outputDir.trim();
         await localAgent.approveProjectRoot(root);
         const b64 = await blobToRawBase64(blob);
         await localAgent.writeBinary(root, safeName, b64);
+        if (trackText) {
+          await writeVoiceGenTrackTextFile(root, safeName, scriptText);
+        }
         await refreshOutputDirMp3s();
+        setRightTab("output");
         msg += `\n${root}/${safeName}`;
       }
       setActivity({
@@ -331,6 +484,131 @@ export default function VoiceGenPage(): ReactElement {
     } catch (err) {
       const message: string = err instanceof Error ? err.message : String(err);
       setActivity({ message: `Error: ${message}`, isError: true });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function handleRegenerateClip(mp3FileName: string, text: string): Promise<void> {
+    if (!outputDir.trim() || !eligibleLocalAgent || !localAgentOk) {
+      setActivity({
+        message: "Regenerate needs an output folder on localhost with the local agent running.",
+        isError: true,
+      });
+      return;
+    }
+
+    const trimmedText = text.trim();
+    if (!trimmedText) {
+      setActivity({ message: "Script text is empty.", isError: true });
+      return;
+    }
+
+    setWorking(true);
+    setActivity({
+      message: `Regenerating ${mp3FileName}…`,
+      isError: false,
+    });
+    try {
+      const root = outputDir.trim();
+      await localAgent.approveProjectRoot(root);
+
+      let targetFileName = mp3FileName;
+      let synthText = trimmedText;
+      let blob: Blob;
+
+      if (leftTab === "batch") {
+        const clip = findBatchClipForMp3(batchClips, mp3FileName);
+        if (!clip) {
+          setActivity({
+            message: `No batch clip matches ${mp3FileName}. Batch files use the clip id from JSON.`,
+            isError: true,
+          });
+          return;
+        }
+        const resolved = resolveVoiceIdByName(clip.voice_name, voiceOptions);
+        if (!resolved) {
+          setActivity({
+            message: `No voice match for batch clip "${clip.id}" (${clip.voice_name}).`,
+            isError: true,
+          });
+          return;
+        }
+        const deliveryFromMood: string | undefined = moodAsDeliveryMode(clip.mood);
+        synthText = applyMoodSteering(trimmedText, clip.mood, modelId);
+        blob = await synthesizeInworldMp3({
+          text: synthText,
+          voiceId: resolved,
+          modelId,
+          deliveryMode: isInworldTts2Model(modelId) ? deliveryFromMood ?? "BALANCED" : undefined,
+          temperature: synthesizeTemperatureForModel(modelId, temperature),
+        });
+      } else {
+        if (!voiceId.trim()) {
+          setActivity({ message: "Select a voice before regenerating.", isError: true });
+          return;
+        }
+        const voiceLabel = selectedVoice?.displayName.trim() || voiceId.trim() || "voice";
+        targetFileName = buildVoiceGenMp3FileName(voiceLabel, trimmedText);
+        blob = await synthesizeInworldMp3({
+          text: trimmedText,
+          voiceId,
+          modelId,
+          ...synthOptionsForModel(modelId),
+        });
+      }
+
+      const b64 = await blobToRawBase64(blob);
+      await localAgent.writeBinary(root, targetFileName, b64);
+      if (trackText) {
+        await writeVoiceGenTrackTextFile(root, targetFileName, synthText);
+      }
+
+      if (targetFileName.toLowerCase() !== mp3FileName.toLowerCase()) {
+        await deleteVoiceGenClipFiles(root, mp3FileName);
+      }
+
+      await refreshOutputDirMp3s();
+      setActivity({
+        message:
+          targetFileName.toLowerCase() === mp3FileName.toLowerCase()
+            ? `Regenerated ${targetFileName}.`
+            : `Regenerated as ${targetFileName} (removed ${mp3FileName}).`,
+        isError: false,
+      });
+    } catch (err) {
+      const message: string = err instanceof Error ? err.message : String(err);
+      setActivity({ message: `Regenerate failed: ${message}`, isError: true });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function handleDeleteClip(mp3FileName: string): Promise<void> {
+    if (!outputDir.trim() || !eligibleLocalAgent || !localAgentOk) {
+      setActivity({
+        message: "Delete needs an output folder on localhost with the local agent running.",
+        isError: true,
+      });
+      return;
+    }
+    setWorking(true);
+    setActivity({
+      message: `Deleting ${mp3FileName}…`,
+      isError: false,
+    });
+    try {
+      const root = outputDir.trim();
+      await localAgent.approveProjectRoot(root);
+      await deleteVoiceGenClipFiles(root, mp3FileName);
+      await refreshOutputDirMp3s();
+      setActivity({
+        message: `Deleted ${mp3FileName}.`,
+        isError: false,
+      });
+    } catch (err) {
+      const message: string = err instanceof Error ? err.message : String(err);
+      setActivity({ message: `Delete failed: ${message}`, isError: true });
     } finally {
       setWorking(false);
     }
@@ -456,19 +734,20 @@ export default function VoiceGenPage(): ReactElement {
           errors.push(`Clip "${clip.id}": no voice match for "${clip.voice_name}".`);
           continue;
         }
-        const fileName = `${slugForFilename(clip.id, 120)}.mp3`;
+        const fileName = buildBatchClipMp3FileName(clip.id);
         const deliveryFromMood: string | undefined = moodAsDeliveryMode(clip.mood);
         const synthText: string = applyMoodSteering(clip.script_text, clip.mood, modelId);
-        const synthDelivery =
-          modelId === "inworld-tts-2"
-            ? deliveryFromMood ?? "BALANCED"
-            : undefined;
+        const synthDelivery = isInworldTts2Model(modelId)
+          ? deliveryFromMood ?? "BALANCED"
+          : undefined;
+        const synthTemperature = synthesizeTemperatureForModel(modelId, temperature);
         const signature = buildBatchClipContentSignature(
           clip,
           resolved,
           modelId,
           synthText,
-          synthDelivery
+          synthDelivery,
+          synthTemperature,
         );
         const priorEntry = batchLog.entries[clip.id];
 
@@ -502,9 +781,13 @@ export default function VoiceGenPage(): ReactElement {
             voiceId: resolved,
             modelId,
             deliveryMode: synthDelivery,
+            temperature: synthTemperature,
           });
           const b64 = await blobToRawBase64(blob);
           await localAgent.writeBinary(root, fileName, b64);
+          if (trackText) {
+            await writeVoiceGenTrackTextFile(root, fileName, synthText);
+          }
 
           if (mode === "skip") {
             existingMp3Lower.add(fileName.toLowerCase());
@@ -522,6 +805,7 @@ export default function VoiceGenPage(): ReactElement {
               synth_text: synthText,
               model_id: modelId,
               delivery_mode: synthDelivery ?? null,
+              temperature: synthTemperature ?? null,
               content_signature: signature,
               generated_at: new Date().toISOString(),
             };
@@ -654,30 +938,61 @@ export default function VoiceGenPage(): ReactElement {
             ))}
           </select>
 
+          {!isInworldTts2Model(modelId) && leftTab === "batch" ? (
+            <VoiceGenTemperatureSlider
+              temperature={temperature}
+              disabled={working}
+              onChange={(value) => {
+                setTemperature(value);
+                writeVoiceGenTemperature(value);
+              }}
+            />
+          ) : null}
+
           {leftTab === "single" ? (
             <>
-              <label className="imagegen-label" htmlFor="voice-gen-voice" style={{ display: "block", marginBottom: 6 }}>
-                Voice (Inworld workspace)
+              <label className="imagegen-label" style={{ display: "block", marginBottom: 6 }}>
+                Selected voice
               </label>
-              <select
-                id="voice-gen-voice"
-                className="imagegen-select"
-                style={{ width: "100%", marginBottom: "0.75rem" }}
-                disabled={voicesLoading || voiceOptions.length === 0 || working}
-                value={voiceId}
-                onChange={(event) => {
-                  setVoiceId(event.target.value);
-                }}
-              >
-                {!voicesLoading && voiceOptions.length === 0 ? (
-                  <option value="">No voices loaded</option>
-                ) : null}
-                {voiceOptions.map((option) => (
-                  <option key={option.voiceId} value={option.voiceId}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+              {selectedVoice ? (
+                <div className="voicegen-selected-voice">
+                  <div className="voicegen-selected-voice-name">{selectedVoice.displayName}</div>
+                  <div className="voicegen-selected-voice-id">{selectedVoice.voiceId}</div>
+                  <button
+                    type="button"
+                    className="voicegen-selected-voice-link"
+                    disabled={working}
+                    onClick={() => {
+                      setRightTab("voices");
+                    }}
+                  >
+                    Browse voices
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="voicegen-selected-voice-link"
+                  style={{ marginBottom: "0.75rem" }}
+                  disabled={working || voicesLoading}
+                  onClick={() => {
+                    setRightTab("voices");
+                  }}
+                >
+                  Browse voices
+                </button>
+              )}
+
+              {!isInworldTts2Model(modelId) ? (
+                <VoiceGenTemperatureSlider
+                  temperature={temperature}
+                  disabled={working}
+                  onChange={(value) => {
+                    setTemperature(value);
+                    writeVoiceGenTemperature(value);
+                  }}
+                />
+              ) : null}
 
               {modelId === "inworld-tts-2" ? (
                 <>
@@ -750,6 +1065,32 @@ export default function VoiceGenPage(): ReactElement {
                 Folder save needs localhost tab + running local agent.
               </div>
             ) : null}
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                color: "#cbd5e1",
+                cursor: working ? "default" : "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={trackText}
+                disabled={working}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  setTrackText(enabled);
+                  writeVoiceGenTrackText(enabled);
+                }}
+              />
+              <span>Track text</span>
+            </label>
+            <div style={{ fontSize: 11, color: "#64748b", lineHeight: 1.35 }}>
+              When enabled, each saved MP3 also gets a matching <code style={{ fontSize: 10 }}>.txt</code> with the
+              script used to generate it.
+            </div>
           </div>
 
           {leftTab === "single" ? (
@@ -888,10 +1229,51 @@ export default function VoiceGenPage(): ReactElement {
     <>
       <StudioActivityBox activity={activity} working={working} idleMessage={idleHint()} />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <div className="imagegen-panel" style={{ flex: 1, minHeight: 0 }}>
-          <h2 className="imagegen-panel-title">Preview</h2>
-          <div className="imagegen-panel-body" style={{ alignItems: "stretch", gap: "0.75rem" }}>
-            {outputDir.trim() && eligibleLocalAgent && localAgentOk ? (
+        <div className="imagegen-panel" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          {leftTab === "single" ? (
+            <div className="sidebar-tabs" role="tablist" aria-label="Voice Gen preview" style={{ margin: "0 16px" }}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rightTab === "voices"}
+                className={rightTab === "voices" ? "sidebar-tab active" : "sidebar-tab"}
+                onClick={() => {
+                  setRightTab("voices");
+                }}
+              >
+                Browse voices
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={rightTab === "output"}
+                className={rightTab === "output" ? "sidebar-tab active" : "sidebar-tab"}
+                onClick={() => {
+                  setRightTab("output");
+                }}
+              >
+                Output
+              </button>
+            </div>
+          ) : (
+            <h2 className="imagegen-panel-title">Preview</h2>
+          )}
+          <div
+            className="imagegen-panel-body voicegen-right-panel-body"
+            style={{ alignItems: "stretch", flex: 1, minHeight: 0 }}
+          >
+            {leftTab === "single" && rightTab === "voices" ? (
+              <VoiceBrowser
+                voices={voiceOptions}
+                selectedVoiceId={voiceId}
+                loading={voicesLoading}
+                disabled={working}
+                onSelectVoice={handleSelectVoice}
+                onPreviewVoice={(selectedVoiceId) => {
+                  void playVoicePreview(selectedVoiceId);
+                }}
+              />
+            ) : outputDir.trim() && eligibleLocalAgent && localAgentOk ? (
               <>
                 <div style={{ fontSize: 12, color: "#94a3b8", wordBreak: "break-word" }} title={outputDir.trim()}>
                   {outputMp3sLoading
@@ -905,29 +1287,15 @@ export default function VoiceGenPage(): ReactElement {
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", maxHeight: "100%" }}>
                     {outputMp3s.map((item) => (
-                      <div
+                      <OutputMp3ClipCard
                         key={item.name}
-                        style={{
-                          border: "1px solid #2a2f3a",
-                          borderRadius: 10,
-                          padding: "10px 12px",
-                          background: "#0f1115",
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: "#e2e8f0",
-                            marginBottom: 8,
-                            wordBreak: "break-word",
-                          }}
-                          title={item.name}
-                        >
-                          {item.name}
-                        </div>
-                        {/* eslint-disable-next-line jsx-a11y/media-has-caption -- generated audio has no captions */}
-                        <audio controls src={item.url} style={{ width: "100%" }} preload="metadata" />
-                      </div>
+                        mp3Name={item.name}
+                        audioUrl={item.url}
+                        trackedText={item.trackedText}
+                        disabled={working}
+                        onRegenerate={handleRegenerateClip}
+                        onDelete={handleDeleteClip}
+                      />
                     ))}
                   </div>
                 )}

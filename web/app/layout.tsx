@@ -1,5 +1,6 @@
 import "./globals.css";
 
+import { ActiveProjectStorageSync } from "./components/ActiveProjectStorageSync";
 import { AppHeader } from "./components/AppHeader";
 import { ThemeInitializer } from "./components/ThemeInitializer";
 import { AuthProvider, AuthGuard } from "./contexts/AuthContext";
@@ -20,6 +21,7 @@ export default function RootLayout({
         <AuthProvider>
           <div className="app-layout">
             <ThemeInitializer />
+            <ActiveProjectStorageSync />
             <AppHeader />
             <AuthGuard>{children}</AuthGuard>
           </div>

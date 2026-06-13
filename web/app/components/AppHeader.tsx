@@ -203,8 +203,8 @@ export function AppHeader() {
     setActiveProjectKey(key);
     setActiveProjectName(project.display_name || key);
     closeAllHeaderMenus();
-    dispatchActiveProjectChanged();
     void persistActiveProjectToProfile(key);
+    dispatchActiveProjectChanged({ reload: true });
   };
 
   useEffect(() => {

@@ -390,6 +390,17 @@ def write_binary_file(request: Request, body: FileBinaryWriteRequest) -> dict[st
     return {"ok": True, "path": str(path)}
 
 
+@app.post("/files/delete")
+def delete_file(request: Request, body: FileBinaryReadRequest) -> dict[str, Any]:
+    ensure_localhost(request)
+    root = ensure_root_approved(body.project_root)
+    path = resolve_under_root(root, body.relative_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    path.unlink()
+    return {"ok": True}
+
+
 @app.post("/images/resize_directory")
 async def images_resize_directory(request: Request, body: ImageResizeDirectoryRequest) -> dict[str, Any]:
     """Resize every supported image in an approved directory in place."""

@@ -16,6 +16,7 @@ export type VoiceGenBatchLogEntry = {
   synth_text: string;
   model_id: string;
   delivery_mode: string | null;
+  temperature: number | null;
   content_signature: string;
   generated_at: string;
 };
@@ -35,7 +36,8 @@ export function buildBatchClipContentSignature(
   voiceId: string,
   modelId: string,
   synthText: string,
-  deliveryMode: string | undefined
+  deliveryMode: string | undefined,
+  temperature: number | undefined,
 ): string {
   return [
     clip.script_text,
@@ -44,6 +46,7 @@ export function buildBatchClipContentSignature(
     voiceId,
     modelId,
     deliveryMode ?? "",
+    temperature === undefined ? "" : String(temperature),
     synthText,
   ].join("\u001f");
 }
@@ -81,6 +84,8 @@ function normalizeLogEntry(raw: unknown): VoiceGenBatchLogEntry | null {
       row.delivery_mode === null || row.delivery_mode === undefined
         ? null
         : String(row.delivery_mode),
+    temperature:
+      typeof row.temperature === "number" && Number.isFinite(row.temperature) ? row.temperature : null,
     content_signature: typeof row.content_signature === "string" ? row.content_signature : "",
     generated_at: typeof row.generated_at === "string" ? row.generated_at : "",
   };

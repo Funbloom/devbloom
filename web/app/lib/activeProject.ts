@@ -5,11 +5,18 @@ import { fetchApi } from "./api";
 export const STORAGE_KEY_ACTIVE_PROJECT = "activeProjectKey";
 export const STORAGE_KEY_ACTIVE_PROJECT_NAME = "activeProjectName";
 
-export function dispatchActiveProjectChanged(): void {
+type ActiveProjectChangedOptions = {
+  reload?: boolean;
+};
+
+export function dispatchActiveProjectChanged(options?: ActiveProjectChangedOptions): void {
   if (typeof window === "undefined") {
     return;
   }
   window.dispatchEvent(new Event("activeProjectChanged"));
+  if (options?.reload) {
+    window.location.reload();
+  }
 }
 
 /** Persist current project to the server so auth refresh / other devices see the same selection. */

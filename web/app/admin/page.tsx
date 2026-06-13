@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { persistActiveProjectToProfile } from "../lib/activeProject";
+import { dispatchActiveProjectChanged, persistActiveProjectToProfile } from "../lib/activeProject";
 import { fetchApi, API_BASE } from "../lib/api";
 import { projectKeyFromDisplayName } from "../lib/projectKey";
 import { localAgent, getLocalProjectPath, setLocalProjectPath, isLocalAgentContext } from "../lib/localAgentClient";
@@ -590,8 +590,8 @@ export default function AdminPage() {
       window.localStorage.removeItem("activeProjectKey");
       window.localStorage.removeItem("activeProjectName");
     }
-    window.dispatchEvent(new Event("activeProjectChanged"));
     void persistActiveProjectToProfile(value.trim() || null);
+    dispatchActiveProjectChanged({ reload: true });
     if (scope === "project") {
       setProjectKey(value);
     }
