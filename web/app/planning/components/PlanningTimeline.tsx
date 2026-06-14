@@ -35,7 +35,7 @@ type Props = {
   events: PlanningEvent[];
   selectedMilestoneId: string | null;
   saving: boolean;
-  onSelectMilestone: (id: string) => void;
+  onSelectMilestone: (id: string | null) => void;
   onAddMilestone: () => void;
   monthZoom: MonthZoom;
   compact?: boolean;
@@ -139,7 +139,7 @@ export function PlanningTimeline({
                   background: isSelected ? "rgba(59,130,246,0.08)" : "transparent",
                   cursor: "pointer",
                 }}
-                onClick={() => onSelectMilestone(milestone.id)}
+                onClick={() => onSelectMilestone(isSelected ? null : milestone.id)}
               >
                 <div
                   style={{

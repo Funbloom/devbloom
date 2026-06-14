@@ -617,38 +617,36 @@ export function PlanningPage(): ReactElement {
                     onSelectMilestone={setSelectedMilestoneId}
                     onAddMilestone={() => void handleAddMilestone()}
                   />
-                  <DeliverablesPanel
-                    milestone={selectedMilestone}
-                    deliverables={graph.deliverables}
-                    events={graph.events}
-                    employees={employees}
-                    planStartDate={startDate}
-                    startWeek={
-                      selectedMilestone
-                        ? milestoneStartWeeks.get(selectedMilestone.id) ?? 0
-                        : 0
-                    }
-                    disabled={saving || importParsing}
-                    onMilestoneUpdated={mergeMilestone}
-                    onDeliverableUpdated={mergeDeliverable}
-                    onDeliverableCreated={appendDeliverable}
-                    onDeliverableDeleted={removeDeliverableFromGraph}
-                    onEventCreated={appendEvent}
-                    onEventUpdated={mergeEvent}
-                    onEventDeleted={removeEventFromGraph}
-                    onSaveMilestone={updateMilestone}
-                    onSaveDeliverable={updateDeliverable}
-                    onCreateDeliverable={(milestoneId) =>
-                      createDeliverable(milestoneId, "New item", "todo", "", null, "on_track")
-                    }
-                    onDeleteDeliverable={deleteDeliverable}
-                    onCreateEvent={createEvent}
-                    onSaveEvent={updateEvent}
-                    onDeleteEvent={deleteEvent}
-                    onDeleteMilestone={handleDeleteMilestone}
-                    canDeleteMilestone={canDeleteMilestone}
-                    onError={(message) => setStatus(message)}
-                  />
+                  {selectedMilestone ? (
+                    <DeliverablesPanel
+                      milestone={selectedMilestone}
+                      deliverables={graph.deliverables}
+                      events={graph.events}
+                      employees={employees}
+                      planStartDate={startDate}
+                      startWeek={milestoneStartWeeks.get(selectedMilestone.id) ?? 0}
+                      disabled={saving || importParsing}
+                      onMilestoneUpdated={mergeMilestone}
+                      onDeliverableUpdated={mergeDeliverable}
+                      onDeliverableCreated={appendDeliverable}
+                      onDeliverableDeleted={removeDeliverableFromGraph}
+                      onEventCreated={appendEvent}
+                      onEventUpdated={mergeEvent}
+                      onEventDeleted={removeEventFromGraph}
+                      onSaveMilestone={updateMilestone}
+                      onSaveDeliverable={updateDeliverable}
+                      onCreateDeliverable={(milestoneId) =>
+                        createDeliverable(milestoneId, "New item", "todo", "", null, "on_track")
+                      }
+                      onDeleteDeliverable={deleteDeliverable}
+                      onCreateEvent={createEvent}
+                      onSaveEvent={updateEvent}
+                      onDeleteEvent={deleteEvent}
+                      onDeleteMilestone={handleDeleteMilestone}
+                      canDeleteMilestone={canDeleteMilestone}
+                      onError={(message) => setStatus(message)}
+                    />
+                  ) : null}
                 </>
               )}
             </>

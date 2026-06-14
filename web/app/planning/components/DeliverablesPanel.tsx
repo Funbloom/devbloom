@@ -222,7 +222,7 @@ export function DeliverablesPanel({
   onDeleteMilestone,
   canDeleteMilestone = false,
   onError,
-}: Props): ReactElement {
+}: Props): ReactElement | null {
   const [busy, setBusy] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState(false);
   const [editingDeliverables, setEditingDeliverables] = useState(false);
@@ -312,20 +312,7 @@ export function DeliverablesPanel({
   );
 
   if (!milestone) {
-    return (
-      <div
-        style={{
-          marginTop: 12,
-          padding: 12,
-          border: "1px dashed #334155",
-          borderRadius: 10,
-          color: "var(--muted, #94a3b8)",
-          fontSize: 13,
-        }}
-      >
-        Select a milestone row to see goals and deliverables.
-      </div>
-    );
+    return null;
   }
 
   const handleNameBlur = () => {
